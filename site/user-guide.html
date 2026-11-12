@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSAK User Guide — v1.22.0-beta.11</title>
+<title>OpenSAK User Guide — v1.23.0-beta.2</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -473,7 +473,7 @@
 <nav>
   <div class="nav-header">
     <span class="nav-logo">OpenSAK</span>
-    <div class="nav-version">User Guide · v1.22.0-beta.11</div>
+    <div class="nav-version">User Guide · v1.23.0-beta.2</div>
   </div>
 
   <div class="nav-section-heading">Getting Started</div>
@@ -538,7 +538,7 @@
     <div class="hero-eyebrow">Complete User Guide</div>
     <h1>OpenSAK</h1>
     <p class="hero-sub">The open-source geocache management tool for Windows, Linux, and macOS.</p>
-    <div class="hero-meta">Version 1.22.0-beta.11 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
+    <div class="hero-meta">Version 1.23.0-beta.2 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
   </div>
 
   <figure class="screenshot" style="margin-top:-0.5rem;">
@@ -1186,7 +1186,7 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
 
     <div class="callout note"><div class="callout-icon">ℹ️</div><div>The active filter profile is saved per database. When you switch databases, the last-used profile for that database is restored automatically.</div></div>
 
-    <p>Profile files are stored in a <code>filters</code> folder inside OpenSAK's installation folder. <strong>Help → OpenSAK File Locations…</strong> shows exactly where that is on your computer.</p>
+    <p>Profile files are stored in a <code>filters</code> folder inside OpenSAK's settings folder. <strong>Help → OpenSAK File Locations…</strong> shows exactly where that is on your computer.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1240,7 +1240,8 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
     <h3>Backing Up When You Close OpenSAK</h3>
     <p>When you close OpenSAK and something has changed since your last backup, OpenSAK asks whether to back up first. Click <strong>Back Up and Close</strong> to back up all your databases and settings, <strong>Not Now</strong> to close without a backup, or <strong>Cancel</strong> to keep OpenSAK open. If nothing has changed since the last backup, OpenSAK closes without asking.</p>
     <p>A large backup can take a while; a progress window shows how far it has got, and <strong>Cancel</strong> stops it without leaving a half-finished backup behind. If the backup folder is on a drive that isn't connected, choose another folder in the same window, or close without a backup.</p>
-    <p>Tick <strong>Don't ask again</strong> to remember your answer: OpenSAK then always backs up on close, or never asks. You can change this, and how many automatic backups to keep (5 by default), under <strong>Settings → Advanced → Backups</strong>. Only the oldest automatic backups are deleted; backups made with <strong>File → Back up now…</strong> are kept until you delete them yourself.</p>
+    <p>Tick <strong>Don't ask again</strong> to remember your answer: OpenSAK then always backs up on close, or never asks. You can change this, and how many automatic backups to keep (5 by default), under <strong>Settings → Advanced → Backups</strong>.</p>
+    <p>If a backup at every close takes too long, choose <strong>Back up automatically every few days</strong> there instead, and set the number of days (5 by default). OpenSAK then backs up on close without asking, but only when something has changed and the last backup of all your databases is at least that many days old; otherwise it just closes. A backup of all databases with <strong>File → Back up now…</strong> also counts; a backup of only some of them doesn't. If a backup fails or is cancelled, OpenSAK tries again the next time you close it. Only the oldest automatic backups are deleted; backups made with <strong>File → Back up now…</strong> are kept until you delete them yourself.</p>
 
     <h3>Restoring a Backup</h3>
     <p>Use <strong>File → Restore from backup…</strong> to bring a database back. Pick a backup from the list (newest first), tick the databases you want, and click <strong>Restore</strong>. Use <strong>Browse</strong> to open backups stored in another folder.</p>
@@ -1705,7 +1706,7 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     </table>
 
     <h3>Map Tab</h3>
-    <p>Turn the map on or off, limit how many caches the map shows (nearest to your active home point first — much faster on large databases), and set the radius and cache limit for the split-screen map around the selected cache.</p>
+    <p>Turn the map on or off, limit how many caches the map shows (nearest to your active home point first — much faster on large databases), and set the radius and cache limit for the split-screen map around the selected cache. <strong>Map tile cache</strong> sets how much disk space map tiles you have viewed may use (default 200 MB, <em>Off</em> to keep none; <strong>Clear cache</strong> empties it at once): areas you viewed online show again without an internet connection for about a week. Where no tiles are available, the map says <em>Offline – map tiles unavailable</em>, and the cache pins still work. Changes take effect after a restart.</p>
 
     <h3>Geocaching.com Tab</h3>
     <table>
@@ -1722,13 +1723,13 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     <h3>Advanced Tab</h3>
 
     <h4>Folders</h4>
-    <p>Shows the current installation folder (read-only), the database folder and the backup folder. The database and backup folders can be changed directly here — no need to go through the setup wizard again.</p>
+    <p>Shows the current settings and log folder (read-only), the database folder and the backup folder. The database and backup folders can be changed directly here — no need to go through the setup wizard again.</p>
     <table>
       <thead><tr><th>Setting</th><th>Description</th></tr></thead>
       <tbody>
         <tr><td>Database folder</td><td>Change where new and existing databases are stored. If existing databases are found in the old location, you're asked whether to move them along (keep originals, delete originals, or leave them and only use the new folder for future databases)</td></tr>
         <tr><td>Backup folder</td><td>Where backups are stored (see <a href="#databases">Backing Up</a>). OpenSAK refuses its own data or database folder itself, and warns before using a folder inside one of them. Changing it doesn't move existing backups, and no restart is needed</td></tr>
-        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language, installation folder or backup folder</td></tr>
+        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language, settings folder or backup folder</td></tr>
       </tbody>
     </table>
 
@@ -1901,13 +1902,18 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     <h3>File Locations</h3>
     <p><strong>Help → OpenSAK File Locations…</strong> shows every place OpenSAK keeps files on your computer: settings and application data, the startup configuration, your database folder, databases opened from other locations, the saved PQ Email password, and (on Linux) the application menu files. Each row shows whether the location exists and how much space it uses, with an <strong>Open folder</strong> button. <strong>Copy all to clipboard</strong> gives you a text summary to paste into a bug report. This window only shows information — it never deletes anything.</p>
 
+    <h3>Community</h3>
+    <p><strong>Help → Community</strong> opens the places where other OpenSAK users are, in your browser: the OpenSAK group on Facebook, GitHub Discussions, the OpenSAK section of the GSAK forum, and the page for reporting a bug or requesting a feature. Use whichever you already use — they are all followed.</p>
+
     <table>
       <thead><tr><th>Resource</th><th>Link</th></tr></thead>
       <tbody>
         <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/OpenSAK-Org/opensak/issues">github.com/OpenSAK-Org/opensak/issues</a></td></tr>
-        <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/opensak">Facebook group: OpenSAK</a></td></tr>
+        <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/2062154441232996">Facebook group: OpenSAK</a></td></tr>
+        <tr><td>Questions and ideas on GitHub</td><td><a href="https://github.com/OpenSAK-Org/OpenSAK/discussions">GitHub Discussions</a></td></tr>
+        <tr><td>GSAK forum</td><td><a href="https://forum.gsak.net/index.php?showforum=52">OpenSAK section of the GSAK forum</a></td></tr>
         <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
-        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.22.0-beta.11/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
+        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.23.0-beta.2/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
         <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
         <tr><td>Support the project</td><td><a href="https://opencollective.com/opensak">opencollective.com/opensak</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
@@ -1917,7 +1923,7 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.22.0-beta.11). Last updated September 2026.
+      This guide was generated from the OpenSAK source code (v1.23.0-beta.2). Last updated November 2026.
     </p>
   </section>
 

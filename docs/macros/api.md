@@ -417,11 +417,11 @@ local found = opensak.cache("GC12345", { database = "Found" })
 opensak.caches([spec])
 ```
 
-Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without filter keys (nothing, or only `fields`): the caches of the active filter, in grid order. With filter keys (see Filter keys): every cache of the database matching them, sorted by name. Filter keys search the whole database, they do not narrow the active filter; the view and the active filter stay unchanged. To pick some caches of the active filter, loop without filter keys and test the fields in the loop. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 
 Parameters:
 
-- `spec` (`opensak.CachesSpec`, optional) — Filter keys, `all`, `database` and/or `fields`; nothing = the active filter.
+- `spec` (`opensak.CachesSpec`, optional) — Filter keys, `all`, `database` and/or `fields`; nothing, or only `fields` = the active filter.
 
 Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
 
@@ -431,6 +431,11 @@ Example:
 
 ```lua
 for c in opensak.caches() do print(c.code, c.name) end
+-- the active filter's caches with corrected coordinates:
+for c in opensak.caches{ fields = {"corrected"} } do
+    if c.corrected then print(c.code) end
+end
+-- found caches in Switzerland, whatever the active filter shows:
 for c in opensak.caches{ found = true, country = "Switzerland",
                          fields = {"difficulty", "terrain"} } do
     print(c.code, c.difficulty, c.terrain)
@@ -483,7 +488,7 @@ for _, code in ipairs(opensak.selected()) do print(code) end
 opensak.codes()
 ```
 
-The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed.
+The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed. To read fields of these caches, loop over opensak.caches{ fields = {...} } rather than calling opensak.cache() for each code: it loads only the fields asked for, many caches at a time.
 
 Returns `string[]` — GC codes.
 
@@ -1122,7 +1127,7 @@ opensak.set_corrected(code, lat, lon)
 opensak.set_corrected(code, coords)
 ```
 
-Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 
 Parameters:
 
@@ -1148,7 +1153,7 @@ opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")
 opensak.clear_corrected(code)
 ```
 
-Remove the corrected coordinates of a cache.
+Remove the corrected coordinates of a cache. To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 
 Parameters:
 
@@ -1170,7 +1175,7 @@ opensak.clear_corrected("GC12345")
 opensak.update(code, fields)
 ```
 
-Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 
 Parameters:
 
@@ -1711,12 +1716,12 @@ Example:
 
 ```lua
 local n = opensak.transaction(function()
-    local n = 0
+    local count = 0
     for c in opensak.caches{ found = true, fields = {"code"} } do
         opensak.update(c.code, { user_flag = true })
-        n = n + 1
+        count = count + 1
     end
-    return n
+    return count
 end)
 print(n .. " caches flagged")
 -- error() inside the function undoes everything it changed:
@@ -4170,7 +4175,7 @@ Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 | `mode` | `"OR"` | How the criteria are combined (default AND). |
 | `label` | `"text"` | Shown in the toolbar (optional, default "Macro"). |
 
-`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included), and `database`.
+`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included), and `database`. Filter keys given to `opensak.caches{}` search the whole database; they do not narrow the active filter.
 
 ## Reading another database
 
@@ -4643,7 +4648,21 @@ These fields cannot be written:
 - `last_user_update` — OpenSAK records it when a user field changes
 - `corrected_source` — OpenSAK sets it when `corrected` is written
 
-Each change is committed on its own. To keep several changes together, or undo them all on an error, run them inside `opensak.transaction(function() ... end)`, which is also faster for many changes. SQL `BEGIN`/`COMMIT` is refused.
+Each change is committed on its own. To keep several changes together, or undo them all on an error, run them inside `opensak.transaction(function() ... end)`, which is also faster for many changes. SQL `BEGIN`/`COMMIT` is refused. For example, to clear the corrected coordinates of the caches of the active filter:
+
+```lua
+local n = opensak.transaction(function()
+    local count = 0
+    for c in opensak.caches{ fields = {"corrected"} } do
+        if c.corrected then
+            opensak.clear_corrected(c.code)
+            count = count + 1
+        end
+    end
+    return count
+end)
+print(n .. " corrected coordinates cleared")
+```
 
 `opensak.sql_write()` may INSERT into, UPDATE and DELETE from these tables. An INSERT only has to give the required columns; every other column gets its default (`opensak.columns()` marks them as `required`). An UPDATE may not set the protected columns. Whatever an INSERT puts into the columns OpenSAK maintains is recalculated right away. A DELETE from `caches` also deletes the logs, waypoints, attributes, trackables and user note of each cache, like `opensak.delete()`.
 
@@ -4903,7 +4922,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | PurgeNote | ✅ | `update(code, {note=false, gc_note=false})` |
 | SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
 | ReSync | ✅ | `resync()` |
-| ReSyncLogs | 🚫 | needs the geocaching.com API |
+| ReSyncLogs | ✅ | automatic: every `insert_log` / `delete_log` / `sql_write` on logs recalculates the log counts and dates; inside a `transaction()` they follow at commit or with `resync()` |
 | SetColor | ✅ partial | `update(code, {color=})` for the cache colour; no per-column colouring |
 | SQLGet / SQLNext / SQLGetClose | ✅ | `sql_each()` |
 | SQLQuote | ✅ | `?` / `:name` parameters make it unnecessary |

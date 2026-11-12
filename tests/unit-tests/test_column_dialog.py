@@ -540,3 +540,107 @@ class TestSaveViewOverwrite:
         set_default_view_name("My_View")
         run(qtbot, "My/View")
         assert get_default_view_name() == "My_View"
+
+
+# ── Issue #1144: picking a view in the dialog applies the whole view ─────────
+
+_VIEW_ORDER = ["name", "terrain", "gc_code", "difficulty", "found"]
+_VIEW_WIDTHS = {"name": 333, "terrain": 44, "gc_code": 111}
+
+
+def _check(dlg: ColumnChooserDialog, col_id: str, checked: bool) -> None:
+    for i in range(dlg._list.count()):
+        item = dlg._list.item(i)
+        if item.data(Qt.ItemDataRole.UserRole) == col_id:
+            item.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            return
+    raise AssertionError(f"no column {col_id!r} in the dialog")
+
+
+class TestPickedViewAppliesOrderAndWidths:
+    """The report: a view saved in one database, applied to another through
+    View → Choose Columns, came out with the right columns but the other
+    database's order and widths. The toolbar dropdown applied it fully."""
+
+    @pytest.fixture
+    def other_db(self, store, views_dir):
+        ColumnView("Mine", visible_columns=list(_VIEW_ORDER),
+                   widths=dict(_VIEW_WIDTHS)).save()
+        # The active database: a different order and widths of its own.
+        set_visible_columns(["gc_code", "found", "difficulty", "name", "terrain"])
+        set_column_widths({"name": 90, "gc_code": 70})
+
+    def test_ok_applies_the_views_order(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        dlg._save_and_accept()
+        saved = get_visible_columns()
+        assert [c for c in saved if c in _VIEW_ORDER] == _VIEW_ORDER
+
+    def test_ok_applies_the_views_widths(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        dlg._save_and_accept()
+        assert get_column_widths() == _VIEW_WIDTHS
+
+    def test_same_result_as_the_toolbar_dropdown(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        dlg._save_and_accept()
+        # What _on_column_view_combo_changed() in mainwindow.py writes.
+        view = ColumnView.load(ColumnView.path_for("Mine"))
+        expected = list(dict.fromkeys(view.visible_columns + list(ALWAYS_VISIBLE)))
+        assert set(get_visible_columns()) == set(expected)
+        assert ([c for c in get_visible_columns() if c in view.visible_columns]
+                == view.visible_columns)
+        assert get_column_widths() == view.widths
+        assert current_column_view_match() == "Mine"
+
+    def test_changes_after_picking_keep_the_views_order(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        _check(dlg, "difficulty", False)
+        _check(dlg, "country", True)
+        dlg._save_and_accept()
+        saved = get_visible_columns()
+        assert "difficulty" not in saved
+        assert [c for c in saved if c in _VIEW_ORDER] == [
+            "name", "terrain", "gc_code", "found"]
+        assert saved.index("found") < saved.index("country")
+
+    def test_back_to_none_keeps_the_databases_own_layout(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        dlg._view_combo.setCurrentIndex(0)  # "(None)"
+        dlg._save_and_accept()
+        saved = get_visible_columns()
+        own = ["gc_code", "found", "difficulty", "name", "terrain"]
+        assert [c for c in saved if c in own] == own
+        assert get_column_widths() == {"name": 90, "gc_code": 70}
+
+    def test_without_picking_a_view_widths_are_left_alone(self, qtbot, other_db):
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        _check(dlg, "country", True)
+        dlg._save_and_accept()
+        assert get_column_widths() == {"name": 90, "gc_code": 70}
+
+    def test_save_as_after_picking_keeps_the_views_order_and_widths(
+            self, qtbot, other_db, monkeypatch):
+        monkeypatch.setattr(cd.QInputDialog, "getText",
+                            staticmethod(lambda *a, **k: ("Copy", True)))
+        monkeypatch.setattr(cd.QMessageBox, "information",
+                            staticmethod(lambda *a, **k: None))
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("Mine")
+        dlg._save_view()
+        copy = ColumnView.load(ColumnView.path_for("Copy"))
+        assert [c for c in copy.visible_columns if c in _VIEW_ORDER] == _VIEW_ORDER
+        assert copy.widths == _VIEW_WIDTHS

@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.dialogs import make_progress_cb
 from opensak.export.file_export_settings import (
@@ -238,7 +238,7 @@ class _ExportWorker(QThread):
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
-class FileExportDialog(SavedSettingsDialog):
+class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
     """Dialog for exporting filtered caches to GPX, LOC or GGZ format."""
 
     def __init__(self, caches: list, parent=None, filter_name: str = "",

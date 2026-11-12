@@ -5864,11 +5864,15 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="caches",
         description="Iterate over caches, one table per cache (see Cache "
-                    "fields), in a generic `for`. Without arguments: the "
-                    "caches of the active filter, in grid order. With filter "
-                    "keys (see Filter keys): the caches matching them, sorted "
-                    "by name; the view and the active filter stay "
-                    "unchanged. `all = true`: every cache of the database, "
+                    "fields), in a generic `for`. Without filter keys "
+                    "(nothing, or only `fields`): the caches of the active "
+                    "filter, in grid order. With filter keys (see Filter "
+                    "keys): every cache of the database matching them, "
+                    "sorted by name. Filter keys search the whole database, "
+                    "they do not narrow the active filter; the view and the "
+                    "active filter stay unchanged. To pick some caches of "
+                    "the active filter, loop without filter keys and test "
+                    "the fields in the loop. `all = true`: every cache of the database, "
                     "sorted by name, whatever the active filter shows. "
                     "`database` reads another database, without "
                     "switching: its caches matching the filter keys, or all "
@@ -5878,6 +5882,10 @@ API: tuple[ApiFunction, ...] = (
                     "faster. Caches are loaded in chunks, so large databases "
                     "do not hit the memory limit.",
         example="for c in opensak.caches() do print(c.code, c.name) end\n"
+                "-- the active filter's caches with corrected coordinates:\n"
+                'for c in opensak.caches{ fields = {"corrected"} } do\n'
+                "    if c.corrected then print(c.code) end\nend\n"
+                "-- found caches in Switzerland, whatever the active filter shows:\n"
                 'for c in opensak.caches{ found = true, country = "Switzerland",\n'
                 '                         fields = {"difficulty", "terrain"} } do\n'
                 "    print(c.code, c.difficulty, c.terrain)\nend\n"
@@ -5889,8 +5897,8 @@ API: tuple[ApiFunction, ...] = (
                      "`symbol`, `corrected_source` and `last_user_update`")),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys, `all`, `database` and/or `fields`; nothing = the "
-                      "active filter.",
+                      "Filter keys, `all`, `database` and/or `fields`; nothing, "
+                      "or only `fields` = the active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
     ),
@@ -5915,7 +5923,10 @@ API: tuple[ApiFunction, ...] = (
         name="codes",
         description="The GC codes of the caches of the active filter, in grid "
                     "order. Cheaper than opensak.caches() when only the codes "
-                    "are needed.",
+                    "are needed. To read fields of these caches, loop over "
+                    "opensak.caches{ fields = {...} } rather than calling "
+                    "opensak.cache() for each code: it loads only the fields "
+                    "asked for, many caches at a time.",
         example='print(table.concat(opensak.codes(), ", "))',
         since=2,
         bind=lambda rt, lua: lambda: lua.table_from(rt._active_codes()),
@@ -6499,7 +6510,9 @@ API: tuple[ApiFunction, ...] = (
         name="set_corrected",
         description="Set corrected coordinates, either as decimal degrees or "
                     "as one coordinate string in any format OpenSAK "
-                    "understands (DMM, DMS, decimal degrees).",
+                    "understands (DMM, DMS, decimal degrees). To change many "
+                    "caches, run the loop inside opensak.transaction(): much "
+                    "faster, and undone completely on an error.",
         example='opensak.set_corrected("GC12345", 47.36872, 8.54093)\n'
                 'opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")',
         since=1,
@@ -6517,7 +6530,9 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="clear_corrected",
-        description="Remove the corrected coordinates of a cache.",
+        description="Remove the corrected coordinates of a cache. To change "
+                    "many caches, run the loop inside opensak.transaction(): "
+                    "much faster, and undone completely on an error.",
         example='opensak.clear_corrected("GC12345")',
         since=1,
         bind=lambda rt, lua: rt._clear_corrected,
@@ -6535,7 +6550,9 @@ API: tuple[ApiFunction, ...] = (
                     "from imports. `custom` changes custom fields: a table "
                     "of field name → value (see Custom fields). "
                     "Before a macro's first change, OpenSAK asks the user to "
-                    "allow that macro (see Changing caches).",
+                    "allow that macro (see Changing caches). To change many "
+                    "caches, run the loop inside opensak.transaction(): much "
+                    "faster, and undone completely on an error.",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
                 'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
                 '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',
@@ -6691,12 +6708,12 @@ API: tuple[ApiFunction, ...] = (
                     "permission like opensak.update(). A macro that ends "
                     "inside a transaction (e.g. cancelled) keeps none of it.",
         example='local n = opensak.transaction(function()\n'
-                '    local n = 0\n'
+                '    local count = 0\n'
                 '    for c in opensak.caches{ found = true, fields = {"code"} } do\n'
                 '        opensak.update(c.code, { user_flag = true })\n'
-                '        n = n + 1\n'
+                '        count = count + 1\n'
                 '    end\n'
-                '    return n\n'
+                '    return count\n'
                 'end)\n'
                 'print(n .. " caches flagged")\n'
                 '-- error() inside the function undoes everything it changed:\n'

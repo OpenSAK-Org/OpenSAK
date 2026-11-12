@@ -263,6 +263,11 @@ def main() -> None:
         "QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --disable-software-rasterizer"
     )
 
+    # The map loads its bundled Leaflet assets via opensak:// (#1111); the
+    # scheme has to be registered before the QApplication exists.
+    from opensak.gui.web_assets import register_scheme
+    register_scheme()
+
     app = QApplication(sys.argv)
     # #1015: QApplication sets the C locale from the system; keep numbers in
     # C library formatting (e.g. Lua macros) with a decimal point.
@@ -354,9 +359,14 @@ def main() -> None:
     # Vis velkomst-wizard ved første opstart (issue #210)
     if is_first_run():
         splash.hide()
+        from PySide6.QtWidgets import QDialog
         from opensak.gui.dialogs.welcome_wizard import WelcomeWizard
-        wizard = WelcomeWizard()
-        wizard.exec()
+        wizard = WelcomeWizard(first_run=True)
+        # Issue #1288: Cancel (or closing the window) on first run quits
+        # without saving anything; the wizard shows again next time.
+        if wizard.exec() != QDialog.DialogCode.Accepted:
+            logger.info("startup: setup wizard cancelled, quitting")
+            sys.exit(0)
         # Genindlæs sprog hvis det blev ændret i wizard
         load_language(get_language())
         splash.show()

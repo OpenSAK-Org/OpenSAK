@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import (
+    WorkerGuardMixin, clamp_dialog_height_to_screen, worker_running,
+)
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog
 from opensak.importer.gpx_import_settings import (
     GpxImportProfile, GpxImportSettings, folder_import_files, import_file,
@@ -95,7 +97,7 @@ class ImportWorker(QThread):
         # once this method returns, and the dialog reacts to that instead.
 
 
-class ImportDialog(SavedSettingsDialog):
+class ImportDialog(WorkerGuardMixin, SavedSettingsDialog):
     """Dialog for importing one or more GPX or PQ zip files.
 
     *paths* (e.g. files or folders dropped on the main window) replace
@@ -499,7 +501,7 @@ class ImportDialog(SavedSettingsDialog):
         ]
         if result.errors:
             lines.append(tr("import_errors_header", count=len(result.errors)))
-            for e in result.errors[:5]:
+            for e in result.errors_shown():
                 lines.append(f"    - {e}")
 
         self._append_log("\n".join(lines))
@@ -644,21 +646,15 @@ class ImportDialog(SavedSettingsDialog):
 
         self.accept()
 
-    def closeEvent(self, event) -> None:
-        try:
-            if self._worker and self._worker.isRunning():
-                self._worker.wait()
-        except RuntimeError:
-            pass
-        self._worker = None
-        try:
-            if self._geo_worker and self._geo_worker.isRunning():
-                self._geo_worker.request_cancel()
-                self._geo_worker.wait()
-        except RuntimeError:
-            pass
-        self._geo_worker = None
-        super().closeEvent(event)
+    def _guarded_workers(self):
+        return (self._worker, self._geo_worker)
+
+    def _close_while_running(self) -> None:
+        # #1265: the import itself can't be cancelled, so Escape and the
+        # window's close button are ignored while it runs; during the
+        # location lookup they cancel it, the same as the Cancel button.
+        if worker_running(self._geo_worker):
+            self._on_close_clicked()
 
     # ── Log helpers ───────────────────────────────────────────────────────────
 

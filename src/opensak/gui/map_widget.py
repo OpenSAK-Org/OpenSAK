@@ -11,7 +11,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu
 from PySide6.QtGui import QClipboard
@@ -21,16 +21,11 @@ from opensak.db.models import Cache
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, Point, format_points_text
 from opensak.lang import current_language, tr
 from opensak.gui.theme import hint_text_color
+from opensak.utils.constants import PHYSICAL_CACHE_TYPES
 from opensak.utils.types import GcCode
 
 
-# ── Tile request interceptor (sætter Referer header for OSM tiles) ───────────
-
-class TileInterceptor(QWebEngineUrlRequestInterceptor):
-    def interceptRequest(self, info) -> None:
-        url = info.requestUrl().toString()
-        if "tile.openstreetmap.org" in url:
-            info.setHttpHeader(b"Referer", b"https://www.openstreetmap.org/")
+from opensak.gui import map_profile
 
 # ── Cache type → Leaflet marker HTML ─────────────────────────────────────────
 
@@ -108,6 +103,10 @@ class MapBridge(QObject):
     draw_clicked = Signal()
     # Drawn shape changed: '{"mode": …, "points": [[lat, lon], …]}'
     shape_changed = Signal(str)
+    # Clustering switched on/off with the map button (#1087)
+    clustering_toggled = Signal(bool)
+    # Separation circles switched on/off with the map button (#1087)
+    separation_toggled = Signal(bool)
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
@@ -139,6 +138,16 @@ class MapBridge(QObject):
         """Called from JavaScript when the user draws, edits or removes the shape."""
         self.shape_changed.emit(shape_json)
 
+    @Slot(bool)
+    def on_clustering_toggled(self, on: bool) -> None:
+        """Called from JavaScript when the clustering button is clicked."""
+        self.clustering_toggled.emit(on)
+
+    @Slot(bool)
+    def on_separation_toggled(self, on: bool) -> None:
+        """Called from JavaScript when the separation circles button is clicked."""
+        self.separation_toggled.emit(on)
+
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
 
@@ -149,19 +158,19 @@ MAP_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenSAK Map</title>
 
-<!-- Leaflet CSS -->
+<!-- Leaflet 1.9.4 CSS (bundled in assets/web/, served via opensak:// — #1111) -->
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  href="opensak://assets/leaflet/leaflet.css"/>
 
-<!-- Leaflet MarkerCluster CSS -->
+<!-- Leaflet.markercluster 1.5.3 CSS -->
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  href="opensak://assets/leaflet.markercluster/MarkerCluster.css"/>
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+  href="opensak://assets/leaflet.markercluster/MarkerCluster.Default.css"/>
 
-<!-- Leaflet-Geoman (draw tool for the Line/Polygon filter) -->
+<!-- Leaflet-Geoman 2.19.3 (draw tool for the Line/Polygon filter) -->
 <link rel="stylesheet"
-  href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.css"/>
+  href="opensak://assets/leaflet-geoman/leaflet-geoman.css"/>
 
 <style>
   html, body, #map { height: 100%; margin: 0; padding: 0; }
@@ -216,6 +225,10 @@ MAP_HTML = """<!DOCTYPE html>
   .leaflet-control-mapactions a:last-child {
     border-bottom: none;
   }
+  .leaflet-control-mapactions a.separation-on {
+    background: #ffe0b2;
+    color: #e65100;
+  }
   .draw-point-marker {
     width: 12px; height: 12px;
     background: #d81b60;
@@ -223,6 +236,34 @@ MAP_HTML = """<!DOCTYPE html>
     border: 2px solid #fff;
     box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   }
+  .leaflet-control-tilesoffline {
+    background: #fff3e0;
+    color: #6d4c41;
+    padding: 4px 10px;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    font-size: 11px;
+    font-family: sans-serif;
+    white-space: nowrap;
+  }
+  .leaflet-control-mapactions a.clustering-on {
+    background: #ffe0b2;
+    color: #e65100;
+  }
+  .leaflet-tooltip.cache-label {
+    padding: 0 4px;
+    font-size: 11px;
+    font-family: sans-serif;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.85);
+    border: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .leaflet-tooltip.cache-label::before { display: none; }
+  .cache-labels-hidden .leaflet-tooltip.cache-label { display: none; }
   .leaflet-control-nearbylabel {
     background: #fff;
     padding: 4px 10px;
@@ -239,13 +280,13 @@ MAP_HTML = """<!DOCTYPE html>
 <div id="map"></div>
 
 <!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="opensak://assets/leaflet/leaflet.js"></script>
 
 <!-- Leaflet MarkerCluster -->
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="opensak://assets/leaflet.markercluster/leaflet.markercluster.js"></script>
 
 <!-- Leaflet-Geoman -->
-<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.js"></script>
+<script src="opensak://assets/leaflet-geoman/leaflet-geoman.js"></script>
 
 <!-- Qt WebChannel -->
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -258,21 +299,127 @@ var map = L.map('map', {
     zoomControl: true
 });
 
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+var tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
     crossOrigin: true
 }).addTo(map);
 
-// ── Marker cluster gruppe ─────────────────────────────────────────────────────
-var clusterGroup = L.markerClusterGroup({
-    maxClusterRadius: 40,
-    showCoverageOnHover: false,
-    chunkedLoading: true,
-    chunkInterval: 200,
-    chunkDelay: 10
+// #1111: tiles that are neither online nor in the tile cache fail to load —
+// say so instead of leaving grey squares unexplained. Pins, clustering and
+// map actions keep working; the notice goes away once a tile loads again.
+var TilesOffline = L.Control.extend({
+    options: { position: 'bottomleft' },
+    onAdd: function() {
+        var div = L.DomUtil.create('div', 'leaflet-control-tilesoffline');
+        div.textContent = MAP_TILES_OFFLINE;
+        return div;
+    }
 });
+var tilesOfflineNotice = null;
+tileLayer.on('tileerror', function() {
+    if (!tilesOfflineNotice) {
+        tilesOfflineNotice = new TilesOffline().addTo(map);
+    }
+});
+tileLayer.on('tileload', function() {
+    if (tilesOfflineNotice) {
+        map.removeControl(tilesOfflineNotice);
+        tilesOfflineNotice = null;
+    }
+});
+
+// ── Marker cluster gruppe ─────────────────────────────────────────────────────
+// Issue #1087: every construction (here, in loadCaches and in
+// setClustering) goes through makeClusterGroup(), so the settings can't
+// drift between them. With clustering switched off (the map button),
+// disableClusteringAtZoom 0 puts every marker straight on the top level,
+// while the group's API (addLayers, zoomToShowLayer, getBounds,
+// chunkProgress) stays the same.
+var clusteringOn = MAP_CLUSTERING_ON;
+
+function makeClusterGroup(extra) {
+    var options = {
+        showCoverageOnHover: false,
+        chunkedLoading: true,
+        chunkInterval: 200,
+        chunkDelay: 10
+    };
+    if (clusteringOn) {
+        options.maxClusterRadius = MAP_CLUSTER_RADIUS;
+    } else {
+        options.disableClusteringAtZoom = 0;
+    }
+    return L.markerClusterGroup(L.extend(options, extra));
+}
+
+var clusterGroup = makeClusterGroup();
 map.addLayer(clusterGroup);
+
+// Regroup the markers already on the map — no reload, the view stays.
+function setClustering(on) {
+    clusteringOn = !!on;
+    var layers = Object.keys(markers).map(function(code) { return markers[code]; });
+    clusterGroup.clearLayers();
+    map.removeLayer(clusterGroup);
+    clusterGroup = makeClusterGroup();
+    map.addLayer(clusterGroup);
+    if (layers.length > 0) clusterGroup.addLayers(layers);
+}
+
+L.Control.Clustering = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function(map) {
+        var container = L.DomUtil.create('div', 'leaflet-control-mapactions leaflet-bar');
+        var btn = L.DomUtil.create('a', clusteringOn ? 'clustering-on' : '', container);
+        btn.innerHTML = '⁂';
+        btn.title = MAP_TIP_CLUSTERING;
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function(e) {
+            L.DomEvent.preventDefault(e);
+            setClustering(!clusteringOn);
+            if (clusteringOn) {
+                L.DomUtil.addClass(btn, 'clustering-on');
+            } else {
+                L.DomUtil.removeClass(btn, 'clustering-on');
+            }
+            if (bridge) bridge.on_clustering_toggled(clusteringOn);
+        });
+        return container;
+    }
+});
+
+// ── Issue #1087: cache labels ─────────────────────────────────────────────────
+// A permanent tooltip under each pin with its name or GC code
+// (MAP_LABEL_MODE 'name' / 'gc_code', 'off' = none). Hidden below
+// LABEL_MIN_ZOOM, where they would only cover each other.
+var LABEL_MIN_ZOOM = 13;
+
+function bindCacheLabel(marker, c) {
+    if (MAP_LABEL_MODE === 'off') return;
+    var text = MAP_LABEL_MODE === 'gc_code' ? c.gc_code : c.name;
+    if (!text) return;
+    marker.bindTooltip(escapeHtml(text), {
+        permanent: true,
+        direction: 'bottom',
+        offset: [0, 14],
+        className: 'cache-label',
+        interactive: false
+    });
+}
+
+function updateLabelVisibility() {
+    var container = map.getContainer();
+    if (map.getZoom() < LABEL_MIN_ZOOM) {
+        L.DomUtil.addClass(container, 'cache-labels-hidden');
+    } else {
+        L.DomUtil.removeClass(container, 'cache-labels-hidden');
+    }
+}
+map.on('zoomend', updateLabelVisibility);
+updateLabelVisibility();
 
 // ── State ─────────────────────────────────────────────────────────────────────
 var markers = {};          // gc_code → marker
@@ -347,6 +494,85 @@ L.Control.MapActions = L.Control.extend({
 if (MAP_ACTIONS_ENABLED) {
     new L.Control.MapActions().addTo(map);
 }
+new L.Control.Clustering().addTo(map);   // issue #1087, below the actions
+
+// ── Issue #1087: separation circles ──────────────────────────────────────────
+//
+// A circle of separationRadiusKm around every physical cache (marker._physical,
+// at its displayed position) and around the physical stages/finals Python
+// sends via setSeparationWaypoints(). Only drawn from SEPARATION_MIN_ZOOM and
+// within the (padded) view — at 161 m they are specks when zoomed out. The
+// map button switches them on/off; Python stores that choice.
+var SEPARATION_MIN_ZOOM = 13;
+var SEPARATION_STYLE = {color: '#e65100', weight: 1, fillColor: '#e65100',
+                        fillOpacity: 0.08, interactive: false, pmIgnore: true};
+var separationRadiusKm = 0;
+var separationOn = false;
+var separationWaypoints = [];   // [[lat, lon], …]
+var separationLayer = L.layerGroup().addTo(map);
+var separationControl = null;
+
+L.Control.Separation = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function(map) {
+        var container = L.DomUtil.create('div', 'leaflet-control-mapactions leaflet-bar');
+        var btn = L.DomUtil.create('a', separationOn ? 'separation-on' : '', container);
+        btn.innerHTML = '◯';
+        btn.title = MAP_TIP_SEPARATION;
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function(e) {
+            L.DomEvent.preventDefault(e);
+            separationOn = !separationOn;
+            if (separationOn) {
+                L.DomUtil.addClass(btn, 'separation-on');
+            } else {
+                L.DomUtil.removeClass(btn, 'separation-on');
+            }
+            drawSeparationCircles();
+            if (bridge) bridge.on_separation_toggled(separationOn);
+        });
+        return container;
+    }
+});
+
+// Radius 0 hides the circles and the button.
+function setSeparationConfig(radiusKm, on) {
+    separationRadiusKm = radiusKm;
+    separationOn = !!on;
+    if (separationControl) {
+        map.removeControl(separationControl);
+        separationControl = null;
+    }
+    if (radiusKm > 0) {
+        separationControl = new L.Control.Separation().addTo(map);
+    }
+    drawSeparationCircles();
+}
+
+function setSeparationWaypoints(points) {
+    separationWaypoints = points || [];
+    drawSeparationCircles();
+}
+
+function drawSeparationCircles() {
+    separationLayer.clearLayers();
+    if (!separationOn || !(separationRadiusKm > 0) || map.getZoom() < SEPARATION_MIN_ZOOM) {
+        return;
+    }
+    var bounds = map.getBounds().pad(0.5);
+    var options = L.extend({radius: separationRadiusKm * 1000}, SEPARATION_STYLE);
+    var add = function(ll) {
+        if (bounds.contains(ll)) separationLayer.addLayer(L.circle(ll, options));
+    };
+    Object.keys(markers).forEach(function(code) {
+        if (markers[code]._physical) add(markers[code].getLatLng());
+    });
+    separationWaypoints.forEach(function(p) { add(L.latLng(p[0], p[1])); });
+}
+
+map.on('moveend', drawSeparationCircles);   // also fires after a zoom
 
 // ── Draw tool (Line/Polygon filter) ──────────────────────────────────────────
 //
@@ -591,12 +817,7 @@ function loadCaches(caches) {
 
     // Recreate the cluster group to avoid stale internal state from clearLayers()
     map.removeLayer(clusterGroup);
-    clusterGroup = L.markerClusterGroup({
-        maxClusterRadius: 40,
-        showCoverageOnHover: false,
-        chunkedLoading: true,
-        chunkInterval: 200,
-        chunkDelay: 10,
+    clusterGroup = makeClusterGroup({
         chunkProgress: function(processed, total) {
             // Issue #630: chunkedLoading adds markers to the map in
             // background chunks (via requestAnimationFrame/setTimeout)
@@ -612,6 +833,7 @@ function loadCaches(caches) {
     });
     map.addLayer(clusterGroup);
     markers = {};
+    separationWaypoints = [];   // Python sends the new set after this call
 
     var markerArray = [];
     caches.forEach(function(c) {
@@ -625,7 +847,9 @@ function loadCaches(caches) {
             pmIgnore: true
         });
 
+        marker._physical = c.physical;
         marker.bindPopup(cachePopupHtml(c));
+        bindCacheLabel(marker, c);
 
         marker.on('click', function() {
             if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -641,6 +865,7 @@ function loadCaches(caches) {
     // spatial index on every single addLayer() call, which is dramatically
     // slower than the library's own bulk API at large marker counts — the
     // library's own recommendation for exactly this case.
+    drawSeparationCircles();
     if (markerArray.length > 0) {
         clusterGroup.addLayers(markerArray);
     } else {
@@ -676,10 +901,17 @@ function setHomeLocation(lat, lon, label) {
     homeMarker.bindPopup('<b>' + escapeHtml(label) + '</b>');
 }
 
+// Issue #744: a cache hidden in a cluster of at most this many caches is
+// shown by fanning the cluster out (spiderfy) instead of zooming in, so the
+// map keeps the zoom level the user chose. Larger clusters still zoom in,
+// since a fan of more pins than this is unreadable.
+var SPIDERFY_MAX = 25;
+
 function panToCache(gcCode) {
     var marker = markers[gcCode];
     if (!marker) return;
     selectMarker(gcCode);
+    var latlng = marker.getLatLng();
 
     // Issue #718 (Mike, Mac ARM, beta.7): selecting a new cache in the grid
     // updates the detail text but the map sometimes doesn't pan/pop up,
@@ -694,25 +926,68 @@ function panToCache(gcCode) {
     // clicking). panRequestSeq ensures only the most recently requested
     // pan actually moves the map (a stale callback becomes a no-op instead
     // of yanking the view back to an old cache), and the setTimeout is a
-    // safety net for when zoomToShowLayer's callback never fires at all.
+    // safety net for when the plugin's callback never fires at all.
     var mySeq = ++panRequestSeq;
     var doPan = function() {
         if (mySeq !== panRequestSeq) return;  // superseded by a later selection
         try {
-            map.panTo(marker.getLatLng());
+            // Issue #744: open the popup BEFORE panning. A popup's auto-pan
+            // (which moves the map so the popup fits) starts by stopping
+            // any pan that is running, so with panTo() first the map only
+            // moved the few pixels the popup needed and the cache was not
+            // centred. panTo() last wins and keeps the current zoom.
             if (marker._icon) {
                 marker.openPopup();
             }
+            // getLatLng() now, not when selected: in a fanned-out cluster
+            // the pin sits at the end of its leg, away from its real spot.
+            map.panTo(marker.getLatLng());
         } catch (e) {
             // marker may have been invalidated during animation
         }
     };
     try {
-        clusterGroup.zoomToShowLayer(marker, doPan);
+        var cluster = clusterAtCurrentZoom(marker);
+        if (cluster && cluster.getChildCount() <= SPIDERFY_MAX) {
+            spiderfyToShow(cluster, latlng, mySeq, doPan);
+        } else {
+            clusterGroup.zoomToShowLayer(marker, doPan);
+        }
         setTimeout(doPan, 400);
     } catch (e) {
         doPan();
     }
+}
+
+// Issue #744: the cluster that hides *marker* at the current zoom, or null
+// when the marker is not in a cluster at this zoom (it is shown on its own,
+// or just outside the visible area).
+function clusterAtCurrentZoom(marker) {
+    if (marker._icon) return null;
+    var zoom = Math.round(map.getZoom());
+    var c = marker.__parent;
+    if (!c || c._zoom < zoom) return null;
+    while (c.__parent && c.__parent._zoom >= zoom) {
+        c = c.__parent;
+    }
+    return c;
+}
+
+// Issue #744: centre the cluster without changing the zoom, then fan it out
+// so the selected pin can be seen and its popup opened. moveend also fires
+// when the map is already centred there, and markercluster has added the
+// clusters for the new view by then.
+function spiderfyToShow(cluster, latlng, mySeq, done) {
+    map.once('moveend', function() {
+        if (mySeq !== panRequestSeq) return;
+        if (map.hasLayer(cluster)) {
+            clusterGroup.once('spiderfied', done);
+            cluster.spiderfy();
+        } else {
+            done();
+        }
+    });
+    map.panTo(latlng);
 }
 
 function selectMarker(gcCode) {
@@ -863,7 +1138,9 @@ function updateCacheMarker(c) {
         pmIgnore: true
     });
 
+    marker._physical = c.physical;
     marker.bindPopup(cachePopupHtml(c));
+    bindCacheLabel(marker, c);
 
     marker.on('click', function() {
         if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -872,6 +1149,7 @@ function updateCacheMarker(c) {
 
     markers[c.gc_code] = marker;
     clusterGroup.addLayer(marker);
+    drawSeparationCircles();
     // Issue #474: a plain map.panTo() here only moves the view centre —
     // if the (possibly far-away) new location sits inside an unopened
     // cluster at the current zoom, the pin stays invisible. Reuse
@@ -911,6 +1189,10 @@ class MapWidget(QWidget):
         is where the map opens instead of Home."""
         super().__init__(parent)
         self._caches: list[Cache] = []
+        # The caches last sent to the page — load_caches()' set, or the
+        # nearby set from show_nearby_for_selection(). Their physical
+        # stages/finals get separation circles (#1087).
+        self._shown_caches: list[Cache] = []
         self._ready = False
         self._cleaned = False
         self._pending_caches: Optional[list[Cache]] = None
@@ -945,7 +1227,6 @@ class MapWidget(QWidget):
         if webengine_disabled():
             from PySide6.QtWidgets import QLabel
             self._profile = None
-            self._interceptor = None
             self._page = None
             self._view = None
             self._channel = None
@@ -955,18 +1236,19 @@ class MapWidget(QWidget):
             self._bridge.popout_clicked.connect(self.popout_requested)
             self._bridge.draw_clicked.connect(self._show_draw_menu)
             self._bridge.shape_changed.connect(self._on_shape_changed)
+            self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
+            self._bridge.separation_toggled.connect(self._on_separation_toggled)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
 
-        # Brug en isoleret off-the-record profil til kortet så TileInterceptor
-        # ikke påvirker andre QWebEngineView instanser (fx beskrivelsespanelet).
-        # Dette løser et Windows 11-specifikt problem hvor den globale
-        # defaultProfile interceptor blokerede setHtml() i cache_detail.py.
-        # Ingen Qt-parent — vi rydder selv op i _cleanup_webengine().
-        self._profile = QWebEngineProfile()
-        self._interceptor = TileInterceptor()
-        self._profile.setUrlRequestInterceptor(self._interceptor)
+        # Kortet har sin egen profil så TileInterceptor ikke påvirker andre
+        # QWebEngineView instanser (fx beskrivelsespanelet). Dette løser et
+        # Windows 11-specifikt problem hvor den globale defaultProfile
+        # interceptor blokerede setHtml() i cache_detail.py.
+        # #1111: én persistent profil delt af alle kort (tile-cache på disk),
+        # se map_profile.py. Frigives i _cleanup_webengine().
+        self._profile = map_profile.acquire(QWebEngineProfile)
 
         self._page = QWebEnginePage(self._profile)
         self._view = QWebEngineView()
@@ -981,6 +1263,8 @@ class MapWidget(QWidget):
         self._bridge.popout_clicked.connect(self.popout_requested)
         self._bridge.draw_clicked.connect(self._show_draw_menu)
         self._bridge.shape_changed.connect(self._on_shape_changed)
+        self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
+        self._bridge.separation_toggled.connect(self._on_separation_toggled)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -1021,6 +1305,10 @@ class MapWidget(QWidget):
         s = get_settings()
         home_label = s.active_home_name or tr("map_home_label")
         self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {_js_arg(home_label)})")
+        self._run_js(
+            f"setSeparationConfig({s.map_separation_radius_km}, "
+            f"{_js_arg(s.map_separation_circles)})"
+        )
 
         # Indlæs ventende caches
         if self._pending_caches is not None:
@@ -1052,12 +1340,20 @@ class MapWidget(QWidget):
             cb()
 
     def _html_options(self) -> dict:
+        # Issue #1087: clustering and labels are read here, so the reload
+        # after Settings → OK (reload_map) applies them to the open map.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
         return {"map_actions": self._map_actions, "draw_button": self._draw_button,
-                "auto_fit_caches": self._auto_fit_caches}
+                "auto_fit_caches": self._auto_fit_caches,
+                "clustering": s.map_clustering, "cluster_radius": s.map_cluster_radius,
+                "label_mode": s.map_labels}
 
     @staticmethod
     def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
-                         draw_button: bool = False, auto_fit_caches: bool = True) -> str:
+                         draw_button: bool = False, auto_fit_caches: bool = True,
+                         clustering: bool = True, cluster_radius: int = 40,
+                         label_mode: str = "off") -> str:
         """Render MAP_HTML template with dynamic values and localized tooltips."""
         import opensak.utils.flags as flags
         html = MAP_HTML.replace("INIT_LAT", str(lat))
@@ -1067,6 +1363,9 @@ class MapWidget(QWidget):
         html = html.replace("MAP_ACTIONS_ENABLED", "true" if map_actions else "false")
         html = html.replace("MAP_DRAW_BUTTON", "true" if draw_button else "false")
         html = html.replace("AUTO_FIT_CACHES", "true" if auto_fit_caches else "false")
+        html = html.replace("MAP_CLUSTERING_ON", "true" if clustering else "false")
+        html = html.replace("MAP_CLUSTER_RADIUS", str(max(1, int(cluster_radius))))
+        html = html.replace("MAP_LABEL_MODE", _js_inline_arg(label_mode))
         html = html.replace("GEOMAN_LANG", _js_inline_arg(_geoman_lang()))
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before
@@ -1087,6 +1386,13 @@ class MapWidget(QWidget):
             "MAP_TIP_POPOUT", _js_inline_arg(tr("toolbar_popout_map_tooltip"))
         )
         html = html.replace("MAP_TIP_DRAW", _js_inline_arg(tr("map_draw_tooltip")))
+        html = html.replace("MAP_TILES_OFFLINE", _js_inline_arg(tr("map_tiles_offline")))
+        html = html.replace(
+            "MAP_TIP_CLUSTERING", _js_inline_arg(tr("map_clustering_tooltip"))
+        )
+        html = html.replace(
+            "MAP_TIP_SEPARATION", _js_inline_arg(tr("map_separation_tooltip"))
+        )
         return html
 
     def _run_js(self, js: str) -> None:
@@ -1133,12 +1439,39 @@ class MapWidget(QWidget):
                 "corrected_label": tr("detail_corrected_coords"),
                 "pin_html":       _cache_pin_html(c.cache_type or "", bool(c.found), bool(c.dnf)),
                 "found":          c.found,
+                "physical":       c.cache_type in PHYSICAL_CACHE_TYPES,
             })
         return data
 
     def _do_load_caches(self, caches: list[Cache]) -> None:
         data = self._build_marker_data(caches)
         self._run_js(f"loadCaches({_js_arg(data)})")
+        self._shown_caches = caches
+        self._send_separation_waypoints()
+
+    def _send_separation_waypoints(self) -> None:
+        """Send the physical stages/finals of the shown caches to the page
+        for their separation circles (#1087) — only while the circles are
+        on, so the query never runs for a map that doesn't show them."""
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        if not (s.map_separation_circles and s.map_separation_radius_km > 0):
+            return
+        ids = [c.id for c in self._shown_caches
+               if c.cache_type in PHYSICAL_CACHE_TYPES and getattr(c, "id", None) is not None]
+        if not ids:
+            return
+        from opensak.db.database import get_session
+        from opensak.filters.engine import physical_waypoint_coords
+        with get_session() as session:
+            points = physical_waypoint_coords(session, ids)
+        self._run_js(f"setSeparationWaypoints({_js_arg(points)})")
+
+    def _on_separation_toggled(self, on: bool) -> None:
+        from opensak.gui.settings import get_settings
+        get_settings().map_separation_circles = on
+        if on:
+            self._send_separation_waypoints()
 
     def show_nearby_for_selection(
         self,
@@ -1185,6 +1518,8 @@ class MapWidget(QWidget):
             f"loadNearbyCaches({_js_arg(data)}, {center_lat}, {center_lon}, "
             f"{radius_km}, {_js_arg(cache.gc_code)}, {_js_arg(label_text)})"
         )
+        self._shown_caches = nearby_caches
+        self._send_separation_waypoints()
 
     def pan_to_cache(self, gc_code: GcCode) -> None:
         """Centrér kortet på en bestemt cache."""
@@ -1231,6 +1566,7 @@ class MapWidget(QWidget):
             "corrected_label": tr("detail_corrected_coords"),
             "pin_html":        _cache_pin_html(cache.cache_type or "", bool(cache.found), bool(cache.dnf)),
             "found":           cache.found,
+            "physical":        cache.cache_type in PHYSICAL_CACHE_TYPES,
         }
         self._run_js(f"updateCacheMarker({_js_arg(data)})")
 
@@ -1361,6 +1697,12 @@ class MapWidget(QWidget):
     def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
         if self._ready:
             self._run_js(f"setView({lat}, {lon}, {int(zoom)})")
+
+    def _on_clustering_toggled(self, on: bool) -> None:
+        """The map button already regrouped the pins; remember the choice
+        for the next map load (#1087)."""
+        from opensak.gui.settings import get_settings
+        get_settings().map_clustering = on
 
     def _on_shape_changed(self, shape_json: str) -> None:
         parsed = _parse_shape_json(shape_json)
@@ -1496,7 +1838,8 @@ class MapWidget(QWidget):
     def _cleanup_webengine(self) -> None:
         """Slet QWebEnginePage FØR QWebEngineProfile destrueres.
 
-        The map uses a parent-less off-the-record QWebEngineProfile + QWebEnginePage.
+        The map uses a parent-less QWebEnginePage on the shared map profile
+        (map_profile.py), which is deleted at quit after the last release().
         Without an explicit, ordered teardown they are released by Python GC in a
         nondeterministic order; when the profile is collected before its page Qt
         logs 'Release of profile requested but WebEnginePage still not deleted.
@@ -1515,7 +1858,7 @@ class MapWidget(QWidget):
             self._ready = False
             self._view.setPage(None)  # type: ignore[arg-type]
             self._page.deleteLater()
-            self._profile.deleteLater()
         except RuntimeError:
             # Widget er allerede slettet af Qt — intet at gøre
             pass
+        map_profile.release()

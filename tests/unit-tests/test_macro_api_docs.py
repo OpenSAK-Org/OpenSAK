@@ -240,3 +240,16 @@ def test_gsak_comparison_marks_only_beta_only_functions():
     rows = [line for line in GSAK_COMPARE.splitlines()
             if line.startswith("|") and "β" in line]
     assert [row.split("|")[1].strip() for row in rows] == ["GetUrl"]
+
+
+def test_gsak_comparison_resynclogs_is_local():
+    # Issue #1274: GSAK's ReSyncLogs only recalculates the log counts and
+    # dates after a macro wrote logs; it never calls the geocaching.com API.
+    from opensak.macro.gsak_compare import GSAK_COMPARE
+
+    row = next(line for line in GSAK_COMPARE.splitlines()
+               if line.startswith("| ReSyncLogs |"))
+    status, mapping = (cell.strip() for cell in row.split("|")[2:4])
+    assert status == "✅"
+    assert "API" not in mapping
+    assert "`resync()`" in mapping
