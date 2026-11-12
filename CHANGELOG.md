@@ -4,6 +4,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.3] — Unreleased
+
+### Added
+
+- **Run macros without a window: `opensak run` (#1203)** — runs a Lua
+  macro from the command line, so Task Scheduler, launchd, cron or
+  systemd can run it unattended. The macro can be a path, or a file name
+  or Name from the macros folder. Options: `--db`, `--arg name=value`,
+  `--yes`, `--allow-write`, `--allow-folder`, `--wait`, `--json`,
+  `--quiet` and `--log-file`. A question never blocks the run: it is
+  answered from `--arg`, a remembered form value or `--yes`; otherwise
+  the run stops with the new exit code 7 (needs a window). A write or
+  folder without approval also stops the run. `--db` picks the database
+  for this run only — OpenSAK still opens the one you had active. A
+  macro can declare `Headless: no` in its header to refuse running
+  without a window. The User Guide has a new section, *Running macros
+  unattended*. Contributed by nagisml.
+
+- **`opensak export gpx` and `opensak db` (#1203)** — `export gpx`
+  writes the caches of a saved filter with the same code as the export
+  in OpenSAK. `db list` shows your databases, `db backup` makes a manual
+  backup of one database, and `db check` runs the integrity and foreign
+  key checks and exits with code 1 on any problem. The `db` commands also
+  work while OpenSAK has the database open. Contributed by nagisml.
+
+- **Macro API 5 (#1203)** — `opensak.is_headless()` tells a macro whether
+  it runs under `opensak run`, and `opensak.args` holds the `--arg`
+  values. The Macro manager has a new *Headless* column. New example
+  macro: `delete_archived.lua` deletes archived caches you haven't found
+  (found, owned and locked caches are kept); `--arg dry_run=yes` only
+  lists them. Contributed by nagisml.
+
 ## [1.23.0-beta.2] — 2026-11-11
 
 > Headline: **the map works offline.** Leaflet is bundled and the tiles
