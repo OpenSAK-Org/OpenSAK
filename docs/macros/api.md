@@ -121,6 +121,7 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.run_macro`](#opensakrunmacro) | 3 |
 | [`opensak.is_headless`](#opensakisheadless) | 5 |
 | [`opensak.args`](#opensakargs) | 5 |
+| [`opensak.shift_key`](#opensakshiftkey) | 5 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
 | [`opensak.exit`](#opensakexit) | 3 |
@@ -2641,6 +2642,30 @@ Example:
 local days = tonumber(opensak.args.days) or 30
 ```
 
+### opensak.shift_key
+
+```lua
+opensak.shift_key()
+```
+
+Whether Shift was held when the user started the macro (GSAK's `$_ShiftKey`), e.g. to show the macro's options only then and otherwise run unattended with the saved ones (`opensak.settings`). Read when the macro is started — with Run in the Macro manager, the macro's shortcut, or Run (F5 or Shift+F5) in the editor — so Shift can be let go at once. Always false in a macro started with `opensak.run_macro()`, `opensak --run-macro` or `opensak run`, and for a macro whose own shortcut includes Shift. See the example `quick_filter.lua`.
+
+Returns `boolean` — true if Shift was held.
+
+Since API version 5.
+
+Example:
+
+```lua
+local s = opensak.settings.load()
+if opensak.shift_key() or s.name == nil then
+  s.name = opensak.input("Your name", s.name or "")
+  if not s.name then return end  -- cancelled
+  opensak.settings.save(s)
+end
+print("Hello " .. s.name)
+```
+
 ### opensak.sleep
 
 ```lua
@@ -4825,6 +4850,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — Show the unfound caches updated since the last run
 - [`owned_statistics.lua`](../../macros/examples/owned_statistics.lua) — Write an HTML page with statistics of the caches you own and the finds they received
 - [`puzzle_helper.lua`](../../macros/examples/puzzle_helper.lua) — Coordinates, formulas and numbers from a mystery listing; ROT13, digit sum, word value
+- [`quick_filter.lua`](../../macros/examples/quick_filter.lua) — Filter the cache list with saved options; hold Shift to change them
 - [`refile_by_country.lua`](../../macros/examples/refile_by_country.lua) — Move caches to a database per country or state
 - [`region_coverage.lua`](../../macros/examples/region_coverage.lua) — Write an HTML page of the states (or countries) you have found a cache in, and where to go next
 - [`sql_report.lua`](../../macros/examples/sql_report.lua) — Run an SQL query and show its result as an HTML table (GSAK's SqlToHtml)
@@ -5142,4 +5168,4 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`, `$_ShiftKey` → `shift_key()`) were not checked one by one.
