@@ -48,6 +48,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and so does a macro whose shortcut itself includes Shift. New example
   macro: *Quick filter* (`quick_filter.lua`). Contributed by nagisml.
 
+- **GSAK's distance, bearing and projection functions in SQL (#917)** —
+  Where clauses, macro SQL and imported GSAK filters can use
+  `g_Distance(lat1, lon1, lat2, lon2, 'K')`, `g_Bearing1()` (N, NE, …),
+  `g_Bearing2()` (degrees) and `g_Project(lat, lon, degrees, distance,
+  units, 'G')` (returns `'lat;lon'`) with GSAK's arguments, to measure
+  between any two points without changing the centre point. Each has a
+  great-circle and a high-accuracy Vincenty mode (`'KH'`/`'MH'`,
+  `'V'`, and an optional `'H'` for the bearings). Unlike GSAK, NULL gives
+  NULL, an unknown unit or a non-numeric coordinate is an error instead of
+  a silent 0, identical or antipodal points don't fail, and Vincenty is
+  computed to the millimetre (GSAK stops ~20 cm short). GSAK filters using
+  these functions are now imported as working SQL instead of comments.
+  `opensak.coords.distance()`, `bearing()` and `project()` take an
+  optional `"vincenty"` method too (macro API 5). The new example macro
+  *distance_bearing* lists the caches around any point with distance,
+  compass direction and the great-circle/Vincenty difference.
+  Contributed by nagisml.
+
 ## [1.23.0-beta.2] — 2026-11-11
 
 > Headline: **the map works offline.** Leaflet is bundled and the tiles

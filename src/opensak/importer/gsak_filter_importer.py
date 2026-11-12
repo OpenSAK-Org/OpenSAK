@@ -49,6 +49,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from opensak.db.sql_functions import GEO_FUNCTIONS
 from opensak.filters.engine import (
     DATE_COMPARE_OPS,
     DATE_UNITS,
@@ -596,11 +597,13 @@ _STATUS_SQL: dict[str, str] = {
 }
 _STATUS_CMP_RE = re.compile(r"\bstatus\b\s*(=|<>|!=)\s*'([ATX])'", re.IGNORECASE)
 
-# GSAK macro globals and macro functions (%g_… / $g_… / g_Distance(…)) that can
+# GSAK macro globals and macro functions (%g_… / $g_… / g_FoundLog(…)) that can
 # appear in a saved where clause and only resolve while a GSAK macro is running.
 # GSAK's kBeforeLat/kAfterLon and friends are NOT listed here: inside a where
 # clause they are columns of the Corrected table, and are mapped as such.
 _MACRO_GLOBAL_RE = re.compile(r"^g_", re.IGNORECASE)
+# …except the geo functions, which OpenSAK's SQL has too (#917).
+_GEO_FUNCTION_NAMES = frozenset(name.lower() for name in GEO_FUNCTIONS)
 
 # GSAK one-letter cache-type codes as used inside where clauses.
 GSAK_CODE_TO_OSAK: dict[str, Optional[str]] = {
@@ -1028,6 +1031,8 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
                     f"where: '{word}' is a GSAK custom field — custom fields are not "
                     f"available in this build"
                 )
+                return prefix + word
+            if low in _GEO_FUNCTION_NAMES:
                 return prefix + word
             if _MACRO_GLOBAL_RE.match(word):
                 warnings.append(

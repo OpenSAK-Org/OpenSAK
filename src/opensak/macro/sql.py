@@ -90,6 +90,7 @@ from typing import Any, Callable, Iterator, Optional
 
 from opensak.db import companion as companion_db
 from opensak.db.companion import COMPANION_SCHEMA
+from opensak.db.sql_functions import register_geo_functions
 
 # Per statement (and per fetched chunk of opensak.sql_each()).
 QUERY_TIMEOUT_S = 60.0
@@ -386,6 +387,7 @@ def connect_read_only(db_path: Path) -> sqlite3.Connection:
     except sqlite3.Error:
         conn.close()
         raise
+    register_geo_functions(conn)
     return conn
 
 
@@ -993,6 +995,7 @@ class WritableDatabase:
                 )
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA recursive_triggers = ON")
+                register_geo_functions(conn)
                 self._authorizer = _write_authorizer(_main_names(conn), self._companion)
                 self._create_triggers(conn)
             except sqlite3.Error as exc:

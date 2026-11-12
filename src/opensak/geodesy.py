@@ -4,6 +4,11 @@ src/opensak/geodesy.py — Coordinate math without Qt.
   distance_km / bearing / project / midpoint
       Great-circle math on a sphere with the WGS-84 mean radius — the same
       formulas as the Distance & bearing, Projection and Midpoint dialogs.
+  bearing_direction
+      Compass direction (N, NE, …) of a bearing.
+  vincenty_inverse / vincenty_direct
+      Distance and bearing, and projection, on the WGS-84 ellipsoid
+      (Vincenty; sub-millimetre).
   to_utm / from_utm / format_utm
       WGS-84 ↔ UTM (Krüger series, sub-millimetre accuracy inside a zone).
   to_ch1903 / from_ch1903 / format_ch1903
@@ -81,6 +86,21 @@ def midpoint(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float,
     return math.degrees(lat_m), math.degrees(math.atan2(y, x))
 
 
+# Compass directions in clockwise order from north — index i is the 45° sector
+# centred on i*45° (N = 337.5°–22.5°). Language-independent codes; the dialogs
+# show them via tr("bearing_dirs"), which lists the same eight in this order.
+DIRECTIONS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def bearing_direction(deg: float) -> str:
+    """Compass direction code (see DIRECTIONS) for a bearing in degrees.
+
+    Sectors are half-open [lo, hi) — a bearing of exactly 22.5° is NE —
+    matching DirectionFilter.apply_to_query()'s SQL ranges.
+    """
+    return DIRECTIONS[int(((deg % 360.0) + 22.5) // 45.0) % 8]
+
+
 # ── Ellipsoids and datums ────────────────────────────────────────────────────
 
 class Ellipsoid(NamedTuple):
@@ -92,6 +112,111 @@ WGS84 = Ellipsoid(6_378_137.0, 1 / 298.257223563)
 GRS80 = Ellipsoid(6_378_137.0, 1 / 298.257222101)
 AIRY_1830 = Ellipsoid(6_377_563.396, 1 / 299.3249646)
 BESSEL_1841 = Ellipsoid(6_377_397.155, 1 / 299.1528128)
+
+
+# ── Vincenty (WGS-84 ellipsoid) ──────────────────────────────────────────────
+
+# Iterations stop once lambda/sigma change by less than this (radians, about
+# 0.06 mm). GSAK stops at 1e-6, which leaves up to ~20 cm in its distances.
+_VINCENTY_EPS = 1e-12
+_VINCENTY_MAX_ITER = 200
+
+
+def vincenty_inverse(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float]:
+    """Distance in km and initial bearing (0–360°) from point 1 to point 2 on
+    the WGS-84 ellipsoid.
+
+    Coincident points give (0.0, 0.0), like bearing(). Nearly antipodal
+    points, where the formula does not converge, fall back to the great
+    circle (distance_km() and bearing()).
+    """
+    a = WGS84.a / 1000
+    f = WGS84.f
+    b = a * (1 - f)
+    L = math.radians(lon2 - lon1)
+    U1 = math.atan((1 - f) * math.tan(math.radians(lat1)))
+    U2 = math.atan((1 - f) * math.tan(math.radians(lat2)))
+    sU1, cU1 = math.sin(U1), math.cos(U1)
+    sU2, cU2 = math.sin(U2), math.cos(U2)
+
+    lam = L
+    for _ in range(_VINCENTY_MAX_ITER):
+        sl, cl = math.sin(lam), math.cos(lam)
+        sin_sigma = math.hypot(cU2 * sl, cU1 * sU2 - sU1 * cU2 * cl)
+        if sin_sigma == 0.0:
+            return 0.0, 0.0
+        cos_sigma = sU1 * sU2 + cU1 * cU2 * cl
+        sigma = math.atan2(sin_sigma, cos_sigma)
+        sin_alpha = cU1 * cU2 * sl / sin_sigma
+        cos2a = 1 - sin_alpha ** 2
+        # cos2a is 0 for a line along the equator
+        cos2sm = (cos_sigma - 2 * sU1 * sU2 / cos2a) if cos2a else 0.0
+        C = f / 16 * cos2a * (4 + f * (4 - 3 * cos2a))
+        lam_prev = lam
+        lam = L + (1 - C) * f * sin_alpha * (
+            sigma + C * sin_sigma * (cos2sm + C * cos_sigma * (-1 + 2 * cos2sm ** 2))
+        )
+        if abs(lam - lam_prev) < _VINCENTY_EPS:
+            break
+    else:
+        return distance_km(lat1, lon1, lat2, lon2), bearing(lat1, lon1, lat2, lon2)
+
+    u2 = cos2a * (a ** 2 - b ** 2) / b ** 2
+    A = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)))
+    B = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)))
+    d_sigma = B * sin_sigma * (
+        cos2sm + B / 4 * (
+            cos_sigma * (-1 + 2 * cos2sm ** 2)
+            - B / 6 * cos2sm * (-3 + 4 * sin_sigma ** 2) * (-3 + 4 * cos2sm ** 2)
+        )
+    )
+    alpha1 = math.atan2(cU2 * math.sin(lam), cU1 * sU2 - sU1 * cU2 * math.cos(lam))
+    return b * A * (sigma - d_sigma), (math.degrees(alpha1) + 360) % 360
+
+
+def vincenty_direct(lat: float, lon: float, bearing_deg: float, dist_km: float) -> tuple[float, float]:
+    """The point *dist_km* away from (lat, lon) in direction *bearing_deg* on
+    the WGS-84 ellipsoid. A negative distance goes the opposite way."""
+    a = WGS84.a / 1000
+    f = WGS84.f
+    b = a * (1 - f)
+    alpha1 = math.radians(bearing_deg)
+    sa1, ca1 = math.sin(alpha1), math.cos(alpha1)
+    tan_u1 = (1 - f) * math.tan(math.radians(lat))
+    cU1 = 1 / math.sqrt(1 + tan_u1 ** 2)
+    sU1 = tan_u1 * cU1
+    sigma1 = math.atan2(tan_u1, ca1)
+    sin_alpha = cU1 * sa1
+    cos2a = 1 - sin_alpha ** 2
+    u2 = cos2a * (a ** 2 - b ** 2) / b ** 2
+    A = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)))
+    B = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)))
+
+    sigma = dist_km / (b * A)
+    for _ in range(_VINCENTY_MAX_ITER):
+        cos2sm = math.cos(2 * sigma1 + sigma)
+        ss, cs = math.sin(sigma), math.cos(sigma)
+        d_sigma = B * ss * (
+            cos2sm + B / 4 * (
+                cs * (-1 + 2 * cos2sm ** 2)
+                - B / 6 * cos2sm * (-3 + 4 * ss ** 2) * (-3 + 4 * cos2sm ** 2)
+            )
+        )
+        sigma_prev = sigma
+        sigma = dist_km / (b * A) + d_sigma
+        if abs(sigma - sigma_prev) < _VINCENTY_EPS:
+            break
+    cos2sm = math.cos(2 * sigma1 + sigma)
+    ss, cs = math.sin(sigma), math.cos(sigma)
+
+    x = sU1 * ss - cU1 * cs * ca1
+    lat2 = math.atan2(sU1 * cs + cU1 * ss * ca1, (1 - f) * math.hypot(sin_alpha, x))
+    lam = math.atan2(ss * sa1, cU1 * cs - sU1 * ss * ca1)
+    C = f / 16 * cos2a * (4 + f * (4 - 3 * cos2a))
+    L = lam - (1 - C) * f * sin_alpha * (
+        sigma + C * ss * (cos2sm + C * cs * (-1 + 2 * cos2sm ** 2))
+    )
+    return math.degrees(lat2), _normalize_lon(lon + math.degrees(L))
 
 
 class Helmert(NamedTuple):

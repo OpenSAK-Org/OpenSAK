@@ -4425,13 +4425,29 @@ class MacroRuntime:
         return helpers.format_coordinate(*point, rest[0] if rest else None)
 
     @staticmethod
+    def _geo_method(func: str, value: Any) -> bool:
+        """The optional method of the coords functions: True for
+        "vincenty", False for "haversine" (the default)."""
+        if value is None or value == "haversine":
+            return False
+        if value == "vincenty":
+            return True
+        raise MacroError(f'{func}: method must be "haversine" or "vincenty", got {value!r}')
+
+    @staticmethod
     def _coords_distance(*args) -> float:
-        (a, b), _ = take_points(args, 2, "opensak.coords.distance")
+        func = "opensak.coords.distance"
+        (a, b), rest = take_points(args, 2, func)
+        if MacroRuntime._geo_method(func, rest[0] if rest else None):
+            return geodesy.vincenty_inverse(*a, *b)[0]
         return geodesy.distance_km(*a, *b)
 
     @staticmethod
     def _coords_bearing(*args) -> float:
-        (a, b), _ = take_points(args, 2, "opensak.coords.bearing")
+        func = "opensak.coords.bearing"
+        (a, b), rest = take_points(args, 2, func)
+        if MacroRuntime._geo_method(func, rest[0] if rest else None):
+            return geodesy.vincenty_inverse(*a, *b)[1]
         return geodesy.bearing(*a, *b)
 
     @staticmethod
@@ -4441,6 +4457,8 @@ class MacroRuntime:
         brng, km = (_number(v) for v in (rest + [None, None])[:2])
         if brng is None or km is None:
             raise MacroError(f"{func} expects a point, a bearing in degrees and a distance in km")
+        if MacroRuntime._geo_method(func, rest[2] if len(rest) > 2 else None):
+            return geodesy.vincenty_direct(*point, brng, km)
         return geodesy.project(*point, brng, km)
 
     @staticmethod
@@ -5615,6 +5633,10 @@ _TWO_POINT_STRINGS = (
 )
 _BEARING = Param("bearing", "number", "Direction in degrees, 0 = North, clockwise.")
 _DIST = Param("km", "number", "Distance in km.")
+_GEO_METHOD = Param("method", "string",
+                    '`"haversine"` (great circle, the default) or `"vincenty"` '
+                    "(WGS-84 ellipsoid, accurate to the millimetre).",
+                    optional=True)
 _POLYGON = Param("polygon", "string|table", "Polygon file path, or a table of points.")
 _TEXT = Param("text", "string", "The text.")
 _PATTERN = Param("pattern", "string", "Regular expression (Python syntax); a "
@@ -7556,14 +7578,17 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="coords.distance",
-        description="Great-circle distance between two points.",
+        description="Distance between two points: along the great circle, or "
+                    "on the WGS-84 ellipsoid with `\"vincenty\"`.",
         example='local km = opensak.coords.distance("N47 22.123 E008 32.456",\n'
-                '                                   "N47 23.000 E008 33.000")',
+                '                                   "N47 23.000 E008 33.000")\n'
+                'local exact = opensak.coords.distance(47.36872, 8.54093, 46.948, 7.4474, "vincenty")',
         since=2,
         bind=lambda rt, lua: rt._coords_distance,
-        params=_TWO_POINTS,
-        overloads=(_TWO_POINT_STRINGS,),
+        params=(*_TWO_POINTS, _GEO_METHOD),
+        overloads=((*_TWO_POINT_STRINGS, _GEO_METHOD),),
         returns=("number", "Distance in km."),
+        changed=((5, "added `method`"),),
     ),
     ApiFunction(
         name="coords.bearing",
@@ -7571,9 +7596,10 @@ API: tuple[ApiFunction, ...] = (
         example='local deg = opensak.coords.bearing(47.36872, 8.54093, 47.38333, 8.55)',
         since=2,
         bind=lambda rt, lua: rt._coords_bearing,
-        params=_TWO_POINTS,
-        overloads=(_TWO_POINT_STRINGS,),
+        params=(*_TWO_POINTS, _GEO_METHOD),
+        overloads=((*_TWO_POINT_STRINGS, _GEO_METHOD),),
         returns=("number", "Degrees, 0 = North, clockwise."),
+        changed=((5, "added `method`"),),
     ),
     ApiFunction(
         name="coords.project",
@@ -7583,9 +7609,10 @@ API: tuple[ApiFunction, ...] = (
                 "print(opensak.coords.format(lat, lon))",
         since=2,
         bind=lambda rt, lua: rt._coords_project,
-        params=(_LAT, _LON, _BEARING, _DIST),
-        overloads=((_COORDS, _BEARING, _DIST),),
+        params=(_LAT, _LON, _BEARING, _DIST, _GEO_METHOD),
+        overloads=((_COORDS, _BEARING, _DIST, _GEO_METHOD),),
         returns=("number, number", "Latitude and longitude of the projected point."),
+        changed=((5, "added `method`"),),
     ),
     ApiFunction(
         name="coords.midpoint",

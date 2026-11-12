@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
 from opensak.db import companion, custom_fields, maintenance
 from opensak.db.models import Base
+from opensak.db.sql_functions import register_geo_functions
 from opensak.utils import flags
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,13 @@ def _enable_wal_and_fk(dbapi_connection, _connection_record) -> None:
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+@event.listens_for(Engine, "connect")
+def _register_sql_functions(dbapi_connection, _connection_record) -> None:
+    """GSAK's g_Distance(), g_Bearing1/2() and g_Project() for Where clauses
+    and everything else that runs SQL through an engine (#917)."""
+    register_geo_functions(dbapi_connection)
 
 
 # ── Module-level singletons (initialised lazily) ─────────────────────────────

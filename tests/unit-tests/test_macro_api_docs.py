@@ -156,7 +156,7 @@ def test_npp_autocomplete_is_valid_and_sorted():
     distance = root.find(".//KeyWord[@name='opensak.coords.distance']")
     assert distance is not None and distance.get("func") == "yes"
     forms = distance.findall("Overload")
-    assert [len(form.findall("Param")) for form in forms] == [4, 2]
+    assert [len(form.findall("Param")) for form in forms] == [5, 3]
     assert forms[0].get("retVal") == "number"
     assert "\n" in forms[0].get("descr")
 
