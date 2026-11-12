@@ -46,7 +46,7 @@ from opensak.macro.runtime import API_VERSION
 
 # Columns of the macro list.
 (COL_NAME, COL_DESCRIPTION, COL_VERSION, COL_AUTHOR, COL_API, COL_PERMISSIONS, COL_SHORTCUT,
- COL_FOLDER) = range(8)
+ COL_FOLDER, COL_HEADLESS) = range(9)
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
@@ -135,7 +135,7 @@ class MacroManagerDialog(QDialog):
             tr("macro_mgr_col_version"), tr("macro_mgr_col_author"),
             tr("macro_mgr_col_api"), tr("macro_mgr_col_permissions"),
             tr("shortcuts_col_shortcut"),
-            tr("settings_folder_perm_col_folder"),
+            tr("settings_folder_perm_col_folder"), tr("macro_mgr_col_headless"),
         ])
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(COL_NAME, Qt.SortOrder.AscendingOrder)
@@ -234,6 +234,7 @@ class MacroManagerDialog(QDialog):
                 info.name, info.error or info.description, info.version, info.author,
                 info.requires_api, permissions_text(info),
                 _native(macro_shortcut(info.path)), "" if folder == "." else folder,
+                "" if info.error else "yes" if info.runs_headless else "no",
             ])
             item.setData(COL_NAME, _PATH_ROLE, str(info.path))
             item.setToolTip(COL_NAME, str(info.path))

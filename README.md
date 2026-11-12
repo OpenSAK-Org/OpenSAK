@@ -33,7 +33,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 📧 **Pocket Queries by e-mail** — fetch PQ ZIP attachments straight from your own IMAP mailbox; the password is kept in your OS keyring, never in plain text
 - 🔁 **Import GSAK databases** — read a GSAK database directly, including personal notes, corrected coordinates, child waypoints, attributes and the full log history — or every database in a GSAK backup `.zip` at once
 - 🧮 **Import GSAK filters** — turn your saved GSAK filters into OpenSAK filter profiles
-- ⏰ **Scheduled imports** — `opensak import gpx` and `opensak import gsak` import without opening a window, so Task Scheduler, launchd, systemd or cron can refresh a database every morning
+- ⏰ **Scheduled imports** — `opensak import gpx` and `opensak import gsak` import without opening a window, so Task Scheduler, launchd, systemd or cron can refresh a database every morning; `opensak run` does the same for Lua macros, and `opensak export gpx` and `opensak db list|backup|check` for exports, backups and checks
 - 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus), move caches between them, and move or copy whole databases to any folder; each database keeps its own home location, columns and sort order
 - 📍 **Home points** — save multiple named home points (Home, Cottage, Hotel…) and switch instantly from the toolbar
 - ✅ **Update finds** from a reference database (e.g. your "My Finds" PQ)

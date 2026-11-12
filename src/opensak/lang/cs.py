@@ -114,6 +114,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_unreadable":         "Toto makro nelze přečíst: {msg}",
     "macro_mgr_api_newer":          "Vyžaduje API maker verze {needed}; tento OpenSAK má verzi {have}.",
     "macro_mgr_col_permissions":    "Oprávnění",
+    "macro_mgr_col_headless":       "Bez okna",
     "macro_mgr_perm_info":          "Podle hlavičky makra. OpenSAK se i tak ptá před každým zápisem a každým přístupem ke složce nebo webu.",
     "macro_mgr_perm_undeclared":    "Makro neuvádí svá oprávnění.",
     "macro_mgr_perm_none":          "Makro uvádí, že nepotřebuje žádné z těchto oprávnění.",

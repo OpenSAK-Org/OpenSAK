@@ -2,31 +2,21 @@
 src/opensak/cli/import_cmd.py — `opensak import gpx|gsak …` (#937).
 
 Runs the same import services as the GUI (gpx_import_service,
-gsak_import_service) on one existing database:
-
-1. start-up without a window (opensak.bootstrap.init_headless);
-2. find the database given with --db — never create one;
-3. take its lock, so OpenSAK (or another run) isn't writing to it at the
-   same time (opensak.db.lock), waiting up to --wait seconds;
-4. open it — an older database is migrated, after the usual pre-migration
-   backup (#549);
-5. import, then write the summary to stdout (text or --json) and the log.
+gsak_import_service) on one existing database, found, locked and opened as
+every headless command does it (opensak.cli.common), then writes the summary
+to stdout (text or --json) and the log.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Optional, TextIO
 
+from opensak.cli.common import Fail, emit, opened_database, resolve_database, run_headless
 from opensak.utils.run_macro import (
-    EXIT_DB_LOCKED,
-    EXIT_DB_NOT_FOUND,
     EXIT_MACRO_ERROR as EXIT_FAILED,
     EXIT_OK,
     EXIT_USAGE,
@@ -35,95 +25,15 @@ from opensak.utils.run_macro import (
 logger = logging.getLogger(__name__)
 
 
-class _Fail(Exception):
-    """Stop the command with *code* and *message* on stderr."""
-
-    def __init__(self, code: int, message: str):
-        super().__init__(message)
-        self.code = code
-
-
-# ── Target database ─────────────────────────────────────────────────────────
-
-def resolve_database(spec: str):
-    """The DatabaseInfo for --db: a name in the database list
-    (case-insensitive), else the path of an OpenSAK database file. Raises
-    _Fail(EXIT_DB_NOT_FOUND) when there is no such database."""
-    from opensak.db.manager import DatabaseInfo, get_db_manager
-
-    manager = get_db_manager()
-    wanted = spec.strip()
-    for db in manager.databases:
-        if db.name.lower() == wanted.lower():
-            if not db.exists:
-                raise _Fail(EXIT_DB_NOT_FOUND,
-                            f"the file of database {db.name!r} is missing: {db.path}")
-            return db
-
-    path = Path(wanted).expanduser()
-    try:
-        path = path.resolve()
-    except OSError:
-        pass
-    for db in manager.databases:
-        if _same_file(db.path, path):
-            if not db.exists:
-                raise _Fail(EXIT_DB_NOT_FOUND, f"database file not found: {path}")
-            return db
-    if path.is_file():
-        if not manager.is_valid_database_file(path):
-            raise _Fail(EXIT_DB_NOT_FOUND, f"not an OpenSAK database: {path}")
-        return DatabaseInfo(path.stem, path)
-
-    names = ", ".join(repr(db.name) for db in manager.databases) or "none"
-    raise _Fail(EXIT_DB_NOT_FOUND,
-                f"no database {spec!r} — give a name from the database list "
-                f"({names}) or the path of a .db file")
-
-
-def _same_file(a: Path, b: Path) -> bool:
-    try:
-        return a.resolve() == b.resolve()
-    except OSError:
-        return a == b
-
-
 # ── Command ─────────────────────────────────────────────────────────────────
 
 def run_import(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     """`opensak import …`; returns the exit code."""
-    from opensak import bootstrap
-
-    # stdout carries the summary only (scripts parse --json): anything else
-    # that print()s along the way (e.g. the settings migration) goes to
-    # stderr, or nowhere with --quiet.
-    with contextlib.ExitStack() as stack:
-        stray = stack.enter_context(open(os.devnull, "w")) if args.quiet else err
-        stack.enter_context(contextlib.redirect_stdout(stray))
-        return _run_logged(args, out, err, bootstrap.init_headless())
+    return run_headless(args, out, err, f"import {args.kind}",
+                        lambda: _run(args, out, err))
 
 
-def _run_logged(args: argparse.Namespace, out: TextIO, err: TextIO, log_path: Path) -> int:
-    command = f"import {args.kind}"
-    logger.info("headless: %s %s", command, vars(args))
-    try:
-        code = _run(args, command, out, err)
-    except _Fail as exc:
-        err.write(f"opensak: {exc}\n")
-        logger.error("headless: %s failed: %s", command, exc)
-        code = exc.code
-    except Exception as exc:
-        logger.exception("headless: %s failed", command)
-        err.write(f"opensak: {command} failed: {exc}\n"
-                  f"opensak: details are in the log file {log_path}\n")
-        code = EXIT_FAILED
-    logger.info("headless: %s finished, exit code %d", command, code)
-    return code
-
-
-def _run(args: argparse.Namespace, command: str, out: TextIO, err: TextIO) -> int:
-    from opensak.db.lock import DatabaseLock
-
+def _run(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     # Check the sources before anything is locked or opened.
     files: list[Path] = []
     if args.kind == "gpx":
@@ -131,55 +41,17 @@ def _run(args: argparse.Namespace, command: str, out: TextIO, err: TextIO) -> in
         try:
             files = collect_files([Path(p) for p in args.paths], recursive=args.recursive)
         except GpxImportError as exc:
-            raise _Fail(EXIT_USAGE, str(exc)) from None
+            raise Fail(EXIT_USAGE, str(exc)) from None
     else:
         source = Path(args.source).expanduser()
         if not source.exists():
-            raise _Fail(EXIT_USAGE, f"{source} does not exist")
+            raise Fail(EXIT_USAGE, f"{source} does not exist")
 
     db = resolve_database(args.db)
-    lock = DatabaseLock(db.path)
-    try:
-        acquired = lock.acquire(args.wait)
-    except OSError as exc:
-        raise _Fail(EXIT_FAILED, str(exc)) from None
-    if not acquired:
-        holder = lock.holder()
-        raise _Fail(EXIT_DB_LOCKED,
-                    f"database {db.name!r} is in use"
-                    + (f" by {holder}" if holder else "")
-                    + " — close it in OpenSAK, or use --wait SECONDS")
-    try:
-        _open(db, err, quiet=args.quiet)
+    with opened_database(db, args.wait, err, quiet=args.quiet):
         if args.kind == "gpx":
             return _import_gpx(args, files, db, out, err)
         return _import_gsak(args, db, out, err)
-    finally:
-        from opensak.db.database import dispose_engine
-        dispose_engine(db.path)
-        lock.release()
-
-
-def _open(db, err: TextIO, quiet: bool) -> None:
-    """Open *db* as this process's database (migrating it, with a backup
-    first, if it comes from an older OpenSAK)."""
-    from opensak.backup.premigration import take_notices
-    from opensak.db.database import init_db
-
-    try:
-        init_db(db_path=db.path)
-    except Exception as exc:
-        logger.exception("headless: could not open %s", db.path)
-        message = f"cannot open database {db.name!r}: {exc}"
-        for notice in take_notices():
-            message += f"\nopensak: it was backed up before the update: {notice.backup_path}"
-        raise _Fail(EXIT_FAILED, message) from None
-    for notice in take_notices():
-        line = (f"database {notice.db_path.name} was updated to the current version; "
-                f"a backup of it is in {notice.backup_path}")
-        logger.info("headless: %s", line)
-        if not quiet:
-            err.write(f"opensak: {line}\n")
 
 
 class _Progress:
@@ -196,14 +68,6 @@ class _Progress:
             self._last = text
             self._err.write(f"{text} …\n")
             self._err.flush()
-
-
-def _emit(args: argparse.Namespace, out: TextIO, lines: list[str], data: dict[str, Any]) -> None:
-    if args.json:
-        out.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-    elif not args.quiet:
-        out.write("\n".join(lines) + "\n")
-    out.flush()
 
 
 # ── GPX ─────────────────────────────────────────────────────────────────────
@@ -259,7 +123,7 @@ def _import_gpx(args: argparse.Namespace, files: list[Path], db, out: TextIO,
         },
         "move_errors": move_errors,
     }
-    _emit(args, out, lines, data)
+    emit(args, out, lines, data)
     return EXIT_OK if report.ok else EXIT_FAILED
 
 
@@ -317,7 +181,7 @@ def _import_gsak(args: argparse.Namespace, db, out: TextIO, err: TextIO) -> int:
         report = run_gsak_import(Path(args.source).expanduser(), options,
                                  progress_cb=progress)
     except GsakImportError as exc:
-        raise _Fail(EXIT_USAGE, str(exc)) from None
+        raise Fail(EXIT_USAGE, str(exc)) from None
 
     data: dict[str, Any] = {
         "command": "import gsak",
@@ -351,5 +215,5 @@ def _import_gsak(args: argparse.Namespace, db, out: TextIO, err: TextIO) -> int:
         ],
         "notes": report.notes,
     }
-    _emit(args, out, report.summary_lines(), data)
+    emit(args, out, report.summary_lines(), data)
     return EXIT_OK if report.ok else EXIT_FAILED

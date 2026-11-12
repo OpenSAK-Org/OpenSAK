@@ -50,7 +50,7 @@ def test_every_exposed_function_is_documented():
     out: list[str] = []
     MacroRuntime(_Host(), output=out.append).run(  # type: ignore[arg-type]
         "for name, value in pairs(opensak) do\n"
-        "  if type(value) == 'table' then\n"
+        "  if type(value) == 'table' and name ~= 'args' then\n"
         "    for sub in pairs(value) do print(name .. '.' .. sub) end\n"
         "  else print(name) end\n"
         "end")

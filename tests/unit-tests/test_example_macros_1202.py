@@ -37,7 +37,7 @@ from opensak.db.database import get_session
 from opensak.db.manager import get_db_manager
 from opensak.db.models import Cache, UserNote, Waypoint
 from opensak.export.file_export import active_database_name
-from opensak.filters.engine import FilterSet, apply_filters_auto
+from opensak.filters.engine import CacheTypeFilter, FilterSet, apply_filters_auto
 from opensak.importer import import_gpx
 from opensak.macro import FolderApproval, MacroRuntime, WriteApproval, db_access
 from opensak.macro.runtime import MacroHost
@@ -514,7 +514,21 @@ def _check_owned_statistics(ctx, out):
     assert "Beer Garden" in page and "Car Museum" in page
 
 
+def _filter_traditionals(ctx: Context) -> None:
+    assert ctx.host.apply_filter(FilterSet().add(CacheTypeFilter(["Traditional Cache"])),
+                                 "Traditionals")
+
+
+def _check_delete_archived(ctx: Context, out: list[str]) -> None:
+    # Whatever the active filter shows, and it stays as it was
+    assert "GCEX005" not in _codes()
+    assert "GCEX001" in _codes()
+    assert "1 archived caches deleted" in out
+    assert ctx.host.filter_name() == "Traditionals"
+
+
 SCENARIOS: dict[str, Scenario] = {
+    "delete_archived.lua": Scenario(setup=_filter_traditionals, check=_check_delete_archived),
     "corrected_coords_form.lua": Scenario(user=_coords_form, check=_check_coords_form),
     "corrected_coords_from_csv.lua": Scenario(setup=_csv_for_the_test_database,
                                               check=_check_csv),
