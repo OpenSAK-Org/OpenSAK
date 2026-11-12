@@ -4,7 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.3] — Unreleased
+## [1.23.0-beta.3] — 2026-11-12
+
+> Headline: **macros without a window, and a Macros toolbar.**
+> `opensak run` runs a macro from Task Scheduler, launchd, cron or
+> systemd, and `opensak export gpx` and `opensak db list|backup|check`
+> export, back up and check databases the same way. Put your favourite
+> macros on the new Macros toolbar with one tick in the Macro manager,
+> and hold Shift when starting a macro to change its saved options.
+> Macro API 5 brings these to macros, together with GSAK's distance,
+> bearing, projection, regex and date functions in SQL — so more GSAK
+> filters now import as working SQL.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
 
 ### Added
 
