@@ -366,22 +366,26 @@
 				<Param name="lon1: number" />
 				<Param name="lat2: number" />
 				<Param name="lon2: number" />
+				<Param name="[method: string]" />
 			</Overload>
 			<Overload retVal="number" descr="Initial bearing from the first point to the second.&#x0a;Returns number — Degrees, 0 = North, clockwise.">
 				<Param name="a: string" />
 				<Param name="b: string" />
+				<Param name="[method: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.coords.distance" func="yes">
-			<Overload retVal="number" descr="Great-circle distance between two points.&#x0a;Returns number — Distance in km.">
+			<Overload retVal="number" descr="Distance between two points: along the great circle, or on the WGS-84 ellipsoid&#x0a;with `&quot;vincenty&quot;`.&#x0a;Returns number — Distance in km.">
 				<Param name="lat1: number" />
 				<Param name="lon1: number" />
 				<Param name="lat2: number" />
 				<Param name="lon2: number" />
+				<Param name="[method: string]" />
 			</Overload>
-			<Overload retVal="number" descr="Great-circle distance between two points.&#x0a;Returns number — Distance in km.">
+			<Overload retVal="number" descr="Distance between two points: along the great circle, or on the WGS-84 ellipsoid&#x0a;with `&quot;vincenty&quot;`.&#x0a;Returns number — Distance in km.">
 				<Param name="a: string" />
 				<Param name="b: string" />
+				<Param name="[method: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.coords.format" func="yes">
@@ -439,11 +443,13 @@
 				<Param name="lon: number" />
 				<Param name="bearing: number" />
 				<Param name="km: number" />
+				<Param name="[method: string]" />
 			</Overload>
 			<Overload retVal="number, number" descr="Waypoint projection: the point a given distance away in a given direction.&#x0a;Returns number, number — Latitude and longitude of the projected point.">
 				<Param name="coords: string" />
 				<Param name="bearing: number" />
 				<Param name="km: number" />
+				<Param name="[method: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.copy_caches" func="yes">

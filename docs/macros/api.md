@@ -127,9 +127,9 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.exit`](#opensakexit) | 3 |
 | [`opensak.coords.parse`](#opensakcoordsparse) | 2, changed in 3 |
 | [`opensak.coords.format`](#opensakcoordsformat) | 2, changed in 3 |
-| [`opensak.coords.distance`](#opensakcoordsdistance) | 2 |
-| [`opensak.coords.bearing`](#opensakcoordsbearing) | 2 |
-| [`opensak.coords.project`](#opensakcoordsproject) | 2 |
+| [`opensak.coords.distance`](#opensakcoordsdistance) | 2, changed in 5 |
+| [`opensak.coords.bearing`](#opensakcoordsbearing) | 2, changed in 5 |
+| [`opensak.coords.project`](#opensakcoordsproject) | 2, changed in 5 |
 | [`opensak.coords.midpoint`](#opensakcoordsmidpoint) | 2 |
 | [`opensak.coords.inside`](#opensakcoordsinside) | 2 |
 | [`opensak.coords.location`](#opensakcoordslocation) | 2 |
@@ -2787,11 +2787,11 @@ print(opensak.coords.format(51.50072, -0.12462, "osgb"))
 ### opensak.coords.distance
 
 ```lua
-opensak.coords.distance(lat1, lon1, lat2, lon2)
-opensak.coords.distance(a, b)
+opensak.coords.distance(lat1, lon1, lat2, lon2 [, method])
+opensak.coords.distance(a, b [, method])
 ```
 
-Great-circle distance between two points.
+Distance between two points: along the great circle, or on the WGS-84 ellipsoid with `"vincenty"`.
 
 Parameters:
 
@@ -2799,25 +2799,27 @@ Parameters:
 - `lon1` (`number`) — Longitude of the first point.
 - `lat2` (`number`) — Latitude of the second point.
 - `lon2` (`number`) — Longitude of the second point.
+- `method` (`string`, optional) — `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 - `a` (`string`) — First point as a coordinate string.
 - `b` (`string`) — Second point as a coordinate string.
 
 Returns `number` — Distance in km.
 
-Since API version 2.
+Since API version 2. Changed in API version 5: added `method`.
 
 Example:
 
 ```lua
 local km = opensak.coords.distance("N47 22.123 E008 32.456",
                                    "N47 23.000 E008 33.000")
+local exact = opensak.coords.distance(47.36872, 8.54093, 46.948, 7.4474, "vincenty")
 ```
 
 ### opensak.coords.bearing
 
 ```lua
-opensak.coords.bearing(lat1, lon1, lat2, lon2)
-opensak.coords.bearing(a, b)
+opensak.coords.bearing(lat1, lon1, lat2, lon2 [, method])
+opensak.coords.bearing(a, b [, method])
 ```
 
 Initial bearing from the first point to the second.
@@ -2828,12 +2830,13 @@ Parameters:
 - `lon1` (`number`) — Longitude of the first point.
 - `lat2` (`number`) — Latitude of the second point.
 - `lon2` (`number`) — Longitude of the second point.
+- `method` (`string`, optional) — `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 - `a` (`string`) — First point as a coordinate string.
 - `b` (`string`) — Second point as a coordinate string.
 
 Returns `number` — Degrees, 0 = North, clockwise.
 
-Since API version 2.
+Since API version 2. Changed in API version 5: added `method`.
 
 Example:
 
@@ -2844,8 +2847,8 @@ local deg = opensak.coords.bearing(47.36872, 8.54093, 47.38333, 8.55)
 ### opensak.coords.project
 
 ```lua
-opensak.coords.project(lat, lon, bearing, km)
-opensak.coords.project(coords, bearing, km)
+opensak.coords.project(lat, lon, bearing, km [, method])
+opensak.coords.project(coords, bearing, km [, method])
 ```
 
 Waypoint projection: the point a given distance away in a given direction.
@@ -2856,11 +2859,12 @@ Parameters:
 - `lon` (`number`) — Longitude in decimal degrees.
 - `bearing` (`number`) — Direction in degrees, 0 = North, clockwise.
 - `km` (`number`) — Distance in km.
+- `method` (`string`, optional) — `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 - `coords` (`string`) — Coordinates, e.g. "N47 22.123 E008 32.456".
 
 Returns `number, number` — Latitude and longitude of the projected point.
 
-Since API version 2.
+Since API version 2. Changed in API version 5: added `method`.
 
 Example:
 
@@ -4840,6 +4844,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
 - [`database_statistics.lua`](../../macros/examples/database_statistics.lua) — Write an HTML page with statistics and maps of all caches in the database
 - [`delete_archived.lua`](../../macros/examples/delete_archived.lua) — Delete the archived caches you haven't found from the active database
+- [`distance_bearing.lua`](../../macros/examples/distance_bearing.lua) — List the caches around any point with distance and compass direction (GSAK's g_Distance, g_Bearing1/2 and g_Project in SQL)
 - [`dnf_alert.lua`](../../macros/examples/dnf_alert.lua) — Filter the unfound caches with several DNFs since their last find, from dnf_stats.lua's data
 - [`dnf_stats.lua`](../../macros/examples/dnf_stats.lua) — Count the DNF logs of every cache into the companion database, for other macros
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — One GPX file per filter
