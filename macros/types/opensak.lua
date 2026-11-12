@@ -1,6 +1,6 @@
 ---@meta
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
--- OpenSAK Lua macro API, version 4. Reference: docs/macros/api.md
+-- OpenSAK Lua macro API, version 5. Reference: docs/macros/api.md
 
 ---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
@@ -1885,6 +1885,27 @@ function opensak.version() end
 ---@param ... any Passed to the macro as `...`.
 ---@return any ... # What the macro returns.
 function opensak.run_macro(file, ...) end
+
+---Whether the macro runs without a window, under `opensak run`, so it can skip its dialogs. False in OpenSAK and with `opensak --run-macro`.
+---
+---Since API version 5.
+---
+---```lua
+---local name = opensak.is_headless() and opensak.args.name
+---    or opensak.input("Name?")
+---```
+---@return boolean # True under `opensak run`.
+function opensak.is_headless() end
+
+---The `--arg key=value` pairs of `opensak run`, with the values as strings. Empty in OpenSAK and with `opensak --run-macro`. A table, not a function.
+---
+---Since API version 5.
+---
+---```lua
+---local days = tonumber(opensak.args.days) or 30
+---```
+---@type table<string, string>
+opensak.args = {}
 
 ---Pause the macro. One pause lasts at most 10 s and all pauses of a run together at most 60 s; a cancelled macro stops at its next pause.
 ---

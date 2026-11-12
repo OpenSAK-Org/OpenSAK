@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!-- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand. -->
-<!-- OpenSAK Lua macro API, version 4. Reference: docs/macros/api.md -->
+<!-- OpenSAK Lua macro API, version 5. Reference: docs/macros/api.md -->
 <NotepadPlus>
 	<AutoComplete language="Lua">
 		<Environment ignoreCase="no" startFunc="(" stopFunc=")" paramSeparator="," terminal=";" additionalWordChar="." />
@@ -225,6 +225,7 @@
 			<Overload retVal="integer" descr="The API version of this OpenSAK build. Each function lists the version it was&#x0a;added in.&#x0a;Returns integer — The API version.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.args" />
 		<KeyWord name="opensak.attach" func="yes">
 			<Overload retVal="string" descr="Attach another OpenSAK database read-only to the SQL functions, under a schema&#x0a;name, so one opensak.sql() or sql_write() statement can read it together with&#x0a;the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN&#x0a;found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays&#x0a;refused. Nothing can write to an attached database: the file is opened read-&#x0a;only, and SQL that would change it is refused. Without `schema`, the name is&#x0a;made from the database name: lower case, `_` for anything but letters and digits&#x0a;(&quot;Found 2020&quot; → `found_2020`). The schema name must be letters, digits and `_`;&#x0a;`main`, `temp`, `macro`, `companion` and names starting with `opensak_` are&#x0a;reserved. The active database cannot be attached, and neither can a database&#x0a;twice. Attaching the same database under the same name again does nothing.&#x0a;SQLite allows 10 attached databases at once, opensak.macro_db() included. The&#x0a;database is not updated to the current schema, so one last opened by an older&#x0a;OpenSAK version may lack columns; `opensak.columns(&quot;&lt;schema&gt;.caches&quot;)` shows&#x0a;what is there. Each attach prints a line in the macro output. Cannot be called&#x0a;inside opensak.transaction(). Stays attached after opensak.switch_database(),&#x0a;unless the database becomes the active one. Everything is detached when the&#x0a;macro ends. A macro started with opensak.run_macro() sees its caller's attached&#x0a;databases; what it attaches or detaches is undone when it returns. The&#x0a;database's companion database (opensak.companion()) is attached with it, read-&#x0a;only, as `&lt;schema&gt;_companion`, if it has one, and detached with it. See Several&#x0a;databases in one query.&#x0a;Returns string — The schema name.">
 				<Param name="name: string" />
@@ -736,6 +737,10 @@
 			<Overload retVal="integer?" descr="Add a waypoint to a cache in the active database; `prefix`, `type` required.&#x0a;OpenSAK updates the cache's waypoint count. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new waypoint's id; nil if the cache is not in the&#x0a;database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.WaypointInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.is_headless" func="yes">
+			<Overload retVal="boolean" descr="Whether the macro runs without a window, under `opensak run`, so it can skip its&#x0a;dialogs. False in OpenSAK and with `opensak --run-macro`.&#x0a;Returns boolean — True under `opensak run`.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.list_dir" func="yes">
