@@ -1992,25 +1992,27 @@ function opensak.coords.parse(text, fmt) end
 ---@overload fun(coords: string, fmt?: string): string
 function opensak.coords.format(lat, lon, fmt) end
 
----Great-circle distance between two points.
+---Distance between two points: along the great circle, or on the WGS-84 ellipsoid with `"vincenty"`.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 5: added `method`.
 ---
 ---```lua
 ---local km = opensak.coords.distance("N47 22.123 E008 32.456",
 ---                                   "N47 23.000 E008 33.000")
+---local exact = opensak.coords.distance(47.36872, 8.54093, 46.948, 7.4474, "vincenty")
 ---```
 ---@param lat1 number Latitude of the first point.
 ---@param lon1 number Longitude of the first point.
 ---@param lat2 number Latitude of the second point.
 ---@param lon2 number Longitude of the second point.
+---@param method? string `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 ---@return number # Distance in km.
----@overload fun(a: string, b: string): number
-function opensak.coords.distance(lat1, lon1, lat2, lon2) end
+---@overload fun(a: string, b: string, method?: string): number
+function opensak.coords.distance(lat1, lon1, lat2, lon2, method) end
 
 ---Initial bearing from the first point to the second.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 5: added `method`.
 ---
 ---```lua
 ---local deg = opensak.coords.bearing(47.36872, 8.54093, 47.38333, 8.55)
@@ -2019,13 +2021,14 @@ function opensak.coords.distance(lat1, lon1, lat2, lon2) end
 ---@param lon1 number Longitude of the first point.
 ---@param lat2 number Latitude of the second point.
 ---@param lon2 number Longitude of the second point.
+---@param method? string `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 ---@return number # Degrees, 0 = North, clockwise.
----@overload fun(a: string, b: string): number
-function opensak.coords.bearing(lat1, lon1, lat2, lon2) end
+---@overload fun(a: string, b: string, method?: string): number
+function opensak.coords.bearing(lat1, lon1, lat2, lon2, method) end
 
 ---Waypoint projection: the point a given distance away in a given direction.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 5: added `method`.
 ---
 ---```lua
 ---local lat, lon = opensak.coords.project("N47 22.123 E008 32.456", 45, 0.25)
@@ -2035,10 +2038,11 @@ function opensak.coords.bearing(lat1, lon1, lat2, lon2) end
 ---@param lon number Longitude in decimal degrees.
 ---@param bearing number Direction in degrees, 0 = North, clockwise.
 ---@param km number Distance in km.
+---@param method? string `"haversine"` (great circle, the default) or `"vincenty"` (WGS-84 ellipsoid, accurate to the millimetre).
 ---@return number # Latitude and longitude of the projected point.
 ---@return number
----@overload fun(coords: string, bearing: number, km: number): number, number
-function opensak.coords.project(lat, lon, bearing, km) end
+---@overload fun(coords: string, bearing: number, km: number, method?: string): number, number
+function opensak.coords.project(lat, lon, bearing, km, method) end
 
 ---The point halfway between two points (along the great circle).
 ---
