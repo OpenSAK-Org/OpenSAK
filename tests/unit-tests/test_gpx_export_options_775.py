@@ -266,7 +266,8 @@ class TestGpx11:
         # the waypoint name stays in the link text.
         children = _root(self._gpx()).findall(f"{GPX11}wpt")[1:]
         for child in children:
-            assert _tags(child) == ["name", "cmt", "desc", "link", "sym", "type"]
+            # #1169: GSAK's child fields go into <extensions>, last.
+            assert _tags(child) == ["name", "cmt", "desc", "link", "sym", "type", "extensions"]
         assert children[0].find(f"{GPX11}link").get("href") == "https://example.com/pk"
         assert children[1].find(f"{GPX11}link").get("href") == ""
         assert children[1].findtext(f"{GPX11}link/{GPX11}text") == "Child S1"

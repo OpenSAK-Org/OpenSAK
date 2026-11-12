@@ -106,6 +106,8 @@ class TestFileExportProfile:
             "max_counts": "caches", "children": "all", "children_only": False,
             "max_logs": 0, "my_logs_always": False, "user_note_log": False,
             "gpx_version": "1.0",
+            # #1169
+            "gsak_fields": True,
         }}
 
 

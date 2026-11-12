@@ -266,6 +266,8 @@ EXPORT_KEYS = frozenset({
     # #775: GPX/GGZ content options (see export.gpx_content.GpxContent)
     "max_counts", "children", "children_only", "max_logs", "my_logs_always",
     "user_note_log", "version",
+    # #1169: GSAK's own fields
+    "gsak_fields",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # opensak.import_gsak(): the keys of its options table, and how many cache
@@ -4918,8 +4920,8 @@ class MacroRuntime:
                 )
             return value
 
-        def _flag(key: str) -> bool:
-            value = opts.get(key, False)
+        def _flag(key: str, default: bool = False) -> bool:
+            value = opts.get(key, default)
             if not isinstance(value, bool):
                 raise MacroError(f"{func}: {key} must be true or false, got {value!r}")
             return value
@@ -4942,6 +4944,7 @@ class MacroRuntime:
             my_logs_always=_flag("my_logs_always"),
             user_note_log=_flag("user_note_log"),
             version=version,
+            gsak_fields=_flag("gsak_fields", True),
         )
 
     @staticmethod
@@ -7467,9 +7470,9 @@ API: tuple[ApiFunction, ...] = (
                     "shown, or when the file exists and `if_exists` says "
                     "skip (or ask, and the user answers No). The content "
                     "keys `children`, `children_only`, `max_logs`, "
-                    "`my_logs_always`, `user_note_log`, `version` and "
-                    "`max_counts` are the options of the export dialog "
-                    "(GPX/GGZ).",
+                    "`my_logs_always`, `user_note_log`, `version`, "
+                    "`gsak_fields` and `max_counts` are the options of the "
+                    "export dialog (GPX/GGZ).",
         example='local path, n = opensak.export_gpx{\n'
                 '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
                 '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'

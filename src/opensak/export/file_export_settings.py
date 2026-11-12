@@ -77,6 +77,7 @@ class FileExportSettings:
     my_logs_always: bool = False # own logs on top of max_logs
     user_note_log: bool = False  # user note as a synthetic first log
     gpx_version: str = "1.0"     # "1.0" | "1.1" (GPX and the GPX inside a GGZ)
+    gsak_fields: bool = True     # #1169: GSAK's full field set (GPX and GGZ)
 
     def content(self) -> GpxContent:
         """The GPX/GGZ content options of these settings."""
@@ -87,6 +88,7 @@ class FileExportSettings:
             my_logs_always=self.my_logs_always,
             user_note_log=self.user_note_log,
             version=self.gpx_version,
+            gsak_fields=self.gsak_fields,
         )
 
     def to_dict(self) -> dict:
@@ -105,6 +107,7 @@ class FileExportSettings:
             "my_logs_always": self.my_logs_always,
             "user_note_log": self.user_note_log,
             "gpx_version": self.gpx_version,
+            "gsak_fields": self.gsak_fields,
         }
 
     @classmethod
@@ -163,6 +166,7 @@ class FileExportSettings:
             my_logs_always=_flag("my_logs_always"),
             user_note_log=_flag("user_note_log"),
             gpx_version=_choice("gpx_version", GPX_VERSIONS),
+            gsak_fields=_flag("gsak_fields"),
         )
 
 
