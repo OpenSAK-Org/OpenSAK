@@ -34,7 +34,10 @@ class FakePage:
 @pytest.fixture
 def fake_settings(monkeypatch):
     s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
-                        use_miles=False, map_draw_dialog_geometry=None)
+                        use_miles=False, map_draw_dialog_geometry=None,
+                        map_clustering=True, map_cluster_radius=40,
+                        map_labels="off",
+                        map_separation_radius_km=0.161, map_separation_circles=False)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.dialogs.map_draw_dialog.get_settings", lambda: s)
     return s
@@ -76,9 +79,9 @@ class TestTemplate:
         assert "if (true) {\n            var drawBtn" in html
         assert "} else if (false && Object.keys(markers)" in html
 
-    def test_geoman_pinned(self):
-        assert "@geoman-io/leaflet-geoman-free@2." in mw_mod.MAP_HTML
-        assert mw_mod.MAP_HTML.count("leaflet-geoman-free@") == 2  # css + js
+    def test_geoman_bundled(self):
+        # Bundled under assets/web/ (#1111), no longer from unpkg.com.
+        assert mw_mod.MAP_HTML.count("opensak://assets/leaflet-geoman/") == 2  # css + js
 
     def test_geoman_lang(self, monkeypatch):
         monkeypatch.setattr(mw_mod, "current_language", lambda: "cs")

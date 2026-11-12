@@ -115,6 +115,8 @@ class Form:
     fields: list[Field] = field(default_factory=list)
     buttons: list[Field] = field(default_factory=list)
     remember: bool = False
+    # The ids of the fields that start with a remembered value
+    remembered: set[str] = field(default_factory=set)
     timeout: Optional[float] = None
     on_open: Any = None
     validate: Any = None

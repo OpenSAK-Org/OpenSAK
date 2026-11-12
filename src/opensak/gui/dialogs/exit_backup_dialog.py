@@ -222,11 +222,25 @@ class ExitBackupController(QObject):
             exit_state.mark_clean_on_close()
             return True
 
-        if mode == exit_state.ON_EXIT_ALWAYS and _folder_usable(self._folder):
+        # #1240: every X days — like Always, but only once the last full
+        # backup is old enough. Otherwise just close; the next exit checks
+        # again. (Not "clean": something changed, so nothing is recorded.)
+        if mode == exit_state.ON_EXIT_EVERY_DAYS:
+            try:
+                due = exit_state.full_backup_due()
+            except Exception:
+                logger.warning("backup: could not read the last backup time", exc_info=True)
+                due = True
+            if not due:
+                return True
+
+        automatic = mode in (exit_state.ON_EXIT_ALWAYS, exit_state.ON_EXIT_EVERY_DAYS)
+        if automatic and _folder_usable(self._folder):
             self._start_backup()
             return None
 
-        # Ask — or Always with a folder that can't be used right now.
+        # Ask — or Always / every X days with a folder that can't be used
+        # right now.
         prompt = self._make_prompt(show_dont_ask=(mode == exit_state.ON_EXIT_ASK))
         prompt.exec()
         choice = prompt.choice()
@@ -307,6 +321,8 @@ class ExitBackupController(QObject):
                         ", ".join(result.skipped))
         try:
             exit_state.record_backup_state()
+            # Every database in the list was backed up: a full backup (#1240).
+            exit_state.record_full_backup()
             exit_state.mark_clean_on_close()
         except Exception:
             logger.warning("backup: could not record the backup state", exc_info=True)

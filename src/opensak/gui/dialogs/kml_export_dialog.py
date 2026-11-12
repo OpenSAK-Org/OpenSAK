@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from ...export.kml import export_kml
 from ...gui.icon import OpenSAKMessageBox as QMessageBox
 from ...lang import tr
-from .widgets import clamp_dialog_height_to_screen
+from .widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from . import make_progress_cb
 
 
@@ -64,7 +64,7 @@ class _ExportWorker(QThread):
 # Dialog
 # ---------------------------------------------------------------------------
 
-class KmlExportDialog(QDialog):
+class KmlExportDialog(WorkerGuardMixin, QDialog):
     def __init__(self, caches: list, parent=None) -> None:
         super().__init__(parent)
         clamp_dialog_height_to_screen(self, parent)
@@ -186,6 +186,10 @@ class KmlExportDialog(QDialog):
             tr("kml_dialog_done_title"),
             tr("kml_dialog_done_msg", count=count, path=path),
         )
+        # Sent from run(), which returns right after it — wait for that, or
+        # the guard (#1265) would refuse to close.
+        if self._worker is not None:
+            self._worker.wait()
         self.accept()
 
     def _on_error(self, message: str) -> None:

@@ -8,6 +8,8 @@
 
 *5 October 2026 (#959): the on-exit setting and the number of automatic backups to keep are in Settings → Advanced → Backups. The prompt's button is "Back Up and Close"; with the setting Always and a backup folder that can't be used (e.g. a drive that isn't connected), the prompt is shown instead.*
 
+*11 November 2026 (#1240): a fourth on-exit choice, `every_days` ("Back up automatically every few days"): like Always, but only when the last full backup is at least `backup.every_days` days old (default 5, 1–365). The time of the last full backup is stored in `backup.last_full_backup` (ISO 8601, UTC). Only a full backup restarts the count — on exit, or from the Backup dialog with every database ticked (a listed database whose file is missing doesn't count against it); a backup of some databases, or before maintenance, doesn't. A failed or cancelled backup doesn't either. With an unusable folder the prompt is shown, as for Always.*
+
 *6 October 2026 (#986): the Welcome Wizard has a backup folder page after the database folder page, and Settings → Advanced → Folders has a backup folder row. Both check the folder against the install and database folders as entered on screen, before they are saved. Skip leaves `backup.dir` unset; a folder is only stored when the user finishes the wizard or changes the row.*
 
 *6 October 2026 (#988): "once a backup folder is set" means `backup.dir` is set explicitly and the folder passes `folder_available()` and `validate_backup_dir()` at migration time; otherwise the copy goes next to the database. File names carry the first 8 characters of `db_uuid`, or of a hash of the database path for a database from before #659, so two `Default.db` from different folders don't collide. `folder_available()` moved from the exit dialog into `backupset.py`.*
@@ -184,15 +186,17 @@ A small dialog: the backup folder (with Browse), all databases checked by defaul
 
 **On exit**
 
-Setting `backup.on_exit` = Ask (default) / Always / Never, in Settings and remembered from the prompt's "Don't ask again" box.
+Setting `backup.on_exit` = Ask (default) / Always / Never / every X days (#1240), in Settings and remembered from the prompt's "Don't ask again" box (Always or Never).
 
 ```mermaid
 flowchart TD
     A[Window is closed] --> B{On exit setting?}
     B -- Never --> Z[Window closes]
-    B -- Ask or Always --> C{Anything changed?}
+    B -- "Ask, Always or every X days" --> C{Anything changed?}
     C -- nothing changed --> Z
-    C -- yes --> D["Ask: back up now?<br/><small>skipped when the setting is Always</small>"]
+    C -- yes --> X{"Every X days:<br/>last full backup<br/>X days old?"}
+    X -- "not yet" --> Z
+    X -- "yes, or another setting" --> D["Ask: back up now?<br/><small>skipped when the setting is Always or every X days</small>"]
     D -- Not now --> Z
     D -- Back up --> E["Back up databases + settings<br/><small>progress per database, Cancel</small>"]
     E -- Cancel --> Z

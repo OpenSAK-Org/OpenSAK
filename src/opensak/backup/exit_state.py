@@ -19,6 +19,14 @@ current state is recorded in ``backup.last_state`` (opensak.json):
 opensak.json itself is left out: OpenSAK writes the window geometry to it on
 every exit.
 
+**Every X days (#1240).** With ``backup.on_exit`` = ``every_days`` the close
+backs up without asking, but only when something changed *and* at least
+``backup.every_days`` days have passed since the last full backup
+(``backup.last_full_backup``, an ISO 8601 UTC time). Only a full backup — all
+databases in the list, on exit or from the Backup dialog — restarts the count;
+a backup of one database (e.g. before maintenance) doesn't. A failed or
+cancelled backup doesn't either, so it is tried again at the next exit.
+
 **Why an empty WAL is ignored, and why the state is recorded again after
 close.** When the last connection to a database closes, SQLite checkpoints
 the WAL into the ``.db`` file, which changes its size and modification time
@@ -38,6 +46,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -51,8 +60,16 @@ LAST_STATE_KEY = "backup.last_state"
 ON_EXIT_ASK = "ask"
 ON_EXIT_ALWAYS = "always"
 ON_EXIT_NEVER = "never"
-ON_EXIT_CHOICES = (ON_EXIT_ASK, ON_EXIT_ALWAYS, ON_EXIT_NEVER)
+ON_EXIT_EVERY_DAYS = "every_days"   # #1240
+ON_EXIT_CHOICES = (ON_EXIT_ASK, ON_EXIT_ALWAYS, ON_EXIT_NEVER, ON_EXIT_EVERY_DAYS)
 DEFAULT_ON_EXIT = ON_EXIT_ASK
+
+# #1240: days between automatic backups, and when the last full backup ran.
+EVERY_DAYS_KEY = "backup.every_days"
+LAST_FULL_BACKUP_KEY = "backup.last_full_backup"
+DEFAULT_EVERY_DAYS = 5
+MIN_EVERY_DAYS = 1
+MAX_EVERY_DAYS = 365
 
 # Settings folders (in the install folder) whose changes count. icons/ is
 # backed up too, but isn't something a user edits in a session.
@@ -88,6 +105,76 @@ def set_on_exit(value: str) -> None:
     if value not in ON_EXIT_CHOICES:
         raise ValueError(f"unknown backup.on_exit value: {value!r}")
     get_store().set(ON_EXIT_KEY, value)
+
+
+# ── Every X days (#1240) ──────────────────────────────────────────────────────
+
+def get_every_days() -> int:
+    """Days between automatic backups; anything invalid reads as the default."""
+    from opensak.settings_store import get_store
+    value = get_store().get(EVERY_DAYS_KEY, DEFAULT_EVERY_DAYS)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return DEFAULT_EVERY_DAYS
+    return min(max(value, MIN_EVERY_DAYS), MAX_EVERY_DAYS)
+
+
+def set_every_days(days: int) -> None:
+    """Store the number of days (raises ValueError outside 1–365)."""
+    from opensak.settings_store import get_store
+    if isinstance(days, bool) or not isinstance(days, int) \
+            or not MIN_EVERY_DAYS <= days <= MAX_EVERY_DAYS:
+        raise ValueError(f"backup.every_days must be {MIN_EVERY_DAYS}–{MAX_EVERY_DAYS}: {days!r}")
+    get_store().set(EVERY_DAYS_KEY, days)
+
+
+def get_last_full_backup() -> Optional[datetime]:
+    """When the last full backup finished (UTC), or None if never/unreadable."""
+    from opensak.settings_store import get_store
+    value = get_store().get(LAST_FULL_BACKUP_KEY)
+    if not isinstance(value, str):
+        return None
+    try:
+        when = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when
+
+
+def record_full_backup(now: Optional[datetime] = None) -> None:
+    """A full backup just succeeded: restart the every-X-days count."""
+    from opensak.settings_store import get_store
+    when = now or datetime.now(timezone.utc)
+    get_store().set(LAST_FULL_BACKUP_KEY, when.astimezone(timezone.utc).isoformat())
+
+
+def full_backup_due(now: Optional[datetime] = None) -> bool:
+    """
+    True when at least ``get_every_days()`` days have passed since the last
+    full backup, or there has been none. A last backup in the future (the
+    clock was changed) counts as due, so backups can't stop for good.
+    """
+    last = get_last_full_backup()
+    if last is None:
+        return True
+    now = now or datetime.now(timezone.utc)
+    if last > now:
+        return True
+    return now - last >= timedelta(days=get_every_days())
+
+
+def is_full_backup(backed_up: Iterable[Any]) -> bool:
+    """
+    True when *backed_up* contains every database in the database list. A
+    listed database whose file is missing can't be backed up, so it doesn't
+    count against it (as in record_backup_state()).
+    """
+    included = {_key(db.path) for db in backed_up}
+    return all(
+        _key(db.path) in included or not Path(db.path).is_file()
+        for db in _listed_databases()
+    )
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────

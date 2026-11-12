@@ -40,18 +40,17 @@ def _release_defaults(prerelease: bool) -> dict[str, bool]:
     return {
         "reverse-geocoding": True,
         "map-popout": True,
-        # Lua macros (#938): on in beta builds only, so the POC cannot reach a
-        # stable release before the API (#938 step 4) is settled.
-        "lua-macros": prerelease,
-        # Macros changing the active database (opensak.update, insert, sql_write,
-        # transaction, ...): beta-only on their own, so the rest of the macro
-        # system can go stable while the write API is still settling.
-        "lua-macro-write": prerelease,
-        # Companion database per cache database (#1034): on in beta builds only,
-        # so it can be tested there before macros and custom fields go stable.
-        "companion-db": prerelease,
-        # Macros contacting web sites (opensak.get_url, #1079): beta-only on its
-        # own, so it does not hold up the stable macro release.
+        # Lua macros (#938): stable since v1.22.0, macro API 4 (#1190).
+        "lua-macros": True,
+        # Macros changing the active database (opensak.update, insert,
+        # sql_write, transaction, ...): stable since v1.22.0 (#1190).
+        "lua-macro-write": True,
+        # Companion database per cache database (#1034), which custom fields
+        # (#1028) live in: stable since v1.22.0 (#1190).
+        "companion-db": True,
+        # Macros contacting web sites (opensak.get_url, #1079): beta-only for
+        # one more release cycle (v1.22.0 plan, D1), so it does not hold up
+        # the stable macro release.
         "lua-macro-net": prerelease,
     }
 

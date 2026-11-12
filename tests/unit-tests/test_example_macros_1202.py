@@ -37,7 +37,7 @@ from opensak.db.database import get_session
 from opensak.db.manager import get_db_manager
 from opensak.db.models import Cache, UserNote, Waypoint
 from opensak.export.file_export import active_database_name
-from opensak.filters.engine import FilterSet, apply_filters_auto
+from opensak.filters.engine import CacheTypeFilter, FilterSet, apply_filters_auto
 from opensak.importer import import_gpx
 from opensak.macro import FolderApproval, MacroRuntime, WriteApproval, db_access
 from opensak.macro.runtime import MacroHost
@@ -451,7 +451,7 @@ def _gsak_folder(ctx):
     import os
     gsak = Path(os.environ["APPDATA"]) / "gsak"
     helpers = _load("test_gsak_importer.py")
-    for name, codes in (("AllCH", ("GC1A", "GC1B")), ("Holidays", ("GC2A",))):
+    for name, codes in (("Found", ("GC1A", "GC1B")), ("Holidays", ("GC2A",))):
         db = gsak / "data" / name / "sqlite.db3"
         db.parent.mkdir(parents=True)
         helpers._make_gsak_db(db, caches=[{"Code": c} for c in codes],
@@ -465,7 +465,7 @@ def _gsak_folder(ctx):
 
 def _check_gsak(ctx, out):
     assert out[-1] == "Total: 3 new and 0 updated caches, 0 errors"
-    assert _codes("AllCH") == ["GC1A", "GC1B"]
+    assert _codes("Found") == ["GC1A", "GC1B"]
     assert _codes("Holidays") == ["GC2A"]
     assert ctx.host.asked_folders                # it asked for the GSAK folder
 
@@ -482,6 +482,20 @@ def _check_new_since(ctx, out):
     assert re.fullmatch(r"5 unfound caches updated since \S+ UTC", out[0])
     assert ctx.host.applied == [(ctx.host.label, 5)]
     assert ctx.host.label.startswith("New since ")
+
+
+def _quick_filter_first_run(ctx):
+    _, out = ctx.run("quick_filter.lua")       # nothing saved: the form opens
+    assert [k[0] for k, _ in ctx.host.forms] == ["Quick filter options"]
+    ctx.host.applied.clear()
+
+
+def _check_quick_filter(ctx, out):
+    # Without Shift it runs with the saved options and asks nothing (#1038).
+    assert len(ctx.host.forms) == 1
+    [(label, n)] = ctx.host.applied
+    assert label == "Quick filter" and n > 0
+    assert out == [f"{n} caches: Traditional, difficulty up to 2.5, unfound"]
 
 
 def _puzzle(c) -> None:
@@ -540,7 +554,21 @@ def _check_owned_statistics(ctx, out):
     assert "Beer Garden" in page and "Car Museum" in page
 
 
+def _filter_traditionals(ctx: Context) -> None:
+    assert ctx.host.apply_filter(FilterSet().add(CacheTypeFilter(["Traditional Cache"])),
+                                 "Traditionals")
+
+
+def _check_delete_archived(ctx: Context, out: list[str]) -> None:
+    # Whatever the active filter shows, and it stays as it was
+    assert "GCEX005" not in _codes()
+    assert "GCEX001" in _codes()
+    assert "1 archived caches deleted" in out
+    assert ctx.host.filter_name() == "Traditionals"
+
+
 SCENARIOS: dict[str, Scenario] = {
+    "delete_archived.lua": Scenario(setup=_filter_traditionals, check=_check_delete_archived),
     "corrected_coords_form.lua": Scenario(user=_coords_form, check=_check_coords_form),
     "corrected_coords_from_csv.lua": Scenario(setup=_csv_for_the_test_database,
                                               check=_check_csv),
@@ -556,6 +584,7 @@ SCENARIOS: dict[str, Scenario] = {
     "new_since_last_run.lua": Scenario(setup=_first_run_then_import, check=_check_new_since),
     "owned_statistics.lua": Scenario(check=_check_owned_statistics),
     "puzzle_helper.lua": Scenario(user=_puzzle, check=_check_puzzle),
+    "quick_filter.lua": Scenario(setup=_quick_filter_first_run, check=_check_quick_filter),
     "refile_by_country.lua": Scenario(check=_check_refile),
     "region_coverage.lua": Scenario(check=_check_region_coverage),
     "sql_report.lua": Scenario(check=_check_sql_report),

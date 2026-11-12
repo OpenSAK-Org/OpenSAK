@@ -9,6 +9,13 @@ OS's own tools (Task Scheduler, cron, systemd timers, launchd):
                         [--move-imported-to DIR]
     opensak import gsak <zip|folder|sqlite.db3> --db "My Caches"
                         [--if-exists merge|overwrite]
+    opensak run <macro.lua> [--db "My Caches"] [--arg key=value ...] [--yes]
+                        [--allow-write] [--allow-folder DIR ...]
+                        [--log-file FILE]
+    opensak export gpx  --db "My Caches" --filter "Saved filter" --out FILE
+    opensak db list
+    opensak db backup <name> [--out DIR]
+    opensak db check <name>
 
 The choice is made in entry() (run.py and the `opensak` console script),
 before anything imports QtWidgets or opensak.gui: a headless run needs no
@@ -29,7 +36,7 @@ shell gets their output and exit code.
 Exit codes are those of `opensak --run-macro` (opensak.utils.run_macro):
 0 success, 1 the import failed or had errors, 2 bad arguments or a missing
 source, 5 database not found, 6 database in use (open in OpenSAK, or
-another run), 130 interrupted.
+another run), 7 the macro needs a dialog, 130 interrupted.
 """
 
 from __future__ import annotations
@@ -38,9 +45,10 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 # First arguments that select a headless command.
-COMMANDS = ("import",)
+COMMANDS = ("import", "run", "export", "db")
 
 # The Windows console program and the windowed program next to it (opensak.spec).
 CLI_EXE = "opensak-cli.exe"
@@ -96,25 +104,30 @@ def hand_off_to_gui_exe(argv: list[str]) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--db", required=True, metavar="NAME|PATH",
-        help="the OpenSAK database to import into: its name in the database "
-             "list, or the path of its .db file. It must exist — a database "
-             "is never created.")
-    common.add_argument(
-        "--wait", type=float, default=0, metavar="SECONDS",
-        help="if the database is open in OpenSAK or used by another run, wait "
-             "up to this long for it to be released (default: fail at once)")
-    out = common.add_mutually_exclusive_group()
+    db_help = ("its name in the database list, or the path of its .db file. "
+               "It must exist — a database is never created.")
+
+    output = argparse.ArgumentParser(add_help=False)
+    out = output.add_mutually_exclusive_group()
     out.add_argument("--json", action="store_true",
                      help="write the summary to stdout as JSON")
     out.add_argument("--quiet", action="store_true",
                      help="write nothing to stdout; errors still go to stderr "
                           "and everything to the log file")
     # Feature flags, read by opensak.utils.flags from sys.argv itself.
-    common.add_argument("--feature", action="append", metavar="NAME=VALUE",
+    output.add_argument("--feature", action="append", metavar="NAME=VALUE",
                         help=argparse.SUPPRESS)
+
+    wait = argparse.ArgumentParser(add_help=False)
+    wait.add_argument(
+        "--wait", type=float, default=0, metavar="SECONDS",
+        help="if the database is open in OpenSAK or used by another run, wait "
+             "up to this long for it to be released (default: fail at once)")
+
+    common = argparse.ArgumentParser(add_help=False, parents=[wait, output])
+    common.add_argument(
+        "--db", required=True, metavar="NAME|PATH",
+        help=f"the OpenSAK database to import into: {db_help}")
 
     parser = argparse.ArgumentParser(
         prog="opensak",
@@ -122,7 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
                     "runs. Without a command OpenSAK starts as usual.",
         epilog="The summary also goes to OpenSAK's log file. Exit codes: 0 ok, "
                "1 failed or finished with errors, 2 bad arguments, 5 database "
-               "not found, 6 database in use, 130 interrupted.",
+               "not found, 6 database in use, 7 the macro needs a dialog, "
+               "130 interrupted.",
     )
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
@@ -167,15 +181,89 @@ def build_parser() -> argparse.ArgumentParser:
     gsak.add_argument("--locations", choices=("skip", "overwrite"),
                       help="also import GSAK's user locations; skip or overwrite "
                            "those with the same name (default: not imported)")
+
+    run = commands.add_parser(
+        "run", parents=[wait, output], help="run a Lua macro without a window",
+        description="Run a Lua macro without a window. A macro that needs a "
+                    "dialog nobody can answer stops with exit code 7.")
+    run.add_argument("macro", metavar="MACRO", help="the macro's .lua file, or the file name or Name of a macro in "
+                          "the macros folder")
+    run.add_argument("--db", metavar="NAME|PATH",
+                     help=f"the OpenSAK database to run it on: {db_help} "
+                          "(default: the active database)")
+    run.add_argument("--arg", action="append", default=[], dest="macro_args",
+                     metavar="KEY=VALUE",
+                     help="a value for opensak.args and for the macro's dialogs "
+                          "(repeat for more)")
+    run.add_argument("--yes", action="store_true",
+                     help="answer the dialogs --arg doesn't answer with their default")
+    run.add_argument("--allow-write", action="store_true",
+                     help="let the macro change databases although it has no "
+                          "\"Always\" approval for its current code")
+    run.add_argument("--allow-folder", action="append", default=[], metavar="DIR",
+                     help="let the macro read and write this folder during this "
+                          "run (repeat for more)")
+    run.add_argument("--log-file", metavar="FILE",
+                     help="also write the macro's output to this file")
+
+    export = commands.add_parser("export", help="export caches to a file",
+                                 description="Export caches of a database.")
+    formats = export.add_subparsers(dest="kind", metavar="FORMAT", required=True)
+    export_gpx = formats.add_parser(
+        "gpx", parents=[wait, output], help="export a saved filter's caches as GPX",
+        description="Export the caches of a saved filter as GPX, with the same "
+                    "code as the export in OpenSAK.")
+    export_gpx.add_argument("--db", required=True, metavar="NAME|PATH",
+                            help=f"the OpenSAK database to export from: {db_help}")
+    export_gpx.add_argument("--filter", required=True, metavar="NAME",
+                            help="the saved filter to export")
+    export_gpx.add_argument("--out", required=True, metavar="FILE",
+                            help="the GPX file to write")
+
+    database = commands.add_parser("db", help="list, back up or check databases",
+                                   description="Work with OpenSAK's databases.")
+    actions = database.add_subparsers(dest="kind", metavar="ACTION", required=True)
+    actions.add_parser("list", parents=[output], help="list the databases",
+                       description="List the databases OpenSAK knows.")
+    backup = actions.add_parser(
+        "backup", parents=[output], help="back up a database",
+        description="Make the same backup set as OpenSAK: the database, its "
+                    "companion database, settings and macros.")
+    backup.add_argument("name", metavar="NAME|PATH", help=f"the database to back up: {db_help}")
+    backup.add_argument("--out", metavar="DIR",
+                        help="the folder for the backup (default: the backup folder)")
+    check = actions.add_parser(
+        "check", parents=[output], help="check a database's integrity",
+        description="Run the integrity check on a database. The exit code is "
+                    "not 0 if the check fails.")
+    check.add_argument("name", metavar="NAME|PATH", help=f"the database to check: {db_help}")
     return parser
+
+
+def _parse_macro_args(pairs: list[str]) -> Optional[dict[str, str]]:
+    """The --arg KEY=VALUE pairs as a dict (a repeated key: the last one
+    counts); None if one has no KEY=."""
+    result: dict[str, str] = {}
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if not separator or not key.strip():
+            return None
+        result[key.strip()] = value
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse *argv*; raises SystemExit (code 2, or 0 for --help) as argparse
     does."""
-    args = build_parser().parse_args(argv)
-    if args.wait < 0:
-        build_parser().error("--wait expects seconds ≥ 0")
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if getattr(args, "wait", 0) < 0:
+        parser.error("--wait expects seconds ≥ 0")
+    if args.command == "run":
+        macro_args = _parse_macro_args(args.macro_args)
+        if macro_args is None:
+            parser.error("--arg expects KEY=VALUE")
+        args.macro_args = macro_args
     return args
 
 
@@ -188,8 +276,17 @@ def main(argv: list[str]) -> int:
         args = parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 0
-    from opensak.cli.import_cmd import run_import
     try:
+        if args.command == "export":
+            from opensak.cli.export_cmd import run_export
+            return run_export(args, out, err)
+        if args.command == "db":
+            from opensak.cli.db_cmd import run_db
+            return run_db(args, out, err)
+        if args.command == "run":
+            from opensak.cli.run_cmd import run_macro
+            return run_macro(args, out, err)
+        from opensak.cli.import_cmd import run_import
         return run_import(args, out, err)
     except KeyboardInterrupt:
         err.write("opensak: interrupted\n")

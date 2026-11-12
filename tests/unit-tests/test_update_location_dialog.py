@@ -437,17 +437,20 @@ class TestUpdateLocationDialog:
         dlg._request_cancel()
         dlg._worker.request_cancel.assert_called_once()
 
-    def test_close_event_cancels_running_worker(self, qtbot, db):
+    def test_close_cancels_running_worker_and_stays_open(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
+        dlg.show()
         worker = MagicMock()
         worker.isRunning.return_value = True
         dlg._worker = worker
         dlg.close()
         worker.request_cancel.assert_called_once()
-        # wait() must be called with no timeout so the dialog never destroys
-        # a still-running QThread (which causes SIGABRT).
-        worker.wait.assert_called_once_with()
+        # #1265: the dialog stays open until the worker is done, so it never
+        # destroys a still-running QThread (SIGABRT) — without blocking on
+        # wait() the way closeEvent() used to.
+        assert dlg.isVisible()
+        worker.wait.assert_not_called()
 
     def test_start_connects_finished_to_delete_later(self, qtbot, db, monkeypatch):
         # finished must be connected to deleteLater so Qt cleans up the C++
