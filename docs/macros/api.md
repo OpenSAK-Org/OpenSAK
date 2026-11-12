@@ -2,7 +2,7 @@
 
 # OpenSAK Lua macro API
 
-API version: **4** (`opensak.api_version()`).
+API version: **5** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. Both belong to this macro alone: another macro, also one started with `opensak.run_macro()`, is asked on its own, and a macro changed outside OpenSAK's macro editor is asked once whether it may have its folders again. An unsaved macro can be allowed a folder for one run only. OpenSAK's own settings and database files are never accessible.
 
@@ -119,6 +119,8 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.waypoint_type`](#opensakwaypointtype) | 3 |
 | [`opensak.version`](#opensakversion) | 2 |
 | [`opensak.run_macro`](#opensakrunmacro) | 3 |
+| [`opensak.is_headless`](#opensakisheadless) | 5 |
+| [`opensak.args`](#opensakargs) | 5 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
 | [`opensak.exit`](#opensakexit) | 3 |
@@ -2602,6 +2604,43 @@ local count = opensak.run_macro("lib/count_unfound.lua", "Zürich")
 --   return opensak.filter{ found = false, state = area }
 ```
 
+### opensak.is_headless
+
+```lua
+opensak.is_headless()
+```
+
+Whether the macro runs without a window, under `opensak run`, so it can skip its dialogs. False in OpenSAK and with `opensak --run-macro`.
+
+Returns `boolean` — True under `opensak run`.
+
+Since API version 5.
+
+Example:
+
+```lua
+local name = opensak.is_headless() and opensak.args.name
+    or opensak.input("Name?")
+```
+
+### opensak.args
+
+```lua
+opensak.args
+```
+
+The `--arg key=value` pairs of `opensak run`, with the values as strings. Empty in OpenSAK and with `opensak --run-macro`. A table, not a function.
+
+Type `table<string, string>` — The values by key.
+
+Since API version 5.
+
+Example:
+
+```lua
+local days = tonumber(opensak.args.days) or 30
+```
+
 ### opensak.sleep
 
 ```lua
@@ -4739,6 +4778,35 @@ Like folders, the answer belongs to this macro and its code: web sites allowed a
 
 Requests are GET only, with the User-Agent `OpenSAK-Macro/<version>` and without cookies. The system's proxy settings apply.
 
+## Running without a window
+
+`opensak run <macro.lua> --db NAME` runs a macro with no window and no display, e.g. from a scheduler. `opensak run --help` lists the options; the User Guide has examples for each operating system. `opensak.is_headless()` tells a macro it runs this way, `opensak.args` holds the `--arg key=value` pairs, and the header `Headless: no` makes `opensak run` refuse the macro.
+
+Nothing ever waits for an answer. What a macro asks is answered from the command line, otherwise the run stops with exit code 7, which `pcall` can't catch:
+
+| Function | Without a window |
+|---|---|
+| `filter`, `sort`, `count`, ... | The filter is kept in memory and evaluated against the database. |
+| `current`, `selected` | `nil`, and an empty list. |
+| `select` | Returns `false`. |
+| `print`, `message`, `log` | Written to stdout, the log file and `--log-file`. |
+| `progress` | Written to stderr, the log file and `--log-file`. |
+| `confirm` | `--arg` with the message as key (`yes` or `no`), else yes with `--yes`. |
+| `input` | `--arg` with the prompt as key, else the default with `--yes`. |
+| `choose` | `--arg` with the prompt as key, else the default with `--yes`, if there is one. |
+| `form` | `--arg` with the field id as key, then the values remembered with `remember = true`, then the defaults with `--yes`. It closes as with its default button. |
+| `choose_file`, `choose_folder` | Only `--arg` with the title as key. |
+| `open`, `refresh` | Do nothing. A file the macro didn't write needs `--yes`, as `open` asks about it first. |
+| `set_center` | Not available: an error. |
+| `run_macro` | The called macro runs under the same rules. |
+| `switch_database`, `attach`, `copy_caches`, `move_caches`, the targets an import names | Take the database's lock until the run ends; a database in use stops the run with exit code 6. `switch_database` lasts for this run only. |
+
+**Writes** need an "Always" approval for the macro's current code, or `--allow-write`, which stores nothing. A macro edited since its approval counts as not approved. Otherwise its first write stops the run with exit code 7, and that write isn't made.
+
+**Folders** need to be approved for the macro's current code, listed in Settings, or given with `--allow-folder DIR`, for this run only. Otherwise the run stops with exit code 7. OpenSAK's own data is never available.
+
+**Web sites** follow the same rule as in OpenSAK, but a site that isn't approved yet fails, as nobody can be asked. The declaration of `Permissions` and `Network` isn't shown.
+
 ## Example macros
 
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
@@ -4746,6 +4814,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — Enter or remove the corrected coordinates of the selected cache
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
 - [`database_statistics.lua`](../../macros/examples/database_statistics.lua) — Write an HTML page with statistics and maps of all caches in the database
+- [`delete_archived.lua`](../../macros/examples/delete_archived.lua) — Delete the archived caches you haven't found from the active database
 - [`dnf_alert.lua`](../../macros/examples/dnf_alert.lua) — Filter the unfound caches with several DNFs since their last find, from dnf_stats.lua's data
 - [`dnf_stats.lua`](../../macros/examples/dnf_stats.lua) — Count the DNF logs of every cache into the companion database, for other macros
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — One GPX file per filter
@@ -4769,12 +4838,14 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 -- Name: Find easy traditionals
 -- Author: Jane Doe
 -- Version: 1.0
--- Requires-API: 4
+-- Requires-API: 5
 -- Description: Filters for unfound traditional caches with low difficulty.
 -- Permissions: none
 ```
 
 Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read.
+
+`Headless: no` says the macro can't run without a window: `opensak run` refuses it before it starts, with exit code 7. Without the key, or with any other value, it counts as `yes`. A macro that can do without its dialogs can check `opensak.is_headless()`.
 
 From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, or a function key) that runs it from the main window. The output then goes to the manager's output pane.
 
