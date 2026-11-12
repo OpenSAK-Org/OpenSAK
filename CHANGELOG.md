@@ -66,6 +66,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   compass direction and the great-circle/Vincenty difference.
   Contributed by nagisml.
 
+- **GSAK's `g_RegEx()` and `g_GcDate()` in SQL (#1261)** — Where
+  clauses, macro SQL and imported GSAK filters can use
+  `g_RegEx(pattern, text)` (1 if the regular expression matches anywhere
+  in the text, ignoring case, otherwise 0) and `g_GcDate(date [, time])` /
+  `g_GcDate2(date, time, code)` (a log's date as `YYYY-MM-DD`).
+  Contributed by nagisml.
+
 ## [1.23.0-beta.2] — 2026-11-11
 
 > Headline: **the map works offline.** Leaflet is bundled and the tiles
