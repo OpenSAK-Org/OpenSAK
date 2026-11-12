@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "kind": "manual",
+  "created": "2026-01-02T12:00:00Z",
+  "opensak_version": "1.22.0",
+  "databases": [
+    {
+      "name": "Default",
+      "file": "databases/Default.db",
+      "db_uuid": "8762503195c04e0e962a4ce2cdefcba9",
+      "schema_version": 28,
+      "size_bytes": 143360
+    },
+    {
+      "name": "Denmark",
+      "file": "databases/Denmark.db",
+      "db_uuid": "a7ebbd1ccc9241d7909934e921bc0999",
+      "schema_version": 28,
+      "size_bytes": 143360
+    },
+    {
+      "name": "Malta Trip",
+      "file": "databases/Malta Trip.db",
+      "db_uuid": "2d3a57668546441ca5c53c16c584ff5b",
+      "schema_version": 28,
+      "size_bytes": 143360
+    }
+  ],
+  "macro_databases": [],
+  "settings": true
+}

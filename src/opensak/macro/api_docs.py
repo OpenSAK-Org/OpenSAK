@@ -58,6 +58,7 @@ from opensak.macro.metadata import (
     read_metadata,
 )
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
+from opensak.utils.flags import BETA_ONLY
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
 DOC_PATH = Path("docs/macros/api.md")
@@ -169,6 +170,11 @@ def _header_section() -> list[str]:
         "`opensak.api_version()` the macro works with: the manager marks a "
         "macro that needs a newer one and asks before running it. Only the "
         "comment lines before the first line of code are read.",
+        "",
+        "`Headless: no` says the macro can't run without a window: `opensak run` "
+        "refuses it before it starts, with exit code 7. Without the key, or with "
+        "any other value, it counts as `yes`. A macro that can do without its "
+        "dialogs can check `opensak.is_headless()`.",
         *_deprecated_keys_section(),
         "",
         "From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, "
@@ -414,14 +420,6 @@ def _forms_section() -> list[str]:
     return lines
 
 
-# Appended to the functions that need the lua-macro-write feature flag
-_WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
-               "is on, as it is in beta builds; check with `if opensak.update then`. "
-               "Changing caches needs the user's approval, given per macro "
-               "(see Changing caches).")
-# Appended to those that need the flag but change nothing (opensak.attach)
-_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
-         "is on, as it is in beta builds; check with `if opensak.attach then`.")
 # Appended to the functions that need the lua-macro-net feature flag
 _NET_BETA = ("Beta: only available while the `lua-macro-net` feature flag "
              "is on, as it is in beta builds; check with `if opensak.get_url then`. "
@@ -429,18 +427,22 @@ _NET_BETA = ("Beta: only available while the `lua-macro-net` feature flag "
              "(see Web sites).")
 
 
-# Appended to those that need the companion-db feature flag
-_COMPANION_BETA = ("Beta: only available while the `companion-db` feature flag "
-                   "is on (not yet in release builds); check with "
-                   "`if opensak.companion then`.")
-
-
 def _beta_note(func: ApiFunction) -> str | None:
-    if func.companion:
-        return _COMPANION_BETA
+    """The note for a function a stable release does not have: one whose
+    feature flag is off in stable builds (flags.BETA_ONLY), None otherwise.
+    Based on the stable defaults, not on this build's flags, so the docs are
+    the same whichever build generates them."""
+    if func.flag not in BETA_ONLY:
+        return None
     if func.net:
         return _NET_BETA
-    return _WRITE_BETA if func.write else _BETA if func.beta else None
+    return (f"Beta: only available while the `{func.flag}` feature flag is "
+            f"on, as it is in beta builds; check with `if opensak.{func.name} then`.")
+
+
+def _flag_note(flag: str, text: str) -> list[str]:
+    """*text* and a blank line if *flag* is off in stable builds, else nothing."""
+    return [text, ""] if flag in BETA_ONLY else []
 
 
 def _companion_section() -> list[str]:
@@ -448,8 +450,8 @@ def _companion_section() -> list[str]:
         "",
         "## The companion database",
         "",
-        "Beta: only available while the `companion-db` feature flag is on.",
-        "",
+        *_flag_note("companion-db", "Beta: only available while the "
+                    "`companion-db` feature flag is on, as it is in beta builds."),
         "Every OpenSAK database can have a companion database next to it "
         "(`Found.db` → `Found.companion.db3`) for data that doesn't fit the "
         "cache tables: per-cache data a macro collects (FTF information, "
@@ -511,8 +513,8 @@ def _custom_fields_section() -> list[str]:
         "",
         "## Custom fields",
         "",
-        "Beta: only available while the `companion-db` feature flag is on.",
-        "",
+        *_flag_note("companion-db", "Beta: only available while the "
+                    "`companion-db` feature flag is on, as it is in beta builds."),
         "Custom fields are user-defined fields per cache, as in GSAK: the "
         "user defines them in Tools → Custom fields, the GSAK import brings "
         "them along, and a macro can define its own with "
@@ -552,9 +554,10 @@ def _attach_section() -> list[str]:
         "",
         "## Several databases in one query",
         "",
-        "Beta: `opensak.attach()`, `opensak.detach()` and `opensak.attached()` "
-        "are only available while the `lua-macro-write` feature flag is on.",
-        "",
+        *_flag_note("lua-macro-write", "Beta: `opensak.attach()`, "
+                    "`opensak.detach()` and `opensak.attached()` are only "
+                    "available while the `lua-macro-write` feature flag is on, "
+                    "as it is in beta builds."),
         "The `database` option reads one other database per call. To join "
         "several databases in one statement, as GSAK macros do with SQL "
         "`ATTACH`, attach them with `opensak.attach()`: each one becomes a "
@@ -608,14 +611,16 @@ def _changing_section() -> list[str]:
         "",
         "## Changing caches",
         "",
-        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
-        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
-        "`opensak.sql_write()`, `opensak.transaction()`, "
-        "`opensak.in_transaction()` and `opensak.resync()` are only available "
-        "while the `lua-macro-write` feature flag is on, as it is in beta "
-        "builds. Without it they are nil, and `opensak.set_corrected()` and "
-        "`opensak.clear_corrected()` change the database without asking.",
-        "",
+        *_flag_note("lua-macro-write", "Beta: `opensak.update()`, "
+                    "`opensak.insert{}`, `opensak.delete()`, "
+                    "`opensak.insert_<x>()`, `opensak.update_<x>()`, "
+                    "`opensak.delete_<x>()`, `opensak.sql_write()`, "
+                    "`opensak.transaction()`, `opensak.in_transaction()` and "
+                    "`opensak.resync()` are only available while the "
+                    "`lua-macro-write` feature flag is on, as it is in beta "
+                    "builds. Without it they are nil, and "
+                    "`opensak.set_corrected()` and `opensak.clear_corrected()` "
+                    "change the database without asking."),
         "`opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
         "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
         "`opensak.sql_write()`, "
@@ -684,7 +689,22 @@ def _changing_section() -> list[str]:
         "Each change is committed on its own. To keep several changes "
         "together, or undo them all on an error, run them inside "
         "`opensak.transaction(function() ... end)`, which is also faster for "
-        "many changes. SQL `BEGIN`/`COMMIT` is refused.",
+        "many changes. SQL `BEGIN`/`COMMIT` is refused. For example, to "
+        "clear the corrected coordinates of the caches of the active filter:",
+        "",
+        *_code(
+            "local n = opensak.transaction(function()\n"
+            "    local count = 0\n"
+            '    for c in opensak.caches{ fields = {"corrected"} } do\n'
+            "        if c.corrected then\n"
+            "            opensak.clear_corrected(c.code)\n"
+            "            count = count + 1\n"
+            "        end\n"
+            "    end\n"
+            "    return count\n"
+            "end)\n"
+            'print(n .. " corrected coordinates cleared")'
+        ),
         "",
         "`opensak.sql_write()` may INSERT into, UPDATE and DELETE from these "
         "tables. An "
@@ -718,15 +738,70 @@ def _changing_section() -> list[str]:
     return lines + _children_section()
 
 
+def _headless_section() -> list[str]:
+    return [
+        "",
+        "## Running without a window",
+        "",
+        "`opensak run <macro.lua> --db NAME` runs a macro with no window and no "
+        "display, e.g. from a scheduler. `opensak run --help` lists the options; "
+        "the User Guide has examples for each operating system. "
+        "`opensak.is_headless()` tells a macro it runs this way, `opensak.args` "
+        "holds the `--arg key=value` pairs, and the header `Headless: no` makes "
+        "`opensak run` refuse the macro.",
+        "",
+        "Nothing ever waits for an answer. What a macro asks is answered from the "
+        "command line, otherwise the run stops with exit code 7, which `pcall` "
+        "can't catch:",
+        "",
+        "| Function | Without a window |",
+        "|---|---|",
+        "| `filter`, `sort`, `count`, ... | The filter is kept in memory and evaluated "
+        "against the database. |",
+        "| `current`, `selected` | `nil`, and an empty list. |",
+        "| `select` | Returns `false`. |",
+        "| `print`, `message`, `log` | Written to stdout, the log file and `--log-file`. |",
+        "| `progress` | Written to stderr, the log file and `--log-file`. |",
+        "| `confirm` | `--arg` with the message as key (`yes` or `no`), else yes with `--yes`. |",
+        "| `input` | `--arg` with the prompt as key, else the default with `--yes`. |",
+        "| `choose` | `--arg` with the prompt as key, else the default with `--yes`, if "
+        "there is one. |",
+        "| `form` | `--arg` with the field id as key, then the values remembered with "
+        "`remember = true`, then the defaults with `--yes`. It closes as with its "
+        "default button. |",
+        "| `choose_file`, `choose_folder` | Only `--arg` with the title as key. |",
+        "| `open`, `refresh` | Do nothing. A file the macro didn't write needs `--yes`, "
+        "as `open` asks about it first. |",
+        "| `set_center` | Not available: an error. |",
+        "| `run_macro` | The called macro runs under the same rules. |",
+        "| `switch_database`, `attach`, `copy_caches`, `move_caches`, the targets an import names | Take the "
+        "database's lock until the run ends; a database in use stops the run with "
+        "exit code 6. `switch_database` lasts for this run only. |",
+        "",
+        "**Writes** need an \"Always\" approval for the macro's current code, or "
+        "`--allow-write`, which stores nothing. A macro edited since its approval "
+        "counts as not approved. Otherwise its first write stops the run with exit "
+        "code 7, and that write isn't made.",
+        "",
+        "**Folders** need to be approved for the macro's current code, listed in "
+        "Settings, or given with `--allow-folder DIR`, for this run only. Otherwise "
+        "the run stops with exit code 7. OpenSAK's own data is never available.",
+        "",
+        "**Web sites** follow the same rule as in OpenSAK, but a site that isn't "
+        "approved yet fails, as nobody can be asked. The declaration of `Permissions` "
+        "and `Network` isn't shown.",
+    ]
+
+
 def _web_section() -> list[str]:
     blocked = _blocked_domains()
     return [
         "",
         "## Web sites",
         "",
-        "Beta: `opensak.get_url()` is only available while the "
-        "`lua-macro-net` feature flag is on, as it is in beta builds.",
-        "",
+        *_flag_note("lua-macro-net", "Beta: `opensak.get_url()` is only "
+                    "available while the `lua-macro-net` feature flag is on, "
+                    "as it is in beta builds."),
         "A macro can read everything in your databases, so a macro that "
         "contacts a web site could also send your data there. Before a "
         "macro first contacts a web site (host), OpenSAK therefore asks "
@@ -957,7 +1032,8 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
             lines += [_param_line(p) for p in params.values()]
             lines.append("")
         if func.returns:
-            lines += [f"Returns `{func.returns[0]}` — {func.returns[1]}", ""]
+            word = "Type" if func.value else "Returns"
+            lines += [f"{word} `{func.returns[0]}` — {func.returns[1]}", ""]
         lines += [_since(func), ""]
         beta = _beta_note(func)
         if beta:
@@ -982,7 +1058,9 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     lines += [
         "",
         "`opensak.caches{}` also takes `fields`, an array of the cache fields "
-        "to load (`code` is always included), and `database`.",
+        "to load (`code` is always included), and `database`. Filter keys "
+        "given to `opensak.caches{}` search the whole database; they do not "
+        "narrow the active filter.",
         "",
         "## Reading another database",
         "",
@@ -1017,6 +1095,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     lines += _schema_section()
     lines += _changing_section()
     lines += _web_section()
+    lines += _headless_section()
     lines += _examples_section(examples_dir)
     lines += _header_section()
     lines += _editor_section()
@@ -1306,7 +1385,7 @@ def render_lua_stub() -> str:
     for writable in WRITABLE_FIELDS:
         lines.append(f"---@field {writable.name}? {writable.type} {descriptions[writable.name]}")
     lines.append("---@field custom? table<string, any> Custom fields to change, name → value "
-                 "(see Custom fields; `companion-db` feature flag).")
+                 "(see Custom fields).")
     lines += [
         "",
         "---A new cache for `opensak.insert{}`.",
@@ -1360,6 +1439,9 @@ def render_lua_stub() -> str:
         if func.deprecated:
             # Calls are shown struck through, with the hint
             lines.append(f"---@deprecated Use {func.deprecated[1]}")
+        if func.value and func.returns:
+            lines += [f"---@type {func.returns[0]}", f"opensak.{func.name} = {{}}"]
+            continue
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} "
                          f"{_deprecated_comment(p.deprecated)}{p.description}")
@@ -1387,7 +1469,7 @@ def _editor_words() -> dict[str, ApiFunction | LuaFunction | None]:
         namespace = func.name.rpartition(".")[0]
         if namespace:
             words.setdefault(f"opensak.{namespace}", None)
-        words[f"opensak.{func.name}"] = func
+        words[f"opensak.{func.name}"] = None if func.value else func
     return words
 
 

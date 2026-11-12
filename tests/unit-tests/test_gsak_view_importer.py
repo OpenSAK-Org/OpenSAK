@@ -61,7 +61,7 @@ def gsak_db(tmp_path) -> Path:
         ("FI", "A filter", "chkFound=True"),
     ])
     conn.execute("INSERT INTO CustomGlobal VALUES ('FavPerc', 'Integer')")
-    conn.execute("INSERT INTO CustomDefs VALUES ('ToSolve', 'Boolean', 'Local', 'AllCH')")
+    conn.execute("INSERT INTO CustomDefs VALUES ('ToSolve', 'Boolean', 'Local', 'Found')")
     conn.commit()
     conn.close()
     return path

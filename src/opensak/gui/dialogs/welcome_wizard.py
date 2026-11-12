@@ -194,10 +194,17 @@ class WelcomeWizard(QDialog):
 
     Efter Accepted er install_dir, db_dir, gc_username og gc_home_location
     gemt i settings_store / AppSettings.
+
+    Issue #1288: with *first_run* (the wizard shown at startup) Cancel, the
+    window's close button and Esc ask, then quit OpenSAK without saving, so
+    the wizard shows again next time; "Use default folders" saves the
+    defaults and continues (Accepted). Run again from Settings, Cancel just
+    closes and "Use default folders" isn't shown.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, first_run: bool = False):
         super().__init__(parent)
+        self._first_run = first_run
         self.setWindowTitle(tr("wizard_window_title"))
         self.setMinimumSize(520, 380)
         # Issue #811: defensive cap, consistent with the other dialogs
@@ -262,10 +269,18 @@ class WelcomeWizard(QDialog):
         self._back_btn = QPushButton(tr("wizard_back"))
         self._next_btn = QPushButton(tr("wizard_next"))
         self._next_btn.setDefault(True)
-        skip = QPushButton(tr("wizard_skip"))
-        skip.setFlat(True)
+        # Issue #1288: a real Cancel. "Skip setup" used to be the only way
+        # out, but it saved the defaults and marked the wizard as done.
+        self._cancel_btn = QPushButton(tr("wizard_cancel"))
+        self._skip_btn = QPushButton(tr("wizard_skip"))
+        self._skip_btn.setFlat(True)
+        self._skip_btn.setToolTip(
+            tr("wizard_skip_tooltip", button=tr("settings_run_wizard_button"))
+        )
+        self._skip_btn.setVisible(self._first_run)
 
-        btn_lay.addWidget(skip)
+        btn_lay.addWidget(self._cancel_btn)
+        btn_lay.addWidget(self._skip_btn)
         btn_lay.addStretch()
         btn_lay.addWidget(self._back_btn)
         btn_lay.addWidget(self._next_btn)
@@ -273,7 +288,8 @@ class WelcomeWizard(QDialog):
 
         self._back_btn.clicked.connect(self._go_back)
         self._next_btn.clicked.connect(self._go_next)
-        skip.clicked.connect(self._skip)
+        self._cancel_btn.clicked.connect(self.reject)
+        self._skip_btn.clicked.connect(self._skip)
 
         # Sprog-skift trigger genindlæsning af UI-tekster
         self._lang_combo.currentIndexChanged.connect(self._on_lang_changed)
@@ -323,9 +339,31 @@ class WelcomeWizard(QDialog):
             self._update_buttons()
 
     def _skip(self):
-        """Spring wizard over — brug alle defaults."""
+        """Use default folders: save the defaults and continue (#1288)."""
         self._save_all(use_defaults=True)
-        self.reject()
+        self.accept()
+
+    def reject(self) -> None:
+        """
+        Cancel, the window's close button and Esc all end here (#1288). On
+        first run that quits OpenSAK, so ask first; nothing is saved and the
+        wizard shows again next time.
+        """
+        if self._first_run and not self._confirm_quit():
+            return
+        super().reject()
+
+    def _confirm_quit(self) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("wizard_quit_title"))
+        box.setText(tr("wizard_quit_msg"))
+        quit_btn = box.addButton(tr("crash_dialog_quit"), QMessageBox.ButtonRole.DestructiveRole)
+        stay_btn = box.addButton(tr("wizard_continue_setup"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(stay_btn)
+        box.setEscapeButton(stay_btn)
+        box.exec()
+        return box.clickedButton() is quit_btn
 
     def _finish(self):
         """Gem alle valg og luk wizard."""

@@ -11,13 +11,17 @@ pytest.importorskip("pytestqt")
 
 from opensak.gui.dialogs import import_dialog as idlg
 from opensak.gui.dialogs.import_dialog import ImportWorker, ImportDialog
+from opensak.importer import ImportResult
 from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
 from opensak.lang import tr
 
 
 def _result(created=1, updated=0, waypoints=0, skipped=0, errors=None):
-    return SimpleNamespace(created=created, updated=updated, waypoints=waypoints,
-                           skipped=skipped, errors=errors or [])
+    result = ImportResult()
+    result.created, result.updated = created, updated
+    result.waypoints, result.skipped = waypoints, skipped
+    result.errors = errors or []
+    return result
 
 
 @contextlib.contextmanager
@@ -356,14 +360,20 @@ class TestImportDialog:
         assert fired == [True]
         assert dlg._import_btn.isEnabled() is True
 
-    def test_close_event_waits_for_workers(self, dlg):
+    def test_close_while_workers_run_keeps_dialog_open(self, dlg):
+        # #1265: closing used to block on the workers' wait() (and Escape
+        # skipped that entirely). Now the dialog stays open, the location
+        # lookup is cancelled and nothing blocks the GUI thread.
+        dlg.show()
         dlg._worker = SimpleNamespace(isRunning=lambda: True, wait=MagicMock())
         dlg._geo_worker = SimpleNamespace(
             isRunning=lambda: True, request_cancel=MagicMock(), wait=MagicMock()
         )
         dlg.close()
-        assert dlg._worker is None
-        assert dlg._geo_worker is None
+        assert dlg.isVisible()
+        dlg._geo_worker.request_cancel.assert_called_once_with()
+        dlg._worker.wait.assert_not_called()
+        dlg._geo_worker.wait.assert_not_called()
 
     # ── Issue #802: Close button responsiveness ─────────────────────────────
 

@@ -37,12 +37,12 @@ from opensak.importer.gsak_importer import (
     GsakBackupContents,
     GsakBackupDatabase,
     GsakImportResult,
-    clear_opensak_cache_data,
     extract_gsak_member,
     import_gsak_db,
     list_gsak_backup,
     list_gsak_folder,
 )
+from opensak.importer.gsak_replace import import_gsak_db_replacing, is_empty
 
 if TYPE_CHECKING:
     from opensak.importer.gsak_filter_importer import GsakFilterImportResult
@@ -610,15 +610,25 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
     rep.active = rep.target_path == active_path
     label = f"{entry.name} → {rep.target}"
     progress(label)
-    with (get_session() if rep.active else session_for(rep.target_path)) as session:
+    if job.replace or is_empty(rep.target_path):
+        # #1231: built in a fresh file and swapped in; the target stays as it
+        # was if the import fails. A target without caches (a new database)
+        # has nothing to keep either, so it goes the same fast way.
         job.started = True
-        if job.replace:
-            rep.cleared = clear_opensak_cache_data(session)
-        rep.result = import_gsak_db(
-            db3_path, session,
+        rep.result = import_gsak_db_replacing(
+            db3_path, rep.target_path,
             progress_cb=lambda done, total: progress(label, done, total),
             settings_db=settings_db,
         )
+        rep.cleared = rep.result.cleared or 0
+    else:
+        with (get_session() if rep.active else session_for(rep.target_path)) as session:
+            job.started = True
+            rep.result = import_gsak_db(
+                db3_path, session,
+                progress_cb=lambda done, total: progress(label, done, total),
+                settings_db=settings_db,
+            )
     optimize_database(rep.target_path)   # #1048
     if all(j.report.target.lower() != rep.target.lower() for j in later):
         progress(f"{rep.target}: distances")

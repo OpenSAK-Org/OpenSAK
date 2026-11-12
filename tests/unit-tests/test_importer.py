@@ -6,9 +6,10 @@ from pathlib import Path
 
 from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache, Log
+import opensak.importer as importer
 from opensak.importer import (
-    import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx, _parse_datetime,
-    _SanitizedXmlReader,
+    import_gpx, import_loc, import_zip, ImportResult, _count_wpts, _is_companion_gpx,
+    _parse_datetime, _SanitizedXmlReader,
 )
 
 from tests.data import (
@@ -19,6 +20,13 @@ from tests.data import (
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def english(monkeypatch):
+    import opensak.lang as lang
+    from opensak.lang.en import STRINGS
+    monkeypatch.setattr(lang, "_translations", STRINGS)
+
 
 @pytest.fixture
 def gpx_file(tmp_path) -> Path:
@@ -449,7 +457,7 @@ def test_import_gpx_inline_extra_waypoints(tmp_db, tmp_path):
 
 # ── ImportResult.__str__ ──────────────────────────────────────────────────────
 
-def test_import_result_str_lists_warnings_and_caps_errors():
+def test_import_result_str_lists_warnings_and_caps_errors(english):
     r = ImportResult()
     r.created, r.updated, r.waypoints, r.skipped = 3, 1, 2, 4
     r.warnings.append("limited data")
@@ -459,6 +467,109 @@ def test_import_result_str_lists_warnings_and_caps_errors():
     assert "⚠ limited data" in text
     assert "Errors         : 7" in text
     assert text.count("    - err") == 5  # only first 5 shown
+    assert "2 more" in text  # ...and the rest are counted
+
+
+def test_errors_shown_has_no_more_line_when_all_fit():
+    r = ImportResult()
+    r.errors.extend(f"err{i}" for i in range(5))
+    assert r.errors_shown() == r.errors
+
+
+# ── Errors name the failing record (#465) ─────────────────────────────────────
+
+@pytest.fixture
+def bad_cache_gpx(tmp_path, monkeypatch) -> Path:
+    """GCBAD01 can't be parsed; the caches around it can."""
+    real_parse = importer._parse_wpt
+
+    def parse(wpt_el):
+        if importer._wpt_code(wpt_el) == "GCBAD01":
+            raise AttributeError("'NoneType' object has no attribute 'xpath'")
+        return real_parse(wpt_el)
+
+    monkeypatch.setattr(importer, "_parse_wpt", parse)
+    gpx = build_gpx(cache_wpt("GCOK001"), "\n\n", cache_wpt("GCBAD01"), cache_wpt("GCOK002"))
+    return write_gpx(tmp_path, "idaho.gpx", gpx)
+
+
+def _assert_names_bad_cache(error: str, gpx_path: Path) -> None:
+    text = gpx_path.read_text(encoding="utf-8")
+    wpt_start = text.rfind("<wpt", 0, text.index("GCBAD01"))
+    line = text.count("\n", 0, wpt_start) + 1
+    assert line > 1
+    assert f"idaho.gpx, line {line}, GCBAD01:" in error
+    assert "'xpath'" in error
+
+
+def test_gpx_parse_error_names_cache_and_line(tmp_path, bad_cache_gpx, caplog, english):
+    init_db(db_path=tmp_path / "bad.db")
+    with caplog.at_level("WARNING", logger="opensak.importer"):
+        with get_session() as s:
+            result = import_gpx(bad_cache_gpx, s)
+    assert (result.created, result.skipped, len(result.errors)) == (2, 1, 1)
+    _assert_names_bad_cache(result.errors[0], bad_cache_gpx)
+    # The log gets the traceback a developer needs.
+    record = next(r for r in caplog.records if "GCBAD01" in r.getMessage())
+    assert record.exc_info is not None
+
+
+def test_zip_parse_error_names_cache_and_line(tmp_path, bad_cache_gpx, english):
+    init_db(db_path=tmp_path / "badzip.db")
+    zip_path = make_zip(tmp_path, "pq.zip", {"idaho.gpx": bad_cache_gpx})
+    with get_session() as s:
+        result = import_zip(zip_path, s)
+    assert result.created == 2
+    assert len(result.errors) == 1
+    _assert_names_bad_cache(result.errors[0], bad_cache_gpx)
+
+
+def test_parse_error_without_a_code_still_reports(tmp_path, monkeypatch, english):
+    def parse(wpt_el):
+        raise ValueError("broken")
+
+    monkeypatch.setattr(importer, "_parse_wpt", parse)
+    gpx = build_gpx('<wpt lat="55.0" lon="10.0"><type>Geocache|Traditional Cache</type></wpt>')
+    init_db(db_path=tmp_path / "nocode.db")
+    with get_session() as s:
+        result = import_gpx(write_gpx(tmp_path, "nocode.gpx", gpx), s)
+    assert len(result.errors) == 1
+    assert ", ?: broken" in result.errors[0]
+
+
+def test_loc_parse_error_names_cache(tmp_path, monkeypatch, english):
+    def parse(wpt_el):
+        raise ValueError("broken")
+
+    monkeypatch.setattr(importer, "_parse_loc_waypoint", parse)
+    loc = tmp_path / "one.loc"
+    loc.write_text(
+        '<?xml version="1.0"?>\n<loc version="1.0">\n'
+        '<waypoint><name id="GCLOC01">x</name></waypoint>\n</loc>\n',
+        encoding="utf-8",
+    )
+    init_db(db_path=tmp_path / "loc.db")
+    with get_session() as s:
+        result = import_loc(loc, s)
+    assert "GCLOC01" in result.errors[0]
+    assert "line 3" in result.errors[0]
+
+
+def test_db_error_is_short_and_full_text_goes_to_log(tmp_path, caplog, english):
+    # NaN passes float() but breaks the NOT NULL on caches.latitude.
+    gpx = build_gpx(cache_wpt("GCNAN01", lat="nan"), cache_wpt("GCOK001"))
+    init_db(db_path=tmp_path / "nan.db")
+    with caplog.at_level("WARNING", logger="opensak.importer"):
+        with get_session() as s:
+            result = import_gpx(write_gpx(tmp_path, "nan.gpx", gpx), s)
+    assert result.created == 1
+    assert len(result.errors) == 1
+    error = result.errors[0]
+    assert "GCNAN01" in error
+    assert "latitude" in error
+    assert "INSERT INTO" not in error
+    assert "[parameters:" not in error
+    assert "INSERT INTO" in caplog.text
 
 
 # ── import_gpx error/edge paths ───────────────────────────────────────────────

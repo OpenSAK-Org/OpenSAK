@@ -49,6 +49,7 @@ EXIT_BUSY = 4               # a dialog is open or another macro is running
 # Headless commands (`opensak import …`, #937) use the codes above as well.
 EXIT_DB_NOT_FOUND = 5       # the database named with --db is not there
 EXIT_DB_LOCKED = 6          # the database is open in OpenSAK or another run
+EXIT_NEEDS_UI = 7           # `opensak run`: the macro needs a dialog (#1203)
 EXIT_TIMEOUT = 124          # --timeout reached (like coreutils `timeout`)
 EXIT_INTERRUPTED = 130      # Ctrl+C
 

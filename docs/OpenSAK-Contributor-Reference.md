@@ -21,7 +21,8 @@ Linux, and macOS.
 
 - **GitHub:** https://github.com/OpenSAK-Org/OpenSAK
 - **Website:** opensak.com
-- **UI languages:** 8 (da, en, fr, nl, pt, cs, se, de) — see `src/opensak/lang/`
+- **UI languages:** 11 (da, en, fr, nl, pt, cs, se, de, de_CH, pl, es) — see
+  `AVAILABLE_LANGUAGES` in `src/opensak/lang/__init__.py` for the current list
 
 ## Tech stack
 
@@ -49,11 +50,12 @@ opensak/
 ├── src/opensak/
 │   ├── __init__.py                     # __version__ (single source of truth)
 │   ├── lang/
-│   │   └── __init__.py                 # AVAILABLE_LANGUAGES dict, 8 languages
+│   │   └── __init__.py                 # AVAILABLE_LANGUAGES dict (one .py file per language)
 │   ├── db/                             # SQLAlchemy models, sessions, manager
 │   ├── importer/                       # GPX + PQ ZIP importer
 │   ├── filters/
 │   │   └── engine.py                   # Filter types, AND/OR, FilterProfile, apply_filters()
+│   ├── macro/                          # Lua macro runtime and Macro API
 │   ├── gps/
 │   │   └── garmin.py                   # Garmin detection, GPX/GGZ generation
 │   └── gui/
@@ -89,10 +91,13 @@ real repository (see the guide's Step 1) rather than assuming from this document
    hardcoded references in `site/user-guide.html` atomically. A manual edit will
    miss references and break the build.
 
-3. **All 8 language files must be updated together.** If you add or change a
-   translation key, every file in `src/opensak/lang/` needs the new key, or the
-   `test_no_missing_keys` test will fail in CI. Verify the exact file names in the
-   repo — don't assume a naming pattern.
+3. **All language files must be updated together** (currently 11 — check
+   `AVAILABLE_LANGUAGES` in `src/opensak/lang/__init__.py` rather than relying on
+   this number). If you add or change a translation key, every language file in
+   `src/opensak/lang/` needs the new key, or the `test_no_missing_keys` test will
+   fail in CI. Verify the exact file names in the repo — don't assume a naming
+   pattern. For languages you don't speak, a machine translation is fine, but say
+   so in the PR so a native speaker can review it.
 
 4. **Run mypy from the repository root with no arguments.** Scoped invocations
    (e.g. `mypy src/`) miss files that CI checks. Always run:
@@ -104,14 +109,17 @@ real repository (see the guide's Step 1) rather than assuming from this document
    workflow that regenerates screenshots and opens a PR against `beta` (the
    *Macro API docs* workflow does the same for `docs/macros/api.md` and the
    editor files in `macros/types/`, which feature branches don't commit) — not just
-   from other contributors' work. Before pushing, always do:
+   from other contributors' work. Before pushing, always rebase on the main
+   repository's `beta` (called `upstream` if you work from a fork, as in the
+   guide):
    ```bash
-   git fetch origin beta
-   git rebase origin/beta
+   git fetch upstream beta
+   git rebase upstream/beta
    ```
 
 6. **Commit messages** should have a descriptive body and end with a `fixes #NNN`
-   footer referencing the GitHub issue.
+   footer referencing the GitHub issue. If the issue is split across several PRs,
+   use `Part of #NNN` instead, so the issue isn't closed by the first merge.
 
 7. **One thing per PR.** Keep changes focused on a single issue or feature —
    don't mix unrelated changes in one PR.
@@ -123,6 +131,15 @@ real repository (see the guide's Step 1) rather than assuming from this document
 
 9. **Every bug fix needs a regression test** — a test that reproduces the
    original bug and confirms the fix resolves it, not just the fix itself.
+
+10. **Write everything in English** — code comments, docstrings, commit messages,
+    PR descriptions and issue comments. User-facing text is the only exception: it
+    goes through translation keys in `src/opensak/lang/`, never as hardcoded
+    strings in the code. Some older modules still have Danish comments; leave them
+    unless your issue is about translating them (#1249), and don't copy that style.
+
+11. **New contributors work on one issue at a time.** Comment on an issue to ask
+    for it and wait for a maintainer to assign it before you start.
 
 ## Local setup & test commands
 
@@ -163,12 +180,14 @@ import/export or database-manager code.
 
 - [ ] Code changes are complete and address a single GitHub issue
 - [ ] If fixing a bug, includes a regression test that reproduces the original issue
-- [ ] All 8 language files updated, if translation keys changed
+- [ ] All language files updated, if translation keys changed
 - [ ] `pytest -v tests/unit-tests/` passes
 - [ ] `xvfb-run pytest -v tests/e2e-tests/` passes (if relevant to your change)
 - [ ] `mypy` passes with no errors, run from the repo root
-- [ ] Rebased on the latest `origin/beta`
-- [ ] Commit message includes a `fixes #NNN` footer
+- [ ] Rebased on the latest `upstream/beta`
+- [ ] Comments, docstrings and commit message are in English
+- [ ] Commit message includes a `fixes #NNN` footer (or `Part of #NNN`)
+- [ ] PR targets `beta`, not `main`
 - [ ] PR description explains what changed and why
 
 ---
