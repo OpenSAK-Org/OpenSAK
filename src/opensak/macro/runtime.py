@@ -1706,6 +1706,9 @@ class MacroRuntime:
         # _run) and the number of macros currently running inside this one
         self._load_macro: Optional[Callable] = None
         self._macro_depth = 0
+        # opensak.shift_key(): Shift was held when the user started the
+        # macro (#1038); False inside a macro started by opensak.run_macro().
+        self._shift = False
 
     def cancel(self) -> None:
         """Ask the running macro to stop. Safe to call from another thread;
@@ -4334,12 +4337,14 @@ class MacroRuntime:
         # Relative paths in the called macro are its own folder's, and its
         # per-macro state is its own file's.
         previous = (self._base_dir, self._macro_path, self._macro_source,
-                    self._macro_hash, self._edited_from, self._editing)
+                    self._macro_hash, self._edited_from, self._editing, self._shift)
         caller_dbs = self._macro_db_path, dict(self._attachments)
         self._base_dir, self._macro_path = file.parent, file
         # Its own code: only the file as read now counts for its approval.
         self._macro_source, self._macro_hash = source, source_hash(source)
         self._edited_from, self._editing = frozenset(), False
+        # Started by a macro, not by the user: it runs with its saved settings.
+        self._shift = False
         self._macro_depth += 1
         try:
             self._show_declarations()
@@ -4354,7 +4359,7 @@ class MacroRuntime:
     def _end_called_macro(self, previous, caller_dbs, failed: bool) -> None:
         self._macro_depth -= 1
         (self._base_dir, self._macro_path, self._macro_source,
-         self._macro_hash, self._edited_from, self._editing) = previous
+         self._macro_hash, self._edited_from, self._editing, self._shift) = previous
         # The called macro may have switched `macro` to its own file, and
         # attached or detached databases.
         caller_db, caller_attachments = caller_dbs
@@ -5015,6 +5020,7 @@ class MacroRuntime:
     def run(
         self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None,
         macro_path: Optional[Path] = None, edited_from: Iterable[str] = (),
+        shift: bool = False,
     ) -> int:
         """Execute *source* and return its exit code: the one passed to
         opensak.exit(), 0 otherwise. Raises MacroError on any failure, and
@@ -5027,18 +5033,22 @@ class MacroRuntime:
         *edited_from*: from OpenSAK's macro editor, the hashes
         (db_access.source_hash) of the versions of *source* it loaded,
         saved or ran, so an approval of those still counts.
+        *shift*: Shift was held when the user started the macro, which
+        opensak.shift_key() reports (#1038).
         """
         if not _RUN_LOCK.acquire(blocking=False):
             raise MacroBusy("another macro is still running")
         try:
             with _c_locale():
-                return self._run(source, chunk_name, base_dir, macro_path, edited_from)
+                return self._run(source, chunk_name, base_dir, macro_path, edited_from,
+                                 shift)
         finally:
             _RUN_LOCK.release()
 
     def _run(
         self, source: str, chunk_name: str, base_dir: Optional[Path],
         macro_path: Optional[Path] = None, edited_from: Iterable[str] = (),
+        shift: bool = False,
     ) -> int:
         self._base_dir = base_dir
         self._macro_path = macro_path
@@ -5075,6 +5085,7 @@ class MacroRuntime:
         self._slept = 0.0
         self._polygons = {}
         self._macro_depth = 0
+        self._shift = shift
         self._warned = set()
         self._removed = None
         try:
@@ -7422,6 +7433,30 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: lua.table_from(rt._macro_args),
         returns=("table<string, string>", "The values by key."),
         value=True,
+    ),
+    ApiFunction(
+        name="shift_key",
+        description="Whether Shift was held when the user started the macro "
+                    "(GSAK's `$_ShiftKey`), e.g. to show the macro's options "
+                    "only then and otherwise run unattended with the saved "
+                    "ones (`opensak.settings`). Read when the macro is "
+                    "started — with Run in the Macro manager, the macro's "
+                    "shortcut, or Run (F5 or Shift+F5) in the editor — so "
+                    "Shift can be let go at once. Always false in a macro "
+                    "started with `opensak.run_macro()`, `opensak --run-macro` "
+                    "or `opensak run`, and for a macro whose own "
+                    "shortcut includes Shift. See the example "
+                    "`quick_filter.lua`.",
+        example='local s = opensak.settings.load()\n'
+                'if opensak.shift_key() or s.name == nil then\n'
+                '  s.name = opensak.input("Your name", s.name or "")\n'
+                '  if not s.name then return end  -- cancelled\n'
+                '  opensak.settings.save(s)\n'
+                'end\n'
+                'print("Hello " .. s.name)',
+        since=5,
+        bind=lambda rt, lua: lambda: rt._shift,
+        returns=("boolean", "true if Shift was held."),
     ),
     ApiFunction(
         name="sleep",

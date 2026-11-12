@@ -36,6 +36,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (found, owned and locked caches are kept); `--arg dry_run=yes` only
   lists them. Contributed by nagisml.
 
+- **Show a macro's options only with Shift (#1038)** — the new
+  `opensak.shift_key()` tells a macro whether Shift was held when the user
+  started it (GSAK's `$_ShiftKey`). A macro can then run with its saved
+  options (`opensak.settings`) and open its options form only when the
+  user holds Shift — from Run in the Macro manager (Shift is read before
+  the "Run this macro?" question), from the macro's shortcut, or with the
+  new **Shift+F5** (and **Ctrl+Shift+F5**, Save and run) in the macro
+  editor. A macro started by another macro with `opensak.run_macro()`,
+  with `opensak --run-macro` or with `opensak run`, always gets `false`,
+  and so does a macro whose shortcut itself includes Shift. New example
+  macro: *Quick filter* (`quick_filter.lua`). Contributed by nagisml.
+
 ## [1.23.0-beta.2] — 2026-11-11
 
 > Headline: **the map works offline.** Leaflet is bundled and the tiles
