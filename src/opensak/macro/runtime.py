@@ -268,6 +268,9 @@ EXPORT_KEYS = frozenset({
     "user_note_log", "version",
     # #1169: GSAK's own fields
     "gsak_fields",
+    # #454/#950: special-tag templates; first_log may also be a function
+    "name_template", "name_max_chars", "desc_template", "desc_for_cache_name",
+    "remove_chars", "first_log",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # opensak.import_gsak(): the keys of its options table, and how many cache
@@ -4849,6 +4852,13 @@ class MacroRuntime:
             )
         rename = self._lua_function(func, "rename", opts.get("rename"))
         describe = self._lua_function(func, "description", opts.get("description"))
+        # #454: first_log is a special-tag template, or a function(c)
+        # returning the log text (nil: no extra-info log for that cache).
+        first_log = opts.get("first_log")
+        first_log_fn = None
+        if first_log is not None and not isinstance(first_log, str):
+            first_log_fn = self._lua_function(func, "first_log", first_log)
+            opts["first_log"] = ""
         attributes, child_waypoints = self._export_pois(func, opts.get("pois"))
         max_counts, content = self._export_content(
             func, opts, gsak_fields=target != "device",
@@ -4888,7 +4898,7 @@ class MacroRuntime:
 
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
                     return None
-        text = self._export_text(lua, func, caches, rename, describe)
+        text = self._export_text(lua, func, caches, rename, describe, first_log_fn)
         try:
             count = write_export_file(
                 caches, output, fmt, use_corrected=corrected, text=text,
@@ -4932,10 +4942,20 @@ class MacroRuntime:
                 raise MacroError(f"{func}: {key} must be true or false, got {value!r}")
             return value
 
-        max_logs = opts.get("max_logs", 0)
-        if isinstance(max_logs, bool) or not isinstance(max_logs, (int, float)) \
-                or max_logs < 0 or max_logs != int(max_logs):
-            raise MacroError(f"{func}: max_logs must be a whole number >= 0, got {max_logs!r}")
+        def _count(key: str) -> int:
+            value = opts.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or value < 0 or value != int(value):
+                raise MacroError(f"{func}: {key} must be a whole number >= 0, got {value!r}")
+            return int(value)
+
+        def _string(key: str) -> str:
+            value = opts.get(key, "")
+            if not isinstance(value, str):
+                raise MacroError(f"{func}: {key} must be a string, got {value!r}")
+            return value
+
+        max_logs = _count("max_logs")
         version = opts.get("version", "1.0")
         if isinstance(version, (int, float)) and not isinstance(version, bool):
             version = f"{float(version):.1f}"   # Lua 1.1 → "1.1"
@@ -4946,11 +4966,17 @@ class MacroRuntime:
         return _choice("max_counts", MAX_COUNTS_CHOICES, "caches"), GpxContent(
             children=_choice("children", CHILDREN_CHOICES, "all"),
             children_only=_flag("children_only"),
-            max_logs=int(max_logs),
+            max_logs=max_logs,
             my_logs_always=_flag("my_logs_always"),
             user_note_log=_flag("user_note_log"),
             version=version,
             gsak_fields=_flag("gsak_fields", gsak_fields),
+            name_template=_string("name_template"),
+            name_max_chars=_count("name_max_chars"),
+            desc_template=_string("desc_template"),
+            desc_for_cache_name=_flag("desc_for_cache_name"),
+            remove_chars=_string("remove_chars"),
+            first_log=_string("first_log"),
         )
 
     @staticmethod
@@ -4974,18 +5000,21 @@ class MacroRuntime:
             result.append(on)
         return result[0], result[1]
 
-    def _export_text(self, lua, func: str, caches: list, rename, describe) -> ExportText:
-        """Call the macro's rename / description functions once per cache,
-        with the cache table (see Cache fields)."""
-        if rename is None and describe is None:
+    def _export_text(self, lua, func: str, caches: list, rename, describe,
+                     first_log=None) -> ExportText:
+        """Call the macro's rename / description / first_log functions once
+        per cache, with the cache table (see Cache fields)."""
+        if rename is None and describe is None and first_log is None:
             return ExportText()
         names: dict[str, str] = {}
         descriptions: dict[str, str] = {}
+        first_logs: dict[str, str] = {}
         codes = [c.gc_code for c in caches]
         for record in iter_records(get_session, codes, resolve_fields(None), self._db_file(None)):
             table = lua.table_from(record, recursive=True)
             for fn, key, result in ((rename, "rename", names),
-                                    (describe, "description", descriptions)):
+                                    (describe, "description", descriptions),
+                                    (first_log, "first_log", first_logs)):
                 if fn is None:
                     continue
                 value = fn(table)
@@ -4997,7 +5026,7 @@ class MacroRuntime:
                         f"default), got {value!r} for {record['code']}"
                     )
                 result[record["code"]] = str(value)
-        return ExportText(names, descriptions)
+        return ExportText(names, descriptions, first_logs)
 
     def _garmin_folder(self, func: str, device: Any, fmt: str) -> Path:
         """The GPX or GGZ folder of the connected Garmin device (the one
@@ -7478,12 +7507,21 @@ API: tuple[ApiFunction, ...] = (
                     "keys `children`, `children_only`, `max_logs`, "
                     "`my_logs_always`, `user_note_log`, `version`, "
                     "`gsak_fields` and `max_counts` are the options of the "
-                    "export dialog (GPX/GGZ); `gsak_fields` is off by "
-                    "default with `target = \"device\"`, as in Send to GPS.",
+                    "export dialog (GPX/GGZ), as are its special-tag "
+                    "templates `name_template`, `name_max_chars`, "
+                    "`desc_template`, `desc_for_cache_name`, `remove_chars` "
+                    "and `first_log` (GSAK's tags, e.g. \"%drop2%con1\"). "
+                    "`first_log` may also be a function(c) returning the "
+                    "text of the extra-info first log (nil: none). `rename` "
+                    "and `description` win over the templates. `gsak_fields` "
+                    "is off by default with `target = \"device\"`, as in "
+                    "Send to GPS.",
         example='local path, n = opensak.export_gpx{\n'
                 '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
                 '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'
                 '  children = "flagged", max_logs = 2, user_note_log = true,\n'
+                '  name_template = "%drop2%con1", name_max_chars = 8,\n'
+                '  first_log = "Hint: %hint\\nFavorite Points: %FavPoints",\n'
                 '  max = 7000, max_counts = "waypoints",\n'
                 '}\n'
                 'if path then print(n .. " caches → " .. path) end',

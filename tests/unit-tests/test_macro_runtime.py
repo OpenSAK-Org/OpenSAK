@@ -1949,6 +1949,32 @@ def test_export_gpx_gsak_fields_off_for_a_device(tmp_path, export_cache, monkeyp
     assert "<gsak:UserFlag>" in target.read_text(encoding="utf-8")
 
 
+def test_export_gpx_special_tag_templates(tmp_path, export_cache):
+    # #454/#950: the dialog's special-tag templates as export_gpx keys.
+    target = tmp_path / "out" / "t.gpx"
+    _export_gpx(tmp_path, f'''path = {str(target)!r},
+        name_template = "%drop2%typ1", name_max_chars = 4,
+        desc_template = "%name (%dif/%ter)", desc_for_cache_name = true,
+        remove_chars = "()", first_log = "Type: %typ\\nHint: %hint"''')
+    text = target.read_text(encoding="utf-8")
+    assert "<name>EXP1</name>" in text
+    assert "<desc>Export me 2/3.5</desc>" in text
+    assert "<groundspeak:name>Export me 2/3.5</groundspeak:name>" in text
+    # The hint line is left out: GCEXP1 has no hint.
+    assert ('<groundspeak:log id="-454">' in text
+            and "<groundspeak:text encoded=\"False\">Type: Multi-cache</groundspeak:text>" in text)
+
+
+def test_export_gpx_first_log_function(tmp_path, export_cache):
+    # first_log may be a function(c); nil writes no extra-info log.
+    target = tmp_path / "out" / "f.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}, '
+                          'first_log = function(c) return "Code " .. c.code end')
+    assert ">Code GCEXP1</groundspeak:text>" in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, f'path = {str(target)!r}, first_log = function(c) return nil end')
+    assert 'id="-454"' not in target.read_text(encoding="utf-8")
+
+
 def test_export_gpx_children_only(tmp_path, export_cache):
     target = tmp_path / "out" / "c.gpx"
     _export_gpx(tmp_path, f'path = {str(target)!r}, children_only = true')
@@ -1978,6 +2004,12 @@ def test_export_gpx_max_counts_waypoints(tmp_path, export_cache):
     ('user_note_log = 1', "user_note_log must be true or false"),
     ('gsak_fields = "no"', "gsak_fields must be true or false"),
     ('version = "2.0"', "version must be one of"),
+    ("name_template = 5", "name_template must be a string"),
+    ("name_max_chars = -1", "name_max_chars must be a whole number"),
+    ('desc_template = true', "desc_template must be a string"),
+    ('desc_for_cache_name = "yes"', "desc_for_cache_name must be true or false"),
+    ("remove_chars = 1", "remove_chars must be a string"),
+    ("first_log = 3", "first_log must be a function"),
 ])
 def test_export_gpx_rejects_bad_content_options(tmp_path, export_cache, spec, msg):
     path = str(tmp_path / "out" / "x.gpx")
