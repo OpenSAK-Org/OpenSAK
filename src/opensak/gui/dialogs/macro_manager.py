@@ -16,6 +16,8 @@ below; a double-click or Enter in the list asks first, so a stray click
 cannot start a macro that changes the database; Edit opens it in the macro editor, at
 the error line when its last run here failed. Shortcut… gives the macro a
 key that runs it from the main window, refusing keys OpenSAK already uses.
+The "On toolbar" check box puts a button for the macro on the Macros
+toolbar of the main window (#1271).
 The list is read again on Reload and whenever the window becomes active,
 so macros saved from an external editor show up without asking.
 
@@ -49,7 +51,7 @@ from opensak.macro.runtime import API_VERSION
 
 # Columns of the macro list.
 (COL_NAME, COL_DESCRIPTION, COL_VERSION, COL_AUTHOR, COL_API, COL_PERMISSIONS, COL_SHORTCUT,
- COL_FOLDER, COL_HEADLESS) = range(9)
+ COL_TOOLBAR, COL_FOLDER, COL_HEADLESS) = range(10)
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
@@ -98,6 +100,7 @@ class MacroManagerDialog(QDialog):
     *taken_shortcuts(path)* returns the shortcuts already in use (portable
     text → what uses it), leaving out the one of macro *path*;
     *shortcuts_changed()* is called after a shortcut was set or removed;
+    *toolbar_changed()* after a macro was put on or taken off the toolbar;
     *edit_macro(path, error)* opens *path* in the editor, showing *error*
     (a Lua error message) when not None.
     """
@@ -109,6 +112,7 @@ class MacroManagerDialog(QDialog):
         taken_shortcuts: Optional[TakenShortcuts] = None,
         shortcuts_changed: Optional[Callable[[], None]] = None,
         edit_macro: Optional[Callable[[Path, Optional[str]], None]] = None,
+        toolbar_changed: Optional[Callable[[], None]] = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(tr("macro_mgr_title"))
@@ -124,6 +128,7 @@ class MacroManagerDialog(QDialog):
         self._runtime = MacroRuntime(host, output=self._append_output)
         self._taken_shortcuts = taken_shortcuts or (lambda _path: {})
         self._shortcuts_changed = shortcuts_changed or (lambda: None)
+        self._toolbar_changed = toolbar_changed or (lambda: None)
         self._edit_macro = edit_macro or (lambda _path, _error: None)
         self._macros: list[MacroInfo] = []
         # The last failed run: (macro, Lua error message), for Edit.
@@ -144,7 +149,7 @@ class MacroManagerDialog(QDialog):
             tr("col_name"), tr("detail_tab_desc"),
             tr("macro_mgr_col_version"), tr("macro_mgr_col_author"),
             tr("macro_mgr_col_api"), tr("macro_mgr_col_permissions"),
-            tr("shortcuts_col_shortcut"),
+            tr("shortcuts_col_shortcut"), tr("macro_mgr_col_toolbar"),
             tr("settings_folder_perm_col_folder"), tr("macro_mgr_col_headless"),
         ])
         self._tree.setSortingEnabled(True)
@@ -156,6 +161,10 @@ class MacroManagerDialog(QDialog):
         header.setSectionResizeMode(COL_DESCRIPTION, QHeaderView.ResizeMode.Stretch)
         self._tree.itemSelectionChanged.connect(self._update_buttons)
         self._tree.itemActivated.connect(lambda *_: self._run_activated())
+        self._tree.itemChanged.connect(self._on_item_changed)
+        header_item = self._tree.headerItem()
+        if header_item is not None:
+            header_item.setToolTip(COL_TOOLBAR, tr("macro_mgr_toolbar_tip"))
 
         self._search = QLineEdit()
         self._search.setPlaceholderText(tr("macro_mgr_search"))
@@ -231,22 +240,28 @@ class MacroManagerDialog(QDialog):
         """Read the macros folder again, keeping the selected macro."""
         from opensak.macro.permissions import macros_dir
         from opensak.macro.shortcuts import macro_shortcut
+        from opensak.macro.toolbar import on_toolbar
 
         selected = self.selected_path()
         root = macros_dir()
         self._macros = discover_macros(root)
         warn = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         self._tree.setSortingEnabled(False)
+        self._tree.blockSignals(True)       # no itemChanged while filling
         self._tree.clear()
         for info in self._macros:
             folder = info.path.parent.relative_to(root).as_posix()
             item = QTreeWidgetItem([
                 info.name, info.error or info.description, info.version, info.author,
                 info.requires_api, permissions_text(info),
-                _native(macro_shortcut(info.path)), "" if folder == "." else folder,
+                _native(macro_shortcut(info.path)), "", "" if folder == "." else folder,
                 "" if info.error else "yes" if info.runs_headless else "no",
             ])
             item.setData(COL_NAME, _PATH_ROLE, str(info.path))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(COL_TOOLBAR, Qt.CheckState.Checked if on_toolbar(info.path)
+                               else Qt.CheckState.Unchecked)
+            item.setToolTip(COL_TOOLBAR, tr("macro_mgr_toolbar_tip"))
             item.setToolTip(COL_NAME, str(info.path))
             item.setToolTip(COL_DESCRIPTION, info.error or info.description)
             if info.error:
@@ -270,6 +285,7 @@ class MacroManagerDialog(QDialog):
             if selected is not None and info.path == selected:
                 item.setSelected(True)
                 self._tree.setCurrentItem(item)
+        self._tree.blockSignals(False)
         self._tree.setSortingEnabled(True)
         has_macros = bool(self._macros)
         self._tree.setVisible(has_macros)
@@ -433,6 +449,22 @@ class MacroManagerDialog(QDialog):
         set_macro_shortcut(path, dlg.sequence())
         self._shortcuts_changed()
         self.reload()
+
+    # -- Toolbar (#1271) -------------------------------------------------------
+
+    def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        """The "On toolbar" check box: put the macro on the main window's
+        Macros toolbar, as its last button, or take it off."""
+        from opensak.macro.toolbar import on_toolbar, set_on_toolbar
+
+        if column != COL_TOOLBAR:
+            return
+        path = Path(item.data(COL_NAME, _PATH_ROLE))
+        checked = item.checkState(COL_TOOLBAR) == Qt.CheckState.Checked
+        if checked == on_toolbar(path):
+            return
+        set_on_toolbar(path, checked)
+        self._toolbar_changed()
 
     # -- Window ----------------------------------------------------------------
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional, cast
-from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
@@ -198,6 +198,9 @@ class InfoBar(QFrame):
         self._owned_lbl.setText(str(owned))
 
 
+# Longer macro names are shortened on their Macros toolbar button (#1271).
+_MACRO_BUTTON_MAX = 30
+
 # Up to this many caches changed by one macro run are refreshed row by row;
 # more trigger a single full reload of the cache list (see end_macro()).
 _MACRO_ROW_REFRESH_LIMIT = 50
@@ -278,8 +281,10 @@ class MainWindow(QMainWindow):
         self._macro_shortcut_actions: list[QAction] = []
         self._apply_macro_shortcuts()
         self._setup_search_bar()
+        self._setup_macro_toolbar()
         self._setup_statusbar()
         self._restore_state()
+        self._hide_empty_macro_toolbar()
         self._update_title()
         self._reload_home_combo()
         self._reload_db_combo()
@@ -956,6 +961,7 @@ class MainWindow(QMainWindow):
         )
         sb = QToolBar(tr("search"))
         sb.setObjectName("search_toolbar")
+        self._search_toolbar = sb
         sb.setMovable(False)
         # Issue #86 follow-up: forhindre at brugeren skjuler søgelinjen via
         # højreklik-menu på toolbar-området. toggleViewAction() er den action
@@ -3661,8 +3667,9 @@ class MainWindow(QMainWindow):
             self._macro_manager = MacroManagerDialog(
                 host=self, parent=self,
                 taken_shortcuts=self._taken_shortcuts,
-                shortcuts_changed=self._apply_macro_shortcuts,
+                shortcuts_changed=self._macro_shortcuts_changed,
                 edit_macro=self._edit_macro,
+                toolbar_changed=self._macro_toolbar_changed,
             )
         return self._macro_manager
 
@@ -3679,6 +3686,12 @@ class MainWindow(QMainWindow):
         self._open_macro_dialog()
         if self._macro_dialog.open_path(path) and error:
             self._macro_dialog.show_error(error)
+
+    def _macro_shortcuts_changed(self) -> None:
+        """A shortcut was set in the Macro manager: the shortcut actions, and
+        the tooltip of the macro's toolbar button."""
+        self._apply_macro_shortcuts()
+        self._refresh_macro_toolbar()
 
     def _apply_macro_shortcuts(self) -> None:
         """(Re)create the main window actions behind the macro shortcuts
@@ -3700,6 +3713,155 @@ class MainWindow(QMainWindow):
                 lambda _=False, p=Path(path), s=seq: self._run_macro_shortcut(p, s))
             self.addAction(act)
             self._macro_shortcut_actions.append(act)
+
+    # ── Macros toolbar (#1271) ───────────────────────────────────────────────
+
+    def _setup_macro_toolbar(self) -> None:
+        """The Macros toolbar: one button per macro the user put on it in
+        the Macro manager, in the row of the search bar. It is movable, and
+        Qt keeps its place and visibility with the window state; it is
+        hidden while it has no buttons."""
+        tb = QToolBar(tr("macro_toolbar_title"), self)
+        tb.setObjectName("macro_toolbar")
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.insertToolBar(self._search_toolbar, tb)
+        self._macro_toolbar = tb
+        self._macro_toolbar_actions: list[QAction] = []
+        self._macro_toolbar_entries: Optional[list[tuple[str, str, str, bool]]] = None
+        self._refresh_macro_toolbar()
+
+    def _hide_empty_macro_toolbar(self) -> None:
+        """After restoring the window state: a toolbar without buttons is
+        never shown, nor offered in the toolbar context menu."""
+        empty = not self._macro_toolbar_actions
+        self._macro_toolbar.toggleViewAction().setVisible(not empty)
+        if empty:
+            self._macro_toolbar.setVisible(False)
+
+    def _macro_toolbar_button_entries(self) -> list[tuple[str, str, str, bool]]:
+        """(path, label, tooltip, enabled) of each button. A macro that
+        can't be read, or needs a newer macro API, gets a disabled button
+        whose tooltip says why."""
+        from opensak.macro.metadata import read_metadata
+        from opensak.macro.runtime import API_VERSION
+        from opensak.macro.shortcuts import macro_shortcut
+        from opensak.macro.toolbar import toolbar_macros
+        from opensak.utils import flags
+        if not flags.lua_macros:
+            return []
+        entries = []
+        for path in toolbar_macros():
+            info = read_metadata(path)
+            label = info.name if len(info.name) <= _MACRO_BUTTON_MAX else (
+                info.name[:_MACRO_BUTTON_MAX - 1].rstrip() + "…")
+            if info.error:
+                tip, enabled = tr("macro_mgr_unreadable", msg=info.error), False
+            elif info.needs_newer_api(API_VERSION):
+                tip, enabled = tr("macro_mgr_api_newer", needed=info.requires_api,
+                                  have=API_VERSION), False
+            else:
+                tip, enabled = info.description or info.name, True
+                seq = macro_shortcut(path)
+                if seq:
+                    tip += f" ({QKeySequence(seq).toString(QKeySequence.SequenceFormat.NativeText)})"
+            if label != info.name:
+                tip = f"{info.name}\n{tip}"
+            entries.append((str(path), label.replace("&", "&&"), tip, enabled))
+        return entries
+
+    def _refresh_macro_toolbar(self) -> None:
+        """Rebuild the buttons when the macros on the toolbar, or their
+        names, descriptions or shortcuts, changed. Called when the main
+        window becomes active, so a macro renamed in the editor or an
+        external editor gets its new name."""
+        entries = self._macro_toolbar_button_entries()
+        if entries == self._macro_toolbar_entries:
+            return
+        self._macro_toolbar_entries = entries
+        tb = self._macro_toolbar
+        was_empty = not self._macro_toolbar_actions
+        tb.clear()                      # the buttons and the separator after them
+        for act in self._macro_toolbar_actions:
+            act.deleteLater()
+        self._macro_toolbar_actions = []
+        from pathlib import Path
+        for path_text, label, tip, enabled in entries:
+            path = Path(path_text)
+            act = QAction(label, tb)
+            act.setToolTip(tip)
+            act.setEnabled(enabled)
+            act.setData(path_text)
+            act.triggered.connect(lambda _=False, p=path: self._run_macro_shortcut(p))
+            tb.addAction(act)
+            button = tb.widgetForAction(act)
+            if button is not None:
+                button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                button.customContextMenuRequested.connect(
+                    lambda pos, p=path, b=button: self._macro_toolbar_menu(p).exec(b.mapToGlobal(pos)))
+            self._macro_toolbar_actions.append(act)
+        if entries:
+            tb.addSeparator()           # apart from the search fields after it
+        empty = not entries
+        tb.toggleViewAction().setVisible(not empty)
+        if empty:
+            tb.setVisible(False)
+        elif was_empty:
+            tb.setVisible(True)         # the user just put a macro on it
+
+    def _macro_toolbar_changed(self) -> None:
+        """A macro was put on or taken off the toolbar in the Macro manager.
+        A new button shows the toolbar, also if the user had hidden it."""
+        before = len(self._macro_toolbar_actions)
+        self._refresh_macro_toolbar()
+        if len(self._macro_toolbar_actions) > before:
+            self._macro_toolbar.setVisible(True)
+
+    def _macro_toolbar_menu(self, path) -> QMenu:
+        """Right-click menu of a macro button: move it, edit the macro, or
+        take it off the toolbar."""
+        from opensak.macro.toolbar import move_on_toolbar, set_on_toolbar, toolbar_macros
+        paths = toolbar_macros()
+        index = paths.index(path) if path in paths else -1
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def rebuild() -> None:
+            self._refresh_macro_toolbar()
+            manager = getattr(self, "_macro_manager", None)
+            if manager is not None:
+                manager.reload()
+
+        def changed() -> None:
+            # Later: the button whose menu this is goes when the toolbar
+            # is rebuilt, and its signal handler is still running.
+            QTimer.singleShot(0, rebuild)
+
+        def move(step: int) -> None:
+            if move_on_toolbar(path, step):
+                changed()
+
+        def remove() -> None:
+            set_on_toolbar(path, False)
+            changed()
+
+        left = menu.addAction(tr("macro_toolbar_move_left"))
+        left.setEnabled(index > 0)
+        left.triggered.connect(lambda _=False: move(-1))
+        right = menu.addAction(tr("macro_toolbar_move_right"))
+        right.setEnabled(0 <= index < len(paths) - 1)
+        right.triggered.connect(lambda _=False: move(1))
+        menu.addSeparator()
+        edit = menu.addAction(tr("edit"))
+        edit.triggered.connect(lambda _=False: self._edit_macro(path))
+        remove_act = menu.addAction(tr("macro_toolbar_remove"))
+        remove_act.triggered.connect(lambda _=False: remove())
+        return menu
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if (event.type() == QEvent.Type.ActivationChange and self.isActiveWindow()
+                and hasattr(self, "_macro_toolbar")):
+            self._refresh_macro_toolbar()
 
     def _taken_shortcuts(self, exclude) -> dict[str, str]:
         """Shortcuts in use in the main window (portable text → the action

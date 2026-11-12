@@ -73,6 +73,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `g_GcDate2(date, time, code)` (a log's date as `YYYY-MM-DD`).
   Contributed by nagisml.
 
+- **Macros toolbar (#1271)** — tick **On toolbar** for a macro in
+  **Macros → Macro manager** to get a button for it on the new Macros
+  toolbar, at the left of the search fields. Right-click a button to move
+  it left or right, edit the macro or remove it. The toolbar shows only
+  when it has buttons; drag it elsewhere or hide it, and OpenSAK
+  remembers. Hold Shift when clicking for macros that show their options
+  only then (`opensak.shift_key()`). A macro that can't be read or needs a
+  newer macro API gets a greyed-out button with the reason in its
+  tooltip. Only you put macros on the toolbar — a macro can't add itself.
+  Suggested in the Facebook group.
+
 ## [1.23.0-beta.2] — 2026-11-11
 
 > Headline: **the map works offline.** Leaflet is bundled and the tiles
