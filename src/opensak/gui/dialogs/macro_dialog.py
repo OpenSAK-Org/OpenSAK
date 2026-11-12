@@ -290,6 +290,10 @@ class MacroDialog(QDialog):
         """The file being edited, None for an unsaved new macro."""
         return self._path
 
+    def refresh_sizes(self) -> None:
+        """Re-apply the Text size setting after Settings was saved."""
+        self._editor.refresh_sizes()
+
     def _set_text(self, text: str, path: Path | None) -> None:
         self._editor.setPlainText(text)
         self._editor.document().setModified(False)

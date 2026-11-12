@@ -335,6 +335,7 @@ def test_lists_macros_with_metadata(make_manager, macros_dir):
     assert rows[1][mm.COL_DESCRIPTION] == "no header"
     assert rows[1][mm.COL_FOLDER] == "examples"
     assert rows[1][mm.COL_PERMISSIONS] == ""
+    assert rows[1][mm.COL_HEADLESS] == "yes"
     assert d._tree.isVisibleTo(d) and not d._empty.isVisibleTo(d)
 
 

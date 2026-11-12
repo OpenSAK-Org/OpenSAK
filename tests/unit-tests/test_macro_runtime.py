@@ -1095,6 +1095,47 @@ def test_caches_with_filter_keys_leaves_view_unchanged():
     assert host.selected == set() and host.label == ""
 
 
+# Issue #1254: a codes list above SQLite's 32,766 bound variables failed with
+# "too many SQL variables".
+LONG_CODES_LUA = """
+    local codes = {"GCMAC1", "GCMAC3"}
+    for i = 1, 40000 do codes[#codes + 1] = string.format("GCX%05d", i) end
+"""
+
+
+def test_caches_with_long_code_list():
+    host = DbHost()
+    _, out = _run(LONG_CODES_LUA + """
+        for c in opensak.caches{ codes = codes, fields = {"code"} } do print(c.code) end
+    """, host=host)
+    assert out == ["GCMAC1", "GCMAC3"]
+
+
+def test_filter_with_long_code_list():
+    host = DbHost()
+    _, out = _run(LONG_CODES_LUA + """
+        print(opensak.filter{ codes = codes })
+    """, host=host)
+    assert out == ["2"]
+    assert host.selected == {"GCMAC1", "GCMAC3"}
+
+
+def test_caches_fields_keep_active_filter_but_filter_keys_search_whole_db():
+    # As the help of opensak.caches says (discussion #1248): `fields` alone
+    # still loops over the active filter, filter keys do not narrow it.
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ type = "Traditional", code = "GCMAC" }
+        local codes = {}
+        for c in opensak.caches{ fields = {"difficulty"} } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+        codes = {}
+        for c in opensak.caches{ code = "GCMAC", found = false } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+    """, host=host)
+    assert out == ["GCMAC1,GCMAC2,GCMAC4", "GCMAC1,GCMAC2,GCMAC3,GCMAC5"]
+
+
 def test_caches_loads_in_chunks(monkeypatch):
     monkeypatch.setattr(cache_data, "CHUNK_SIZE", 2)
     _, out = _run("""

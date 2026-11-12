@@ -1582,6 +1582,8 @@ class MacroRuntime:
         folder_permissions: Optional[list[FolderPermission]] = None,
         settings_dir: Optional[Path] = None,
         external_editor: bool = False,
+        headless: bool = False,
+        macro_args: Optional[dict[str, str]] = None,
     ):
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
@@ -1591,6 +1593,8 @@ class MacroRuntime:
         None means the settings/ folder of the macros folder.
         *external_editor*: the macros come from an external editor
         (`opensak --run-macro`), so "while I edit it" may approve them.
+        *headless*: a run of `opensak run` (opensak.is_headless()), with
+        *macro_args* from its --arg (opensak.args).
 
         print() goes to *output*; opensak.log() to *log* (default: *output*)
         and to OpenSAK's log file."""
@@ -1605,6 +1609,8 @@ class MacroRuntime:
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
         self._settings_dir = settings_dir
+        self._headless = headless
+        self._macro_args = dict(macro_args or {})
         self._base_dir: Optional[Path] = None
         # The running macro's file — switched by opensak.run_macro() so that
         # per-macro state (saved settings, #983) belongs to the called macro,
@@ -1718,6 +1724,15 @@ class MacroRuntime:
                 self._stop("macro cancelled")
             raise MacroError("macro cancelled")
 
+    def stop_run(self, code: int, message: str) -> None:
+        """End the running macro with exit code *code*, as opensak.exit()
+        does, so pcall cannot catch it. For a host that can't go on
+        (`opensak run`, #1203); call it while the macro is running."""
+        self._exit_code = code
+        if self._stop is not None:
+            self._stop(message)
+        raise MacroError(message)
+
     # -- API functions exposed to Lua -----------------------------------------
 
     def _filter(self, spec=None) -> int:
@@ -1814,6 +1829,9 @@ class MacroRuntime:
             return
         macro = self._macro_path
         if self._write_approved():
+            return
+        # `opensak run --allow-write`: for this run only, nothing is stored.
+        if getattr(self._host, "allow_write", False):
             return
         if macro not in self._write_denied and self._reconfirm(lambda r: r.write) is not False:
             if self._write_approved():
@@ -2214,6 +2232,7 @@ class MacroRuntime:
     def _attach(self, name=None, schema=None) -> str:
         func = "opensak.attach"
         db = self._require_database(name, func)
+        self._lock_database(db)
         if schema is None:
             schema = default_schema_name(db.name)
         elif not isinstance(schema, str):
@@ -2743,6 +2762,14 @@ class MacroRuntime:
     def _find_database(name: str) -> Optional[DatabaseInfo]:
         return next((db for db in get_db_manager().databases if db.name == name), None)
 
+    def _lock_database(self, db: DatabaseInfo) -> None:
+        """Before using a database other than the active one: `opensak run`
+        (#1203) holds its lock, as it does the active one's. Without a host
+        function for it (the GUI) nothing happens."""
+        lock = getattr(self._host, "lock_database", None)
+        if lock is not None and db.path != get_db_manager().active_path:
+            lock(db)
+
     def _require_database(self, name: Any, func: str) -> DatabaseInfo:
         db = self._find_database(_db_name(name, func))
         if db is None:
@@ -2867,6 +2894,7 @@ class MacroRuntime:
             raise MacroError(f"{func}: {db.name!r} is the active database")
         if not db.exists:
             raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        self._lock_database(db)
         if options is not None and not hasattr(options, "items"):
             raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "skip" }}')
         opts = dict(options.items()) if options is not None else {}
@@ -2908,6 +2936,12 @@ class MacroRuntime:
         quiet = bool(opts.pop("quiet", False))
         settings = service.GsakImportOptions(**opts)
         self._require_write(func)
+        # The targets it names; one named after a GSAK database found in the
+        # source is only known to the importer.
+        for name in {settings.target, *settings.targets.values(), *(settings.databases or [])}:
+            target = self._find_database(name) if name else None
+            if target is not None:
+                self._lock_database(target)
 
         # %APPDATA%\gsak, $HOME/... — as the folder permissions expand them.
         path = expand_path(source.strip())
@@ -3005,6 +3039,7 @@ class MacroRuntime:
         if not db.exists:
             raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
         self._require_write(func)
+        self._lock_database(db)
 
         # The files to import, each once. Files and folders of a setting
         # that were moved or deleted since are left out, as in the dialog,
@@ -3167,7 +3202,7 @@ class MacroRuntime:
             if not isinstance(values, list) or not all(
                     isinstance(v, str) and v.strip() for v in values):
                 raise MacroError(f'{func}: {key} must be a name or a list of names, '
-                                 f'e.g. {{"AllCH", "Holidays"}}')
+                                 f'e.g. {{"Found", "Holidays"}}')
             return [v.strip() for v in values]
 
         if "databases" in raw:
@@ -3184,7 +3219,7 @@ class MacroRuntime:
                 result["targets"] = {k: v.strip() for k, v in target.items()}
             else:
                 raise MacroError(f'{func}: target must be a database name, or a table '
-                                 f'of GSAK name = database name, e.g. {{ AllCH = "Switzerland" }}')
+                                 f'of GSAK name = database name, e.g. {{ Found = "Switzerland" }}')
         if_exists = raw.get("if_exists", "skip")
         if if_exists not in IF_EXISTS:
             raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, "
@@ -4763,6 +4798,7 @@ class MacroRuntime:
             stored = self._load_form_memory(memory).get(key)
             if isinstance(stored, dict):
                 restored = macro_forms.apply_remembered(form, stored, func)
+                form.remembered = {f.id for f in restored if f.id}
 
         session = _FormSession(self, lua, form, restored)
         result = show(form, session.dispatch)
@@ -5088,6 +5124,9 @@ class MacroRuntime:
             for ns in namespaces:
                 table = table.setdefault(ns, {})
             bound = func.bind(self, lua)
+            if func.value:
+                table[name] = bound
+                continue
             # A Lua function (opensak.transaction) must not be called through
             # Python: errors passing through lose their value.
             if lua_type(bound) == "function":
@@ -5514,7 +5553,7 @@ class ApiFunction:
     # (API version, what changed) for changes after `since`
     changed: tuple[tuple[int, str], ...] = ()
     # Changes the active database: only registered with the lua-macro-write
-    # feature flag (beta builds), see utils/flags.py.
+    # feature flag (on in every build since v1.22.0), see utils/flags.py.
     write: bool = False
     # Only registered with that flag too, but changes nothing (opensak.attach)
     beta: bool = False
@@ -5523,6 +5562,9 @@ class ApiFunction:
     # Contacts web sites: only registered with the lua-macro-net feature
     # flag (beta builds), see utils/flags.py.
     net: bool = False
+    # Not a function: *bind* gives the value of opensak.<name> (opensak.args)
+    # and *returns* its type and description.
+    value: bool = False
     # (API version, what to use instead) once the function is deprecated;
     # it is removed no earlier than one stable release later (API_STABLE),
     # and then goes to REMOVED. Its first call in a run prints a warning.
@@ -5542,6 +5584,8 @@ class ApiFunction:
     @property
     def signatures(self) -> list[str]:
         """E.g. ["opensak.read_csv(path [, sep])"]."""
+        if self.value:
+            return [f"opensak.{self.name}"]
         result = []
         for params in (self.params, *self.overloads):
             text = ""
@@ -5831,11 +5875,15 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="caches",
         description="Iterate over caches, one table per cache (see Cache "
-                    "fields), in a generic `for`. Without arguments: the "
-                    "caches of the active filter, in grid order. With filter "
-                    "keys (see Filter keys): the caches matching them, sorted "
-                    "by name; the view and the active filter stay "
-                    "unchanged. `all = true`: every cache of the database, "
+                    "fields), in a generic `for`. Without filter keys "
+                    "(nothing, or only `fields`): the caches of the active "
+                    "filter, in grid order. With filter keys (see Filter "
+                    "keys): every cache of the database matching them, "
+                    "sorted by name. Filter keys search the whole database, "
+                    "they do not narrow the active filter; the view and the "
+                    "active filter stay unchanged. To pick some caches of "
+                    "the active filter, loop without filter keys and test "
+                    "the fields in the loop. `all = true`: every cache of the database, "
                     "sorted by name, whatever the active filter shows. "
                     "`database` reads another database, without "
                     "switching: its caches matching the filter keys, or all "
@@ -5845,6 +5893,10 @@ API: tuple[ApiFunction, ...] = (
                     "faster. Caches are loaded in chunks, so large databases "
                     "do not hit the memory limit.",
         example="for c in opensak.caches() do print(c.code, c.name) end\n"
+                "-- the active filter's caches with corrected coordinates:\n"
+                'for c in opensak.caches{ fields = {"corrected"} } do\n'
+                "    if c.corrected then print(c.code) end\nend\n"
+                "-- found caches in Switzerland, whatever the active filter shows:\n"
                 'for c in opensak.caches{ found = true, country = "Switzerland",\n'
                 '                         fields = {"difficulty", "terrain"} } do\n'
                 "    print(c.code, c.difficulty, c.terrain)\nend\n"
@@ -5856,8 +5908,8 @@ API: tuple[ApiFunction, ...] = (
                      "`symbol`, `corrected_source` and `last_user_update`")),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys, `all`, `database` and/or `fields`; nothing = the "
-                      "active filter.",
+                      "Filter keys, `all`, `database` and/or `fields`; nothing, "
+                      "or only `fields` = the active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
     ),
@@ -5882,7 +5934,10 @@ API: tuple[ApiFunction, ...] = (
         name="codes",
         description="The GC codes of the caches of the active filter, in grid "
                     "order. Cheaper than opensak.caches() when only the codes "
-                    "are needed.",
+                    "are needed. To read fields of these caches, loop over "
+                    "opensak.caches{ fields = {...} } rather than calling "
+                    "opensak.cache() for each code: it loads only the fields "
+                    "asked for, many caches at a time.",
         example='print(table.concat(opensak.codes(), ", "))',
         since=2,
         bind=lambda rt, lua: lambda: lua.table_from(rt._active_codes()),
@@ -6061,8 +6116,8 @@ API: tuple[ApiFunction, ...] = (
                     "detached when the macro ends. A macro started with "
                     "opensak.run_macro() sees its caller's attached "
                     "databases; what it attaches or detaches is undone when "
-                    "it returns. While the `companion-db` feature flag is on, "
-                    "the database's companion database (opensak.companion()) "
+                    "it returns. The database's companion database "
+                    "(opensak.companion()) "
                     "is attached with it, read-only, as `<schema>_companion`, "
                     "if it has one, and detached with it. See Several "
                     "databases in one query.",
@@ -6406,7 +6461,7 @@ API: tuple[ApiFunction, ...] = (
                     "imported. The summary is printed (unless `quiet`) and "
                     "written to the log file.",
         example='local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {\n'
-                '  databases = {"AllCH", "Holidays"}, if_exists = "merge",\n'
+                '  databases = {"Found", "Holidays"}, if_exists = "merge",\n'
                 '  locations = true })\n'
                 'for _, db in ipairs(r.databases) do\n'
                 '  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)\n'
@@ -6466,7 +6521,9 @@ API: tuple[ApiFunction, ...] = (
         name="set_corrected",
         description="Set corrected coordinates, either as decimal degrees or "
                     "as one coordinate string in any format OpenSAK "
-                    "understands (DMM, DMS, decimal degrees).",
+                    "understands (DMM, DMS, decimal degrees). To change many "
+                    "caches, run the loop inside opensak.transaction(): much "
+                    "faster, and undone completely on an error.",
         example='opensak.set_corrected("GC12345", 47.36872, 8.54093)\n'
                 'opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")',
         since=1,
@@ -6484,7 +6541,9 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="clear_corrected",
-        description="Remove the corrected coordinates of a cache.",
+        description="Remove the corrected coordinates of a cache. To change "
+                    "many caches, run the loop inside opensak.transaction(): "
+                    "much faster, and undone completely on an error.",
         example='opensak.clear_corrected("GC12345")',
         since=1,
         bind=lambda rt, lua: rt._clear_corrected,
@@ -6502,7 +6561,9 @@ API: tuple[ApiFunction, ...] = (
                     "from imports. `custom` changes custom fields: a table "
                     "of field name → value (see Custom fields). "
                     "Before a macro's first change, OpenSAK asks the user to "
-                    "allow that macro (see Changing caches).",
+                    "allow that macro (see Changing caches). To change many "
+                    "caches, run the loop inside opensak.transaction(): much "
+                    "faster, and undone completely on an error.",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
                 'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
                 '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',
@@ -6658,12 +6719,12 @@ API: tuple[ApiFunction, ...] = (
                     "permission like opensak.update(). A macro that ends "
                     "inside a transaction (e.g. cancelled) keeps none of it.",
         example='local n = opensak.transaction(function()\n'
-                '    local n = 0\n'
+                '    local count = 0\n'
                 '    for c in opensak.caches{ found = true, fields = {"code"} } do\n'
                 '        opensak.update(c.code, { user_flag = true })\n'
-                '        n = n + 1\n'
+                '        count = count + 1\n'
                 '    end\n'
-                '    return n\n'
+                '    return count\n'
                 'end)\n'
                 'print(n .. " caches flagged")\n'
                 '-- error() inside the function undoes everything it changed:\n'
@@ -7352,6 +7413,28 @@ API: tuple[ApiFunction, ...] = (
         returns=("any...", "What the macro returns."),
     ),
     ApiFunction(
+        name="is_headless",
+        description="Whether the macro runs without a window, under `opensak run`, "
+                    "so it can skip its dialogs. False in OpenSAK and with "
+                    "`opensak --run-macro`.",
+        example='local name = opensak.is_headless() and opensak.args.name\n'
+                '    or opensak.input("Name?")',
+        since=5,
+        bind=lambda rt, lua: lambda: rt._headless,
+        returns=("boolean", "True under `opensak run`."),
+    ),
+    ApiFunction(
+        name="args",
+        description="The `--arg key=value` pairs of `opensak run`, with the values "
+                    "as strings. Empty in OpenSAK and with `opensak --run-macro`. "
+                    "A table, not a function.",
+        example='local days = tonumber(opensak.args.days) or 30',
+        since=5,
+        bind=lambda rt, lua: lua.table_from(rt._macro_args),
+        returns=("table<string, string>", "The values by key."),
+        value=True,
+    ),
+    ApiFunction(
         name="shift_key",
         description="Whether Shift was held when the user started the macro "
                     "(GSAK's `$_ShiftKey`), e.g. to show the macro's options "
@@ -7360,8 +7443,8 @@ API: tuple[ApiFunction, ...] = (
                     "started — with Run in the Macro manager, the macro's "
                     "shortcut, or Run (F5 or Shift+F5) in the editor — so "
                     "Shift can be let go at once. Always false in a macro "
-                    "started with `opensak.run_macro()` or "
-                    "`opensak --run-macro`, and for a macro whose own "
+                    "started with `opensak.run_macro()`, `opensak --run-macro` "
+                    "or `opensak run`, and for a macro whose own "
                     "shortcut includes Shift. See the example "
                     "`quick_filter.lua`.",
         example='local s = opensak.settings.load()\n'

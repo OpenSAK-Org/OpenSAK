@@ -938,10 +938,24 @@ class Values:
         return name.lower() in self.expressions
 
     def merged(self, other: "Values") -> "Values":
-        """These values with *other*'s rows on top (same fields)."""
-        if other.fields != self.fields:
+        """These values with *other*'s rows on top. Fields are matched by
+        name, so the order may differ (the refresh worker loads them in the
+        order of a set, #1241); a field *other* lacks keeps its value here."""
+        if other.fields == self.fields:
+            return Values(self.fields, {**self.rows, **other.rows}, self.expressions)
+        if not self.fields:
             return other
-        return Values(self.fields, {**self.rows, **other.rows}, self.expressions)
+        n, m = len(self.fields), len(other.fields)
+        where = [other._index.get(f.name.lower()) for f in self.fields]
+        rows = dict(self.rows)
+        for code, row in other.rows.items():
+            old = self.rows.get(code)
+            raw = [row[i] if i is not None else (old[k] if old else None)
+                   for k, i in enumerate(where)]
+            shown = [row[m + i] if i is not None else (old[n + k] if old else None)
+                     for k, i in enumerate(where)]
+            rows[code] = (*raw, *shown)
+        return Values(self.fields, rows, self.expressions)
 
     def raw(self, code: str, name: str) -> Any:
         """The stored value (the default for an untouched cache)."""
@@ -1083,6 +1097,21 @@ def active_values(names: Optional[Iterable[str]] = None,
     with get_session() as session:
         dbapi = session.connection().connection.dbapi_connection
         return load_values(dbapi, db_path, names, codes)
+
+
+def write_active_values(code: str, values: dict[str, Any]) -> int:
+    """write_values() of one cache of the active database; *values* are
+    parsed (parse_value()) first."""
+    from opensak.db.database import get_engine
+    db_path = Path(get_engine().url.database or "")
+    known = {f.name.lower(): f for f in fields(db_path)}
+    parsed: dict[str, Any] = {}
+    for name, value in values.items():
+        f = known.get(name.lower())
+        if f is None:
+            raise CustomFieldError(f"no field named {name!r} in {db_path}")
+        parsed[f.name] = parse_value(f, value)
+    return write_values(db_path, [(code, parsed)])
 
 
 def parse_value(field_: Field, value: Any) -> Any:

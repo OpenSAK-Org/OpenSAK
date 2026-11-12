@@ -133,6 +133,10 @@ class DatabaseManager:
         # (hold_active_lock); a headless run never does.
         self._hold_lock = False
         self._active_lock: Optional["DatabaseLock"] = None
+        # #1203: the active database stored in the settings, while a headless
+        # run works on another one (activate_for_run)
+        self._stored_active: Optional[DatabaseInfo] = None
+        self._run_only = False
         self._load_from_settings()
 
     # ── Interne helpers ───────────────────────────────────────────────────────
@@ -164,7 +168,9 @@ class DatabaseManager:
         if path.exists() and not new_path.exists():
             import shutil
             shutil.move(str(path), str(new_path))
-            print(f"Migration: moved database {path.name} → opensak/")
+            # #1094: the logger, not print() — stdout may not exist in a
+            # windowed build, and the log file is where we ask users to look.
+            logger.info("Migration: moved database %s → opensak/", path.name)
         elif path.exists() and new_path.exists():
             # Begge eksisterer — brug den nye, ignorer den gamle
             pass
@@ -253,12 +259,30 @@ class DatabaseManager:
     def _save_to_settings(self) -> None:
         """Gem liste over kendte databaser til opensak.json."""
         store = get_store()
+        active = self._stored_active if self._run_only else self._active
         store.set_many({
             "databases.list": [db.to_dict() for db in self._databases],
-            "databases.active": str(self._active.path) if self._active else "",
+            "databases.active": str(active.path) if active else "",
         })
         # Every change of the active database (switch, rename, move) passes here.
         self._sync_active_lock()
+
+    def activate_for_run(self, db_info: "DatabaseInfo") -> None:
+        """#1203: make *db_info* (already opened with init_db) the active
+        database of this headless run only: the settings keep the active
+        database, so the GUI still opens the same one afterwards. *db_info*
+        need not be in the list."""
+        if not self._run_only:
+            self._stored_active = self._active
+            self._run_only = True
+        self._active = db_info
+
+    def end_run(self) -> None:
+        """Undo activate_for_run()."""
+        if self._run_only:
+            self._active = self._stored_active
+            self._stored_active = None
+            self._run_only = False
 
     def hold_active_lock(self) -> None:
         """#937: from now on hold the lock of the active database, and move

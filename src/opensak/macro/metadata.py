@@ -13,6 +13,7 @@ MacHeader):
     -- Description: Filters for unfound traditional caches with low difficulty.
     -- Permissions: write, open
     -- Network: api.example.com
+    -- Headless: no
 
 Every key is optional and the "OpenSAK Macro" line is not required. Keys
 are matched case-insensitively in the comment lines at the top of the file
@@ -47,6 +48,10 @@ it returns anything asks for more than the version the user had.
 header_keys() lists the keys a header actually sets, without the
 defaults parse_header() fills in, e.g. for checking that a macro submitted
 to the community repository has a complete header.
+
+Headless says whether the macro can run without a window: "no" makes
+`opensak run` refuse it before it starts (#1203). Anything else, or no key,
+counts as yes.
 
 A header key can be deprecated (HEADER_KEYS, #1185): MacroInfo lists the
 deprecated keys a macro uses, which the Macro manager shows and the run
@@ -85,6 +90,7 @@ _KEYS = {
     "version": "version",
     "requires-api": "requires_api",
     "description": "description",
+    "headless": "headless",
 }
 
 # The words of Permissions, in the order they are listed, with what each
@@ -144,6 +150,7 @@ HEADER_KEYS: tuple[HeaderKey, ...] = (
     HeaderKey("Version"),
     HeaderKey("Requires-API"),
     HeaderKey("Description"),
+    HeaderKey("Headless"),
     HeaderKey("Permissions"),
     HeaderKey("Network"),
 )
@@ -166,6 +173,7 @@ class MacroInfo:
     author: str = ""
     version: str = ""
     requires_api: str = ""
+    headless: str = ""
     # Permissions: the known words in PERMISSIONS order ("none" left out),
     # the other words (lower-cased), and whether the key is there at all.
     permissions: tuple[str, ...] = ()
@@ -184,6 +192,11 @@ class MacroInfo:
         """deprecated_message() for each of deprecated_keys."""
         return tuple(deprecated_message(f"header key {k.name}", k.deprecated)
                      for k in self.deprecated_keys if k.deprecated)
+
+    @property
+    def runs_headless(self) -> bool:
+        """False if the header says Headless: no."""
+        return self.headless.strip().lower() != "no"
 
     @property
     def requires_api_number(self) -> Optional[int]:

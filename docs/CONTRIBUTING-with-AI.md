@@ -94,22 +94,31 @@ offers — a "project," "custom instructions," "system prompt," or similar — t
 attach the reference file. If your tool has no such feature, paste the file's
 contents at the start of each new conversation instead.
 
+**If your AI assistant works directly in your local clone** (e.g. Claude Code,
+Cursor, or similar), it can read the repository itself. Point it at
+`docs/OpenSAK-Contributor-Reference.md` at the start of a session, or copy the
+file into the tool's own instructions file (for Claude Code: a `CLAUDE.md` in
+your clone, kept out of your commits).
+
 ## Step 4 — Find something to work on
 
-Browse [open issues](https://github.com/OpenSAK-Org/OpenSAK/issues).
+Browse [open issues](https://github.com/OpenSAK-Org/OpenSAK/issues). A good
+place to start is the
+[good first issue](https://github.com/OpenSAK-Org/OpenSAK/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+label — these are small, self-contained, and usually come with a note on where
+to look in the code.
 
 - **Picking up an existing issue?** Leave a comment saying you'd like to work on
-  it, and wait for a maintainer to confirm before you start. This avoids two
-  people unknowingly working on the same thing, and gives a maintainer a chance
-  to flag anything non-obvious about that issue. A maintainer can also assign
-  the issue to you on GitHub once confirmed — if you'd like that, just ask in
-  your comment.
+  it, and wait for a maintainer to assign it to you before you start. This avoids
+  two people unknowingly working on the same thing, and gives a maintainer a
+  chance to flag anything non-obvious about that issue. New contributors are
+  assigned one issue at a time; once your PR is merged, you're welcome to pick
+  the next one.
 - **Have your own idea?** Open an issue describing it before writing code. This
   lets a maintainer weigh in early, and avoids duplicate or unwanted work.
 
-Either way, look for issues that describe a self-contained feature or bug,
-ideally with the "good first issue" label if one exists, or that clearly follow
-an existing pattern in the code.
+Either way, look for issues that describe a self-contained feature or bug, or
+that clearly follow an existing pattern in the code.
 
 ## Step 5 — Design the change with your AI assistant
 
@@ -118,7 +127,7 @@ Describe the issue to your AI assistant and ask it to:
   directly, or you can paste in the relevant file)
 - Propose an approach *in plain language first*, before writing code
 - Point out which files will need to change, including whether it touches
-  translations (all 8 language files) or the database schema
+  translations (all language files) or the database schema
 
 **If you're fixing a bug**, ask it to include a test that reproduces the bug
 as part of the change — a bug fix isn't considered complete without a test that
@@ -148,8 +157,11 @@ conversation.
 source .venv/bin/activate
 pytest -v tests/unit-tests/
 xvfb-run pytest -v tests/e2e-tests/   # if your change touches the GUI
-mypy
+mypy                                  # from the repo root, no arguments
 ```
+
+`xvfb-run` is for Linux. On Windows and macOS, run the e2e tests with plain
+`pytest -v tests/e2e-tests/`.
 
 Run the app itself (`python run.py`) and manually exercise the feature you built.
 Automated tests won't catch everything, especially in the UI.
@@ -179,6 +191,13 @@ fixes #NNN"
 git push origin feature/my-feature
 ```
 
+Use `fixes #NNN` when your PR completes the issue. If the issue is being done
+across several PRs (for example one module at a time), write `Part of #NNN`
+instead — otherwise GitHub closes the issue when your first PR is merged.
+
+Write commit messages, code comments and docstrings in English, even if you
+use another language with your AI assistant.
+
 Open a pull request from your fork's `feature/my-feature` branch into
 `OpenSAK-Org/OpenSAK:beta`. In the description, mention:
 - Which issue it addresses
@@ -201,14 +220,20 @@ built.
 - **Editing `__init__.py`'s version manually** instead of using
   `scripts/bump_version.py` — this is rarely something a contributor needs to do,
   but if a task involves it, always use the script.
-- **Updating only some language files** when adding a translation key — all 8 are
-  required, or CI will fail on `test_no_missing_keys`.
+- **Updating only some language files** when adding a translation key — all of
+  them are required (currently 11, see `AVAILABLE_LANGUAGES` in
+  `src/opensak/lang/__init__.py`), or CI will fail on `test_no_missing_keys`.
 - **Running mypy from a subdirectory** — always run it from the repo root with no
   arguments.
 - **Forgetting to rebase before pushing** — `beta` moves more often than you'd
   expect, largely due to automated CI activity.
 - **Fixing a bug without adding a test for it** — every bug fix should include a
   test that reproduces the original problem, not just the fix itself.
+- **Non-English comments or docstrings** — everything in the code is written in
+  English. Some older modules still have Danish comments; don't copy that style
+  (they're being translated in #1249).
+- **Hardcoding user-facing text** — labels, messages and tooltips always go
+  through a translation key (Appendix C), never as a string in the code.
 
 ---
 
@@ -229,8 +254,8 @@ right-click context menu.
 2. Ask it to add the new item following the same pattern, including a
    keyboard shortcut if appropriate (check
    `src/opensak/gui/dialogs/` for the shortcuts dialog, to keep it consistent).
-3. If the menu item's label needs to be translated, this touches all 8 language
-   files — flag this explicitly if it doesn't mention it.
+3. If the menu item's label needs to be translated, this touches every language
+   file — flag this explicitly if it doesn't mention it.
 4. Test manually: right-click a cache, confirm the item appears and works, confirm
    existing menu items still work.
 
@@ -256,13 +281,13 @@ key.
 
 1. Ask your AI assistant to find the existing key naming convention in
    `src/opensak/lang/__init__.py` and one language file, e.g. `en`.
-2. Ask it to add the new key to **all 8 language files** — explicitly confirm
+2. Ask it to add the new key to **all language files** — explicitly confirm
    this in the request, since it's the single most common thing to get half-done.
    For languages you don't speak, ask it to provide a reasonable machine
    translation and flag it clearly as unverified, so a native speaker can review
    it later.
 3. Run the test suite — `test_no_missing_keys` will fail immediately if any file
-   was missed, which is a fast way to confirm you got all 8.
+   was missed, which is a fast way to confirm you got all of them.
 4. Wire the new key into the UI code where the string is used.
 
 ---

@@ -505,8 +505,17 @@ class TestDataRoles:
 
 class TestIconKeys:
     def test_type_icon_archived_disabled(self):
-        assert CacheTableModel._type_icon_key(_cache(archived=True)) == "archived"
-        assert CacheTableModel._type_icon_key(_cache(archived=False, available=False)) == "disabled"
+        # #594: the type is kept; the status only greys the icon.
+        archived = _cache(cache_type="Multi-cache", archived=True)
+        disabled = _cache(cache_type="Multi-cache", archived=False, available=False)
+        assert CacheTableModel._type_icon_key(archived) == "multi"
+        assert CacheTableModel._type_icon_key(disabled) == "multi"
+        assert CacheTableModel._type_icon_status(archived) == "archived"
+        assert CacheTableModel._type_icon_status(disabled) == "disabled"
+        assert CacheTableModel._type_icon_status(_cache()) is None
+        # Archived and disabled at once shows as archived.
+        both = _cache(archived=True, available=False)
+        assert CacheTableModel._type_icon_status(both) == "archived"
 
     def test_type_icon_mapping(self):
         assert CacheTableModel._type_icon_key(_cache(cache_type="Multi-cache")) == "multi"
@@ -2068,7 +2077,7 @@ class TestLastGpxShortHeader:
         assert self._header(gpx_view, Qt.ItemDataRole.ToolTipRole) == "Last GPX update"
 
 
-# ── Auto-fit column widths (Ctrl+W) ──────────────────────────────────────────
+# ── Auto-fit column widths (Ctrl+Alt+W) ──────────────────────────────────────
 
 class TestAutofitColumns:
     @pytest.fixture
