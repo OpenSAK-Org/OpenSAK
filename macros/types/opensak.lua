@@ -1907,6 +1907,22 @@ function opensak.is_headless() end
 ---@type table<string, string>
 opensak.args = {}
 
+---Whether Shift was held when the user started the macro (GSAK's `$_ShiftKey`), e.g. to show the macro's options only then and otherwise run unattended with the saved ones (`opensak.settings`). Read when the macro is started — with Run in the Macro manager, the macro's shortcut, or Run (F5 or Shift+F5) in the editor — so Shift can be let go at once. Always false in a macro started with `opensak.run_macro()`, `opensak --run-macro` or `opensak run`, and for a macro whose own shortcut includes Shift. See the example `quick_filter.lua`.
+---
+---Since API version 5.
+---
+---```lua
+---local s = opensak.settings.load()
+---if opensak.shift_key() or s.name == nil then
+---  s.name = opensak.input("Your name", s.name or "")
+---  if not s.name then return end  -- cancelled
+---  opensak.settings.save(s)
+---end
+---print("Hello " .. s.name)
+---```
+---@return boolean # true if Shift was held.
+function opensak.shift_key() end
+
 ---Pause the macro. One pause lasts at most 10 s and all pauses of a run together at most 60 s; a cancelled macro stops at its next pause.
 ---
 ---Since API version 2.

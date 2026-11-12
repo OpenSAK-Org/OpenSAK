@@ -934,6 +934,10 @@
 				<Param name="settings: table" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.shift_key" func="yes">
+			<Overload retVal="boolean" descr="Whether Shift was held when the user started the macro (GSAK's `$_ShiftKey`),&#x0a;e.g. to show the macro's options only then and otherwise run unattended with the&#x0a;saved ones (`opensak.settings`). Read when the macro is started — with Run in&#x0a;the Macro manager, the macro's shortcut, or Run (F5 or Shift+F5) in the editor —&#x0a;so Shift can be let go at once. Always false in a macro started with&#x0a;`opensak.run_macro()`, `opensak --run-macro` or `opensak run`, and for a macro&#x0a;whose own shortcut includes Shift. See the example `quick_filter.lua`.&#x0a;Returns boolean — true if Shift was held.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.sleep" func="yes">
 			<Overload descr="Pause the macro. One pause lasts at most 10 s and all pauses of a run together&#x0a;at most 60 s; a cancelled macro stops at its next pause.">
 				<Param name="ms: number" />
