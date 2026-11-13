@@ -1912,7 +1912,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "GSAK-velden opnemen",
     "file_export_gsak_fields_tip": "Ook de eigen velden van GSAK schrijven (gebruikersvlag, vergrendeling, gebruikersgegevens, aangepaste velden en de rest), zodat GSAK en OpenSAK ze uit het bestand teruglezen. Uitzetten voor bestanden voor andere apps en apparaten: die negeren deze velden, die het bestand alleen groter maken",
     "gps_content_settings": "Inhoudsopties uit:",
-    "gps_content_settings_tip": "Kindwaypoints, logs, gebruikersnotitie, GPX-versie en gecorrigeerde coördinaten komen uit deze bestandsexport-instelling. Standaard: gecorrigeerde coördinaten, alle kindwaypoints en logs, GPX 1.0.",
+    "gps_content_settings_tip": "Kindwaypoints, logs, gebruikersnotitie, GPX-versie en gecorrigeerde coördinaten komen uit deze bestandsexport-instelling. Standaard: gecorrigeerde coördinaten, alle kindwaypoints en logs, GPX 1.0, zonder GSAK-velden.",
     "gps_content_settings_default": "Standaard",
     "gps_content_settings_last_export": "Laatste bestandsexport",
     "gps_content_settings_edit_tip": "Het bestandsexportvenster openen om exportinstellingen te maken of te wijzigen",

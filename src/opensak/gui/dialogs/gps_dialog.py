@@ -40,6 +40,17 @@ _CONTENT_LAST = "last:"
 _CONTENT_PROFILE = "profile:"
 
 
+def _default_content_settings():
+    """The file export settings Send to GPS uses with "Default" content:
+    the file export's defaults, but without GSAK's own fields (#1169).
+    Devices have no use for them, and a file for a device should carry
+    nothing it doesn't need (see #656). A saved setting, or the last file
+    export, keeps its own choice."""
+    from opensak.export.file_export_settings import FileExportSettings
+
+    return FileExportSettings(gsak_fields=False)
+
+
 def _sanitize_db_name_for_filename(name: str) -> str:
     """Gør et database-navn sikkert at bruge som filnavn på tværs af
     Windows/Linux/macOS — erstatter ugyldige tegn (\\ / : * ? " < > |) med
@@ -89,8 +100,6 @@ class ExportWorker(QThread):
     def __init__(self, caches, device_path, filename, max_caches, export_format="gpx",
                  settings=None):
         super().__init__()
-        from opensak.export.file_export_settings import FileExportSettings
-
         self.caches        = caches
         self.device_path   = device_path
         self.filename      = filename
@@ -98,7 +107,7 @@ class ExportWorker(QThread):
         self.export_format = export_format   # "gpx" eller "ggz"
         self.cancel        = CancelFlag()
         # #775: the file export settings supplying the content options.
-        self.settings      = settings if settings is not None else FileExportSettings()
+        self.settings      = settings if settings is not None else _default_content_settings()
 
     def _select(self) -> list:
         """The caches to send: max_caches of them, counted as the settings'
@@ -448,7 +457,7 @@ class GpsExportDialog(WorkerGuardMixin, QDialog):
         """The file export settings the content options come from (only
         their content options are used: format, folder and file name are
         this dialog's own)."""
-        from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
+        from opensak.export.file_export_settings import FileExportProfile
 
         choice = self._content_combo.currentData() or _CONTENT_DEFAULT
         get_store().set(_CONTENT_SETTINGS_KEY, choice)
@@ -464,7 +473,7 @@ class GpsExportDialog(WorkerGuardMixin, QDialog):
                 if profile.name == name:
                     return profile.settings
         # The defaults: also when a saved setting was deleted meanwhile.
-        return FileExportSettings()
+        return _default_content_settings()
 
     def _scan_devices(self) -> None:
         """Scan for tilsluttede Garmin enheder."""

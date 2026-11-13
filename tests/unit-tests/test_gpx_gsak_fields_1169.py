@@ -477,6 +477,39 @@ class TestOption:
         gpx = (tmp_path / "gps.gpx").read_text(encoding="utf-8")
         assert "<gsak:UserNote>" in gpx and "<gsak:UserFlag>" not in gpx
 
+    def test_gps_export_leaves_them_out_by_default(self, src_db, tmp_path):
+        # Send to GPS: off unless the content options say otherwise, so a
+        # device only gets what it needs (cf. #656).
+        from opensak.gui.dialogs.gps_dialog import ExportWorker
+
+        ExportWorker(src_db, tmp_path, "gps", max_caches=0).run()
+        gpx = (tmp_path / "gps.gpx").read_text(encoding="utf-8")
+        assert "<gsak:UserNote>" in gpx and "<gsak:UserFlag>" not in gpx
+        ExportWorker(src_db, tmp_path, "on", max_caches=0,
+                     settings=FileExportSettings(gsak_fields=True)).run()
+        assert "<gsak:UserFlag>" in (tmp_path / "on.gpx").read_text(encoding="utf-8")
+
+    def test_gps_dialog_default_content_leaves_them_out(self, qtbot, monkeypatch, tmp_path):
+        # "Default" content in Send to GPS has them off; a saved setting
+        # keeps its own choice.
+        from opensak.export.file_export_settings import FileExportProfile
+        import opensak.gui.dialogs.gps_dialog as gps_dialog
+
+        monkeypatch.setattr("opensak.gps.garmin.find_garmin_devices", lambda: [])
+        monkeypatch.setattr(FileExportProfile, "default_dir", classmethod(lambda cls: tmp_path))
+        store: dict = {}
+        monkeypatch.setattr(gps_dialog, "get_store", lambda: SimpleNamespace(
+            get=lambda key, default=None: store.get(key, default),
+            set=lambda key, value: store.__setitem__(key, value),
+        ))
+        FileExportProfile("for GSAK", FileExportSettings(gsak_fields=True)).save()
+        dlg = gps_dialog.GpsExportDialog(caches=[])
+        qtbot.addWidget(dlg)
+        assert dlg._content_combo.currentData() == ""
+        assert dlg._content_settings().gsak_fields is False
+        dlg._content_combo.setCurrentIndex(dlg._content_combo.findData("profile:for GSAK"))
+        assert dlg._content_settings().gsak_fields is True
+
     def test_reloaded_caches_are_exported_with_custom_values(self, src_db):
         gpx = generate_gpx(reload_caches_full(src_db))
         assert "Custom_Start:Swissgrid:Custom_Data:2'688'000:Custom_End" in gpx

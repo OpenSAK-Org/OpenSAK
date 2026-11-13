@@ -1916,7 +1916,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "GSAK-Felder einschliessen",
     "file_export_gsak_fields_tip": "Auch die GSAK-eigenen Felder schreiben (Benutzer-Flag, Sperre, Benutzerdaten, benutzerdefinierte Felder und den Rest), damit GSAK und OpenSAK sie aus der Datei zurücklesen. Für Dateien für andere Apps und Geräte ausschalten: Sie ignorieren diese Felder, die die Datei nur grösser machen",
     "gps_content_settings": "Inhaltsoptionen aus:",
-    "gps_content_settings_tip": "Unterwegpunkte, Logs, Benutzernotiz, GPX-Version und korrigierte Koordinaten kommen aus dieser Dateiexport-Einstellung. Standard: korrigierte Koordinaten, alle Unterwegpunkte und Logs, GPX 1.0.",
+    "gps_content_settings_tip": "Unterwegpunkte, Logs, Benutzernotiz, GPX-Version und korrigierte Koordinaten kommen aus dieser Dateiexport-Einstellung. Standard: korrigierte Koordinaten, alle Unterwegpunkte und Logs, GPX 1.0, ohne GSAK-Felder.",
     "gps_content_settings_default": "Standard",
     "gps_content_settings_last_export": "Letzter Dateiexport",
     "gps_content_settings_edit_tip": "Den Dateiexport-Dialog öffnen, um Export-Einstellungen anzulegen oder zu ändern",

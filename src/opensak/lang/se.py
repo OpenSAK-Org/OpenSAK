@@ -1914,7 +1914,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Ta med GSAK-fält",
     "file_export_gsak_fields_tip": "Skriv även GSAK:s egna fält (användarflagga, lås, användardata, egna fält och resten), så att GSAK och OpenSAK läser tillbaka dem från filen. Stäng av för filer till andra appar och enheter: de ignorerar fälten, som bara gör filen större",
     "gps_content_settings": "Innehållsalternativ från:",
-    "gps_content_settings_tip": "Underwaypoints, loggar, användaranteckning, GPX-version och korrigerade koordinater kommer från denna filexportinställning. Standard: korrigerade koordinater, alla underwaypoints och loggar, GPX 1.0.",
+    "gps_content_settings_tip": "Underwaypoints, loggar, användaranteckning, GPX-version och korrigerade koordinater kommer från denna filexportinställning. Standard: korrigerade koordinater, alla underwaypoints och loggar, GPX 1.0, utan GSAK-fält.",
     "gps_content_settings_default": "Standard",
     "gps_content_settings_last_export": "Senaste filexport",
     "gps_content_settings_edit_tip": "Öppna filexportdialogen för att skapa eller ändra exportinställningar",

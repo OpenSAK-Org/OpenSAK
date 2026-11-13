@@ -1913,7 +1913,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Include GSAK fields",
     "file_export_gsak_fields_tip": "Write GSAK's own fields too (user flag, lock, user data, custom fields and the rest), so GSAK and OpenSAK read them back from the file. Turn it off for files meant for other apps and devices: they ignore these fields, which only make the file bigger",
     "gps_content_settings": "Content options from:",
-    "gps_content_settings_tip": "Child waypoints, logs, user note, GPX version and corrected coordinates come from this file export setting. Default: corrected coordinates, all child waypoints and logs, GPX 1.0.",
+    "gps_content_settings_tip": "Child waypoints, logs, user note, GPX version and corrected coordinates come from this file export setting. Default: corrected coordinates, all child waypoints and logs, GPX 1.0, without GSAK fields.",
     "gps_content_settings_default": "Default",
     "gps_content_settings_last_export": "Last file export",
     "gps_content_settings_edit_tip": "Open the file export dialog to create or change export settings",

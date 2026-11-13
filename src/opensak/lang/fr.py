@@ -1915,7 +1915,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Inclure les champs GSAK",
     "file_export_gsak_fields_tip": "Écrire aussi les champs propres à GSAK (marqueur utilisateur, verrou, données utilisateur, champs personnalisés et le reste), pour que GSAK et OpenSAK les relisent depuis le fichier. À désactiver pour les fichiers destinés à d'autres applis et appareils : ils ignorent ces champs, qui ne font qu'agrandir le fichier",
     "gps_content_settings": "Options de contenu de :",
-    "gps_content_settings_tip": "Waypoints enfants, logs, note utilisateur, version GPX et coordonnées corrigées viennent de ce paramètre d'export de fichier. Par défaut : coordonnées corrigées, tous les waypoints enfants et logs, GPX 1.0.",
+    "gps_content_settings_tip": "Waypoints enfants, logs, note utilisateur, version GPX et coordonnées corrigées viennent de ce paramètre d'export de fichier. Par défaut : coordonnées corrigées, tous les waypoints enfants et logs, GPX 1.0, sans les champs GSAK.",
     "gps_content_settings_default": "Par défaut",
     "gps_content_settings_last_export": "Dernier export de fichier",
     "gps_content_settings_edit_tip": "Ouvrir la boîte d'export de fichier pour créer ou modifier des paramètres d'export",

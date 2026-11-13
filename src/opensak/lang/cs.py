@@ -1910,7 +1910,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Zahrnout pole GSAK",
     "file_export_gsak_fields_tip": "Zapsat i vlastní pole GSAK (uživatelský příznak, zámek, uživatelská data, vlastní pole a ostatní), aby je GSAK a OpenSAK ze souboru načetly zpět. Pro soubory pro jiné aplikace a přístroje vypněte: tato pole ignorují a soubor jen zvětšují",
     "gps_content_settings": "Volby obsahu z:",
-    "gps_content_settings_tip": "Podřízené waypointy, logy, uživatelská poznámka, verze GPX a opravené souřadnice pocházejí z tohoto nastavení exportu souboru. Výchozí: opravené souřadnice, všechny podřízené waypointy a logy, GPX 1.0.",
+    "gps_content_settings_tip": "Podřízené waypointy, logy, uživatelská poznámka, verze GPX a opravené souřadnice pocházejí z tohoto nastavení exportu souboru. Výchozí: opravené souřadnice, všechny podřízené waypointy a logy, GPX 1.0, bez polí GSAK.",
     "gps_content_settings_default": "Výchozí",
     "gps_content_settings_last_export": "Poslední export souboru",
     "gps_content_settings_edit_tip": "Otevřít dialog exportu souboru a vytvořit nebo změnit nastavení exportu",

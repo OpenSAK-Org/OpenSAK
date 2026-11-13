@@ -1915,7 +1915,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Incluir campos do GSAK",
     "file_export_gsak_fields_tip": "Escrever também os campos próprios do GSAK (marca do utilizador, bloqueio, dados do utilizador, campos personalizados e o resto), para que o GSAK e o OpenSAK os leiam de volta do ficheiro. Desligue para ficheiros destinados a outras apps e aparelhos: ignoram estes campos, que só tornam o ficheiro maior",
     "gps_content_settings": "Opções de conteúdo de:",
-    "gps_content_settings_tip": "Waypoints filhos, logs, nota do utilizador, versão GPX e coordenadas corrigidas vêm desta definição de exportação de ficheiro. Predefinido: coordenadas corrigidas, todos os waypoints filhos e logs, GPX 1.0.",
+    "gps_content_settings_tip": "Waypoints filhos, logs, nota do utilizador, versão GPX e coordenadas corrigidas vêm desta definição de exportação de ficheiro. Predefinido: coordenadas corrigidas, todos os waypoints filhos e logs, GPX 1.0, sem campos do GSAK.",
     "gps_content_settings_default": "Predefinido",
     "gps_content_settings_last_export": "Última exportação de ficheiro",
     "gps_content_settings_edit_tip": "Abrir o diálogo de exportação de ficheiro para criar ou alterar definições de exportação",

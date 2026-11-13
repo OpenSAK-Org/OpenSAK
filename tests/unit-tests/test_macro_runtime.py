@@ -1936,6 +1936,19 @@ def test_export_gpx_gsak_fields(tmp_path, export_cache):
     assert "<gsak:UserFlag>" not in text and "<gsak:Parent>" not in text
 
 
+def test_export_gpx_gsak_fields_off_for_a_device(tmp_path, export_cache, monkeypatch):
+    # #1169: target = "device" leaves them out by default, as Send to GPS.
+    import opensak.gps.garmin as garmin
+    device = tmp_path / "GARMIN_DRIVE"
+    (device / "Garmin" / "GPX").mkdir(parents=True)
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    target = device / "Garmin" / "GPX" / "TestDB.gpx"
+    _export_gpx(tmp_path, 'target = "device"')
+    assert "<gsak:UserFlag>" not in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, 'target = "device", gsak_fields = true')
+    assert "<gsak:UserFlag>" in target.read_text(encoding="utf-8")
+
+
 def test_export_gpx_children_only(tmp_path, export_cache):
     target = tmp_path / "out" / "c.gpx"
     _export_gpx(tmp_path, f'path = {str(target)!r}, children_only = true')

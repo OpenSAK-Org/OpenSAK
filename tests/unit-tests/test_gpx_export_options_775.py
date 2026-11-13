@@ -539,7 +539,8 @@ def test_gps_dialog_defaults_to_the_old_behaviour(qtbot, gps_dialog_env):
     dlg = GpsExportDialog(caches=[])
     qtbot.addWidget(dlg)
     assert dlg._content_combo.currentData() == ""
-    assert dlg._content_settings() == FileExportSettings()
+    # The defaults, without GSAK's own fields (#1169).
+    assert dlg._content_settings() == FileExportSettings(gsak_fields=False)
 
 
 def test_gps_dialog_offers_the_saved_settings(qtbot, gps_dialog_env):
@@ -563,7 +564,7 @@ def test_gps_dialog_offers_the_saved_settings(qtbot, gps_dialog_env):
     assert dlg2._content_combo.currentData() == "profile:c:geo"
     # A setting deleted meanwhile falls back to the defaults.
     FileExportProfile.profile_path("c:geo").unlink()
-    assert dlg2._content_settings() == FileExportSettings()
+    assert dlg2._content_settings() == FileExportSettings(gsak_fields=False)
 
 
 def test_gps_dialog_opens_the_export_dialog_for_new_settings(qtbot, monkeypatch, gps_dialog_env):

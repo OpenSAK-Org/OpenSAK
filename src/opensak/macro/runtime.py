@@ -4850,7 +4850,9 @@ class MacroRuntime:
         rename = self._lua_function(func, "rename", opts.get("rename"))
         describe = self._lua_function(func, "description", opts.get("description"))
         attributes, child_waypoints = self._export_pois(func, opts.get("pois"))
-        max_counts, content = self._export_content(func, opts)
+        max_counts, content = self._export_content(
+            func, opts, gsak_fields=target != "device",
+        )
         if not child_waypoints:
             # pois.child_waypoints = false: no children, also in the count.
             import dataclasses
@@ -4910,8 +4912,12 @@ class MacroRuntime:
         return value
 
     @staticmethod
-    def _export_content(func: str, opts: dict) -> tuple[str, GpxContent]:
-        """The #775 keys of an export_gpx table → (max_counts, content)."""
+    def _export_content(
+        func: str, opts: dict, gsak_fields: bool = True,
+    ) -> tuple[str, GpxContent]:
+        """The #775 keys of an export_gpx table → (max_counts, content).
+        *gsak_fields* is the default of the gsak_fields key: off for a
+        device, as in Send to GPS (#1169)."""
         def _choice(key: str, choices: tuple, default: str) -> str:
             value = opts.get(key, default)
             if value not in choices:
@@ -4944,7 +4950,7 @@ class MacroRuntime:
             my_logs_always=_flag("my_logs_always"),
             user_note_log=_flag("user_note_log"),
             version=version,
-            gsak_fields=_flag("gsak_fields", True),
+            gsak_fields=_flag("gsak_fields", gsak_fields),
         )
 
     @staticmethod
@@ -7472,7 +7478,8 @@ API: tuple[ApiFunction, ...] = (
                     "keys `children`, `children_only`, `max_logs`, "
                     "`my_logs_always`, `user_note_log`, `version`, "
                     "`gsak_fields` and `max_counts` are the options of the "
-                    "export dialog (GPX/GGZ).",
+                    "export dialog (GPX/GGZ); `gsak_fields` is off by "
+                    "default with `target = \"device\"`, as in Send to GPS.",
         example='local path, n = opensak.export_gpx{\n'
                 '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
                 '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'

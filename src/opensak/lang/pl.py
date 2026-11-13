@@ -1915,7 +1915,7 @@ STRINGS: dict[str, str] = {
     "file_export_gsak_fields": "Dołącz pola GSAK",
     "file_export_gsak_fields_tip": "Zapisz także własne pola GSAK (flaga użytkownika, blokada, dane użytkownika, pola niestandardowe i reszta), aby GSAK i OpenSAK odczytały je z pliku. Wyłącz dla plików przeznaczonych dla innych aplikacji i urządzeń: ignorują te pola, które tylko powiększają plik",
     "gps_content_settings": "Opcje zawartości z:",
-    "gps_content_settings_tip": "Punkty podrzędne, logi, notatka użytkownika, wersja GPX i poprawione współrzędne pochodzą z tego ustawienia eksportu pliku. Domyślne: poprawione współrzędne, wszystkie punkty podrzędne i logi, GPX 1.0.",
+    "gps_content_settings_tip": "Punkty podrzędne, logi, notatka użytkownika, wersja GPX i poprawione współrzędne pochodzą z tego ustawienia eksportu pliku. Domyślne: poprawione współrzędne, wszystkie punkty podrzędne i logi, GPX 1.0, bez pól GSAK.",
     "gps_content_settings_default": "Domyślne",
     "gps_content_settings_last_export": "Ostatni eksport pliku",
     "gps_content_settings_edit_tip": "Otwórz okno eksportu pliku, aby utworzyć lub zmienić ustawienia eksportu",

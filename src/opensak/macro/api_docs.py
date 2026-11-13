@@ -1346,7 +1346,7 @@ def render_lua_stub() -> str:
         "---@field my_logs_always? boolean Keep your own logs on top of `max_logs` (default false).",
         "---@field user_note_log? boolean Write the user note as a first log, as GSAK does (default false).",
         '---@field version? "1.0"|"1.1" GPX version (GPX/GGZ, default "1.0").',
-        "---@field gsak_fields? boolean Write GSAK's own fields (user flag, lock, user data, custom fields, ...), so GSAK reads them back (GPX/GGZ, default true).",
+        "---@field gsak_fields? boolean Write GSAK's own fields (user flag, lock, user data, custom fields, ...), so GSAK reads them back (GPX/GGZ, default true; false with target \"device\").",
         "---@field device? string The device's folder, when several Garmin devices are connected.",
         "",
         "---The table passed to `opensak.form{}`.",
