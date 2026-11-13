@@ -102,6 +102,17 @@ class TestFileExportProfile:
             "fmt": "loc", "output_path": "",
             "use_corrected_coords": True, "max_records": 0, "file_name": "",
             "folder": "", "if_exists": "ask",
+            # #775
+            "max_counts": "caches", "children": "all", "children_only": False,
+            "max_logs": 0, "my_logs_always": False, "user_note_log": False,
+            "gpx_version": "1.0",
+            # #1169
+            "gsak_fields": True,
+            # #1303
+            "corrected_final_wp": False,
+            # #454 / #950
+            "name_template": "", "name_max_chars": 0, "desc_template": "",
+            "desc_for_cache_name": False, "remove_chars": "", "first_log": "",
         }}
 
 

@@ -19,12 +19,19 @@ runtime's stop_run(), so pcall cannot catch it. So does a write or a folder
 that is not approved: nothing asks, and the command line names the way out
 (--allow-write, --allow-folder).
 
-approve_host, confirm_declarations and set_center are left out on purpose:
-the runtime handles a host without them (MacroHost).
+set_center (#1304) changes the centre of the active database for this run
+only: its distances are recalculated and stored, so sorting by distance and
+distance filters work, and the centre and distances are set back when the
+run ends (end_macro), so a scheduled job doesn't change the centre the GUI
+shows.
+
+approve_host and confirm_declarations are left out on purpose: the runtime
+handles a host without them (MacroHost).
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional
 
@@ -35,6 +42,12 @@ from opensak.macro import forms as macro_forms
 from opensak.macro.errors import MacroError
 from opensak.macro.runtime import FolderApproval, WriteApproval
 from opensak.utils.run_macro import EXIT_NEEDS_UI, EXIT_USAGE
+
+# The per-database settings holding the active centre (gui.settings: the
+# active_home_name, home_lat and home_lon properties).
+_CENTRE_KEYS = ("active_home_name", "home_lat", "home_lon")
+
+logger = logging.getLogger(__name__)
 
 _TRUE = ("yes", "true", "1")
 _FALSE = ("no", "false", "0")
@@ -140,6 +153,10 @@ class HeadlessHost:
         self._filterset = FilterSet()
         self._filter_label = ""
         self._sort: Optional[SortSpec] = None
+        # #1304: database file → its centre settings before set_center()
+        # first changed them in this run (None = not stored), set back by
+        # end_macro().
+        self._saved_centres: dict[Path, dict[str, Any]] = {}
 
     def set_stop(self, stop_run: Callable[[int, str], None]) -> None:
         self._stop_run = stop_run
@@ -210,6 +227,43 @@ class HeadlessHost:
         if self._lock is not None:
             self._lock(db)
 
+    def set_center(self, name: str, lat: float, lon: float) -> None:
+        """#1304: make (lat, lon) the centre of the active database, shown
+        as *name*, for this run: stored in the database's own settings only
+        (not as the default for new databases, which the GUI would see), and
+        every cache's distance and bearing recalculated. end_macro() sets
+        both back."""
+        from opensak.db import db_settings
+        from opensak.db.database import recalculate_distances
+        from opensak.db.manager import get_db_manager
+
+        db = get_db_manager().active
+        if db is None:
+            raise RuntimeError("no active database")
+        if db.path not in self._saved_centres:
+            stored = db_settings.read_file(db.path)
+            self._saved_centres[db.path] = {key: stored.get(key) for key in _CENTRE_KEYS}
+        for key, value in zip(_CENTRE_KEYS, (name, lat, lon)):
+            db_settings.set_value(key, None, value)
+        recalculate_distances(lat, lon)
+
+    def _restore_centres(self) -> None:
+        """Set the centre of each database set_center() changed back, and
+        recalculate its distances for it."""
+        from opensak.db import db_settings
+        from opensak.db.database import recalculate_distances
+        from opensak.gui.settings import get_settings
+
+        for path, values in self._saved_centres.items():
+            try:
+                db_settings.write_file(path, values)
+                lat, lon = get_settings().home_for_db_file(path)
+                recalculate_distances(lat, lon, db_path=path)
+            except Exception:
+                logger.warning("headless: could not restore the centre of %s", path,
+                               exc_info=True)
+        self._saved_centres = {}
+
     def set_corrected_coords(
         self, gc_code: str, lat: Optional[float], lon: Optional[float]
     ) -> bool:
@@ -232,7 +286,7 @@ class HeadlessHost:
         pass
 
     def end_macro(self) -> None:
-        pass
+        self._restore_centres()
 
     def open_file(self, path: Path) -> bool:
         return True

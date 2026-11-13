@@ -1709,6 +1709,8 @@ def iter_caches_full(caches: list) -> Iterator:
                         selectinload(Cache.logs),
                         selectinload(Cache.waypoints),
                         selectinload(Cache.attributes),
+                        # #700: GPX/GGZ write groundspeak:travelbugs.
+                        selectinload(Cache.trackables),
                         joinedload(Cache.user_note),
                         undefer(Cache.short_description),
                         undefer(Cache.long_description),
@@ -1720,6 +1722,211 @@ def iter_caches_full(caches: list) -> Iterator:
                 by_id.update((c.id, c) for c in rows)
         for c in chunk:
             yield by_id.get(c.id, c) if isinstance(c, reloadable) else c
+
+
+def is_db_cache(cache) -> bool:
+    """True if *cache* is a row of the active database (a Cache or a
+    LightweightCache with an id), as opposed to a stand-in object."""
+    from opensak.db.models import Cache
+    from opensak.filters.engine import LightweightCache
+
+    return isinstance(cache, (Cache, LightweightCache)) and cache.id is not None
+
+
+def _child_filter(children: str) -> list:
+    """SQL conditions selecting the child waypoints an export writes for
+    the #775 children choice ("all", "flagged", "unflagged"; see
+    export.gpx_content.GpxContent.wants_child())."""
+    from opensak.db.models import Waypoint
+
+    if children == "flagged":
+        return [Waypoint.wp_flag.is_(True)]
+    if children == "unflagged":
+        return [Waypoint.wp_flag.isnot(True)]
+    return []
+
+
+def export_bounds(
+    cache_ids: list[int], use_corrected: bool = True, child_waypoints: bool = True,
+    children: str = "all", caches: bool = True, corrected_final_wp: bool = False,
+) -> tuple[float, float, float, float] | None:
+    """(minlat, minlon, maxlat, maxlon) over the caches with *cache_ids*
+    that have coordinates, each at its export position (the corrected
+    coordinates when *use_corrected* and set, as gps.garmin's
+    _effective_coords()), plus, with *child_waypoints*, their child
+    waypoints that have coordinates. None if there is nothing. Points at
+    exactly 0/0 (GSAK's "no coordinates" placeholder) are left out, as in
+    gps.garmin's gpx_bounds(). #775: *children* limits the child waypoints
+    to the flagged or unflagged ones ("none" leaves them out), and
+    *caches*=False leaves the caches' own points out (an export of the
+    child waypoints only). #1303: *corrected_final_wp* adds the corrected
+    coordinates of the caches that have them (the Final Location the
+    export adds there), whatever *children* says.
+
+    #700: the GPX <bounds> must be written before the first <wpt>, while
+    the caches are only loaded in full as they are written (#1075), so the
+    bounds come from the database up front. Chunked like iter_caches_full()
+    (#1041).
+    """
+    from typing import Any
+    from sqlalchemy import and_, case, func, or_
+    from opensak.db.models import Cache, UserNote, Waypoint
+
+    box: tuple[float, float, float, float] | None = None
+    lat: Any = Cache.latitude
+    lon: Any = Cache.longitude
+    if use_corrected:
+        corrected = and_(
+            UserNote.is_corrected.is_(True),
+            UserNote.corrected_lat.isnot(None),
+            UserNote.corrected_lon.isnot(None),
+        )
+        lat = case((corrected, UserNote.corrected_lat), else_=Cache.latitude)
+        lon = case((corrected, UserNote.corrected_lon), else_=Cache.longitude)
+
+    if children == "none":
+        child_waypoints = False
+    with get_session() as session:
+        for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
+            chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
+            rows = []
+            if caches:
+                rows.append(
+                    session.query(func.min(lat), func.min(lon), func.max(lat), func.max(lon))
+                    .select_from(Cache)
+                    .outerjoin(UserNote, UserNote.cache_id == Cache.id)
+                    .filter(
+                        Cache.id.in_(chunk),
+                        Cache.latitude.isnot(None),
+                        Cache.longitude.isnot(None),
+                        or_(lat != 0, lon != 0),
+                    )
+                    .one()
+                )
+            if child_waypoints:
+                rows.append(
+                    session.query(
+                        func.min(Waypoint.latitude), func.min(Waypoint.longitude),
+                        func.max(Waypoint.latitude), func.max(Waypoint.longitude),
+                    )
+                    .join(Cache, Cache.id == Waypoint.cache_id)
+                    .filter(
+                        Waypoint.cache_id.in_(chunk),
+                        Waypoint.latitude.isnot(None),
+                        Waypoint.longitude.isnot(None),
+                        or_(Waypoint.latitude != 0, Waypoint.longitude != 0),
+                        # A cache without coordinates isn't exported, nor
+                        # are its children.
+                        Cache.latitude.isnot(None),
+                        Cache.longitude.isnot(None),
+                        *_child_filter(children),
+                    )
+                    .one()
+                )
+            if corrected_final_wp:
+                rows.append(
+                    session.query(
+                        func.min(UserNote.corrected_lat), func.min(UserNote.corrected_lon),
+                        func.max(UserNote.corrected_lat), func.max(UserNote.corrected_lon),
+                    )
+                    .join(Cache, Cache.id == UserNote.cache_id)
+                    .filter(*_corrected_final_filter(chunk, for_bounds=True))
+                    .one()
+                )
+            for row in rows:
+                if row[0] is None:
+                    continue
+                if box is None:
+                    box = (row[0], row[1], row[2], row[3])
+                else:
+                    box = (min(box[0], row[0]), min(box[1], row[1]),
+                           max(box[2], row[2]), max(box[3], row[3]))
+    return box
+
+
+def _corrected_final_filter(cache_ids: list[int], for_bounds: bool = False) -> list:
+    """SQL conditions selecting the user notes of the caches in
+    *cache_ids* that get a Final Location at their corrected coordinates
+    (#1303): corrected, with both coordinates, on a cache with coordinates
+    (others aren't exported). Joined with Cache. *for_bounds* also leaves
+    out corrected coordinates at 0/0, like any 0/0 point in the bounds."""
+    from typing import Any
+    from sqlalchemy import or_
+    from opensak.db.models import Cache, UserNote
+
+    conditions: list[Any] = [
+        UserNote.cache_id.in_(cache_ids),
+        UserNote.is_corrected.is_(True),
+        UserNote.corrected_lat.isnot(None),
+        UserNote.corrected_lon.isnot(None),
+        Cache.latitude.isnot(None),
+        Cache.longitude.isnot(None),
+    ]
+    if for_bounds:
+        conditions.append(or_(UserNote.corrected_lat != 0, UserNote.corrected_lon != 0))
+    return conditions
+
+
+def export_child_counts(
+    cache_ids: list[int], children: str = "all", corrected_final_wp: bool = False,
+) -> dict[int, int]:
+    """cache id → the number of child waypoints an export writes for it:
+    those with coordinates that pass the #775 *children* choice, plus, with
+    *corrected_final_wp* (#1303), the Final Location the export adds at the
+    corrected coordinates (see GpxContent.corrected_final_wp_for(): not
+    when a written child is already a Final Location there). Caches
+    without such children are left out. Chunked like export_bounds().
+
+    #775: an export limit that counts waypoints (GSAK's "max waypoints")
+    needs each cache's number of children before the export starts.
+    """
+    from sqlalchemy import func
+    from opensak.db.models import Cache, UserNote, Waypoint
+    from opensak.export.gpx_content import CORRECTED_FINAL_WP_TYPE, same_position
+
+    counts: dict[int, int] = {}
+    if not cache_ids or (children == "none" and not corrected_final_wp):
+        return counts
+    with get_session() as session:
+        for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
+            chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
+            child_conditions = [
+                Waypoint.cache_id.in_(chunk),
+                Waypoint.latitude.isnot(None),
+                Waypoint.longitude.isnot(None),
+                *_child_filter(children),
+            ]
+            if children != "none":
+                rows = (
+                    session.query(Waypoint.cache_id, func.count(Waypoint.id))
+                    .filter(*child_conditions)
+                    .group_by(Waypoint.cache_id)
+                    .all()
+                )
+                counts.update({cache_id: n for cache_id, n in rows})
+            if not corrected_final_wp:
+                continue
+            finals: dict[int, list[tuple[float, float]]] = {}
+            if children != "none":
+                for cache_id, lat, lon in (
+                    session.query(Waypoint.cache_id, Waypoint.latitude, Waypoint.longitude)
+                    .filter(*child_conditions, Waypoint.wp_type == CORRECTED_FINAL_WP_TYPE)
+                    .all()
+                ):
+                    if lat is not None and lon is not None:
+                        finals.setdefault(cache_id, []).append((lat, lon))
+            for cache_id, lat, lon in (
+                session.query(UserNote.cache_id, UserNote.corrected_lat, UserNote.corrected_lon)
+                .join(Cache, Cache.id == UserNote.cache_id)
+                .filter(*_corrected_final_filter(chunk))
+                .all()
+            ):
+                if lat is None or lon is None:
+                    continue   # excluded by the filter; for the type checker
+                if any(same_position(f, (lat, lon)) for f in finals.get(cache_id, [])):
+                    continue
+                counts[cache_id] = counts.get(cache_id, 0) + 1
+    return counts
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────

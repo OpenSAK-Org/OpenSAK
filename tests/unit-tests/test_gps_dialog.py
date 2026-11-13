@@ -36,12 +36,19 @@ class TestDeleteWorker:
 # ── ExportWorker ────────────────────────────────────────────────────────────────
 
 class TestExportWorker:
+    @pytest.fixture(autouse=True)
+    def _no_bounds(self, request, monkeypatch):
+        # Most stand-in caches below are plain strings; gpx_bounds() has
+        # its own tests (test_gpx_gsak_structure_700.py).
+        if request.node.name != "test_run_passes_bounds_of_selection":
+            monkeypatch.setattr("opensak.gps.garmin.gpx_bounds", lambda *a, **k: None)
+
     def test_run_to_device(self, monkeypatch, tmp_path):
         (tmp_path / "Garmin").mkdir()
         monkeypatch.setattr("opensak.gps.garmin.export_to_device",
-                            lambda c, d, f, progress_cb=None, total=None: "to device")
+                            lambda c, d, f, progress_cb=None, total=None, bounds=None, **kw: "to device")
         monkeypatch.setattr("opensak.gps.garmin.export_to_file",
-                            lambda c, p, progress_cb=None, total=None: "to file")
+                            lambda c, p, progress_cb=None, total=None, bounds=None, **kw: "to file")
         w = ExportWorker(["c1", "c2", "c3"], tmp_path, "out", max_caches=2)
         got = []
         w.finished.connect(got.append)
@@ -50,7 +57,7 @@ class TestExportWorker:
 
     def test_run_to_file(self, monkeypatch, tmp_path):
         monkeypatch.setattr("opensak.gps.garmin.export_to_file",
-                            lambda c, p, progress_cb=None, total=None: "to file")
+                            lambda c, p, progress_cb=None, total=None, bounds=None, **kw: "to file")
         w = ExportWorker(["c1"], tmp_path, "out", max_caches=0)  # 0 = all
         got = []
         w.finished.connect(got.append)
@@ -59,7 +66,7 @@ class TestExportWorker:
 
     def test_run_error(self, monkeypatch, tmp_path):
         monkeypatch.setattr("opensak.gps.garmin.export_to_file",
-                            lambda c, p, progress_cb=None, total=None: (_ for _ in ()).throw(RuntimeError("disk full")))
+                            lambda c, p, progress_cb=None, total=None, bounds=None, **kw: (_ for _ in ()).throw(RuntimeError("disk full")))
         w = ExportWorker(["c1"], tmp_path, "out", max_caches=0)
         errs = []
         w.error.connect(errs.append)
@@ -88,6 +95,26 @@ class TestExportWorker:
         w.progress.connect(lambda d, t: seen.append((d, t)))
         w.run()
         assert seen and seen[-1] == (3, 3)
+
+    def test_run_passes_bounds_of_selection(self, monkeypatch, tmp_path):
+        # #700: the caches are streamed, so the GPX <bounds> is computed
+        # up front from the selection — only the caches max_caches keeps.
+        from types import SimpleNamespace
+
+        caches = [
+            SimpleNamespace(latitude=lat, longitude=lat, user_note=None, waypoints=[])
+            for lat in (10.0, 20.0, 30.0)
+        ]
+        got = {}
+
+        def _export(c, p, progress_cb=None, total=None, bounds=None, **kw):
+            got["bounds"] = bounds
+            return "to file"
+
+        monkeypatch.setattr("opensak.gps.garmin.export_to_file", _export)
+        w = ExportWorker(caches, tmp_path, "out", max_caches=2)
+        w.run()
+        assert got["bounds"] == (10.0, 10.0, 20.0, 20.0)
 
 
 # ── GpsExportDialog ─────────────────────────────────────────────────────────────
