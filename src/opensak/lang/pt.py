@@ -128,6 +128,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — lê ficheiros fora da pasta de macros e da pasta temporária do OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — escreve, move ou apaga ficheiros fora da pasta temporária do OpenSAK",
     "macro_mgr_perm_open":          "open — abre ficheiros na sua aplicação predefinida",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — lê a área de transferência",
     "macro_mgr_perm_run_macros":    "run-macros — executa outras macros",
     "macro_mgr_perm_network":       "network — contacta {hosts}",
     "macro_mgr_perm_unknown":       "Permissões desconhecidas (para um OpenSAK mais recente?): {names}",
@@ -1960,6 +1961,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "Copiar {count} cache(s) para {target}?",
     "move_caches_done":                        "{count} cache(s) movida(s) com sucesso.",
     "copy_caches_done":                        "{count} cache(s) copiada(s) com sucesso.",
+    "import_cancelled":                        "Importação cancelada. As caches importadas até então são mantidas.",
+    "export_cancelled":                        "Exportação cancelada.",
+    "move_caches_cancelled":                   "Cancelado — {count} cache(s) movida(s) até então.",
+    "copy_caches_cancelled":                   "Cancelado — {count} cache(s) copiada(s) até então.",
     "move_caches_error":                       "Ocorreu um erro ao mover as caches:\n{message}",
     "copy_caches_error":                       "Ocorreu um erro ao copiar as caches:\n{message}",
 

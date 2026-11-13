@@ -131,6 +131,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — leest bestanden buiten de macromap en de tijdelijke map van OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — schrijft, verplaatst of verwijdert bestanden buiten de tijdelijke map van OpenSAK",
     "macro_mgr_perm_open":          "open — opent bestanden in hun standaardprogramma",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — leest het klembord",
     "macro_mgr_perm_run_macros":    "run-macros — voert andere macro's uit",
     "macro_mgr_perm_network":       "network — maakt contact met {hosts}",
     "macro_mgr_perm_unknown":       "Onbekende rechten (voor een nieuwere OpenSAK?): {names}",
@@ -1957,6 +1958,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "{count} cache(s) kopiëren naar {target}?",
     "move_caches_done":                        "{count} cache(s) succesvol verplaatst.",
     "copy_caches_done":                        "{count} cache(s) succesvol gekopieerd.",
+    "import_cancelled":                        "Import geannuleerd. De tot dan geïmporteerde caches blijven bewaard.",
+    "export_cancelled":                        "Export geannuleerd.",
+    "move_caches_cancelled":                   "Geannuleerd — tot dan {count} cache(s) verplaatst.",
+    "copy_caches_cancelled":                   "Geannuleerd — tot dan {count} cache(s) gekopieerd.",
     "move_caches_error":                       "Er is een fout opgetreden bij het verplaatsen:\n{message}",
     "copy_caches_error":                       "Er is een fout opgetreden bij het kopiëren:\n{message}",
 

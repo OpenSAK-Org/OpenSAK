@@ -232,6 +232,7 @@ class PQEmailCheckDialog(WorkerGuardMixin, QDialog):
         self._check_btn.setEnabled(True)
         self._open_settings_btn.setEnabled(True)
 
+
     # ── Log helper ────────────────────────────────────────────────────────────
 
     def _append_log(self, text: str) -> None:

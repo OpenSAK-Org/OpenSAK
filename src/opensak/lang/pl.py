@@ -130,6 +130,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — czyta pliki spoza folderu makr i folderu tymczasowego OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — zapisuje, przenosi lub usuwa pliki spoza folderu tymczasowego OpenSAK",
     "macro_mgr_perm_open":          "open — otwiera pliki w ich domyślnej aplikacji",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — odczytuje schowek",
     "macro_mgr_perm_run_macros":    "run-macros — uruchamia inne makra",
     "macro_mgr_perm_network":       "network — łączy się z {hosts}",
     "macro_mgr_perm_unknown":       "Nieznane uprawnienia (dla nowszego OpenSAK?): {names}",
@@ -1960,6 +1961,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "Skopiować {count} skrytek do {target}?",
     "move_caches_done":                        "Pomyślnie przeniesiono {count} skrytek.",
     "copy_caches_done":                        "Pomyślnie skopiowano {count} skrytek.",
+    "import_cancelled":                        "Import anulowany. Skrytki zaimportowane do tej pory zostają zachowane.",
+    "export_cancelled":                        "Eksport anulowany.",
+    "move_caches_cancelled":                   "Anulowano — do tej pory przeniesiono {count} skrytek.",
+    "copy_caches_cancelled":                   "Anulowano — do tej pory skopiowano {count} skrytek.",
     "move_caches_error":                       "Wystąpił błąd podczas przenoszenia skrytek:\n{message}",
     "copy_caches_error":                       "Wystąpił błąd podczas kopiowania skrytek:\n{message}",
 

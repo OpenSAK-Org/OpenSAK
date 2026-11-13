@@ -11,7 +11,9 @@
 # the GPX import and KML export dialogs.
 #
 # The dialogs' own workers need files, devices or a network, so a stand-in
-# that runs until the test releases it takes their place.
+# that runs until the test releases it takes their place. Where the job can
+# be cancelled, closing cancels it instead (the cancellation itself is in
+# tests/unit-tests/test_cancel_long_jobs_1265.py).
 
 import threading
 from dataclasses import dataclass
@@ -24,17 +26,26 @@ pytest.importorskip("pytestqt")
 from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtTest import QTest
 
+from opensak.utils.cancel import CancelFlag
+
 
 class _BlockingWorker(QThread):
-    """Stands in for a dialog's worker: runs until the test releases it."""
+    """Stands in for a dialog's worker: runs until the test releases it.
+    Has both ways the real workers are cancelled: a CancelFlag (`cancel`)
+    and request_cancel()."""
 
     def __init__(self, gate: threading.Event, parent=None):
         super().__init__(parent)
         self._gate = gate
-        self.cancel_requested = False
+        self.cancel = CancelFlag()
+        self._requested = False
 
     def request_cancel(self) -> None:
-        self.cancel_requested = True
+        self._requested = True
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._requested or self.cancel.is_set()
 
     def run(self) -> None:
         self._gate.wait(10)
@@ -142,15 +153,16 @@ def _boundary_check(parent, mp):
 
 
 CASES = {
-    "gpx-import": _Case(_import),
+    "gpx-import": _Case(_import, cancels=True),
     "gpx-import-location-lookup": _Case(_import, attr="_geo_worker", cancels=True),
-    "kml-export": _Case(_kml),
-    "file-export": _Case(_file_export),
-    "poi-export": _Case(_poi_export),
-    "send-to-gps": _Case(_gps),
+    "kml-export": _Case(_kml, cancels=True),
+    "file-export": _Case(_file_export, cancels=True),
+    "poi-export": _Case(_poi_export, cancels=True),
+    "send-to-gps": _Case(_gps, cancels=True),
+    # Deleting the old files can't be stopped; the export after it is skipped.
     "send-to-gps-delete-old": _Case(_gps, attr="_delete_worker"),
     "update-found": _Case(_found),
-    "move-copy-caches": _Case(_move),
+    "move-copy-caches": _Case(_move, cancels=True),
     "update-location": _Case(_update_location, cancels=True),
     "pq-email-check": _Case(_pq_email_check),
     "gsak-filter-import": _Case(_gsak_filter_import),

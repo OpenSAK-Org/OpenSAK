@@ -654,6 +654,10 @@
 				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string}]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.get_clipboard" func="yes">
+			<Overload retVal="string" descr="The text on the system clipboard (GSAK's GetClipText), e.g. to try a macro on&#x0a;different texts by copying them. The clipboard may hold private text, so the&#x0a;user is asked first, once per run; if they say no, the macro stops with an&#x0a;error. A macro that reads it should declare `read-clipboard` in its&#x0a;`Permissions` header. Needs the user interface.&#x0a;Returns string — The text, &quot;&quot; if the clipboard holds no text.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.get_url" func="yes">
 			<Overload retVal="string, opensak.UrlInfo" descr="Download a web page or file (GSAK's GetUrl), e.g. to check a puzzle answer&#x0a;online or fetch a list before working with it. GET only, over http or https; no&#x0a;cookies, no custom headers, and no user name or password in the URL. Before a&#x0a;macro first contacts a web site (host), the user is asked: this time only,&#x0a;always (for this macro, listed in Settings → Folder permissions) or deny. Each&#x0a;redirect (at most 5) is checked the same way. A host on the local network (a&#x0a;router, a NAS) is asked about separately. geocaching.com, coord.info and&#x0a;Groundspeak's other sites (waymarking.com, wherigo.com, ...) can never be&#x0a;contacted: their terms of use don't allow automated access. List the hosts in&#x0a;the macro's `Network:` header so users see them before running it; the header&#x0a;approves nothing by itself. An HTTP error status (404, 500) is no error: check&#x0a;`info.status`. A failed request (no answer, too large, refused) raises an error,&#x0a;which `pcall` catches. At most 200 requests per run, and at least 1 s between&#x0a;two requests to the same host.&#x0a;Returns string, opensak.UrlInfo — The body, as text decoded with the charset the&#x0a;server names (UTF-8 if none; invalid bytes replaced) or, with `binary`, as&#x0a;bytes; and `{ status, content_type, url }`, `url` being the address after&#x0a;redirects.">
 				<Param name="url: string" />
@@ -745,8 +749,27 @@
 				<Param name="fields: opensak.WaypointInsert" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.inspect" func="yes">
+			<Overload retVal="string" descr="Any value as readable text, e.g. to see what a table holds while writing a&#x0a;macro: print() only shows a table's address. The list part comes first, then the&#x0a;other keys sorted, so the same table always gives the same text. Strings are&#x0a;quoted. A table nested deeper than `depth` shows as `{...}`, a table inside&#x0a;itself as `&lt;cycle&gt;`, a function as `&lt;function&gt;`; metatables are ignored. Short&#x0a;tables stay on one line. Text longer than 1,000,000 characters is cut off and&#x0a;ends with `... (truncated)`.&#x0a;Returns string — The text.">
+				<Param name="value: any" />
+				<Param name="[options: { depth?: integer, indent?: integer }]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.is_headless" func="yes">
 			<Overload retVal="boolean" descr="Whether the macro runs without a window, under `opensak run`, so it can skip its&#x0a;dialogs. False in OpenSAK and with `opensak --run-macro`.&#x0a;Returns boolean — True under `opensak run`.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.json" />
+		<KeyWord name="opensak.json.decode" func="yes">
+			<Overload retVal="any" descr="Turn JSON text into Lua values, e.g. what `opensak.get_url()` downloaded: an&#x0a;object becomes a table with string keys, an array a list starting at 1. Invalid&#x0a;JSON is an error. A Lua table cannot hold nil, so by default a null member is&#x0a;simply absent (it reads as nil) and a null array item leaves a gap, where `#`&#x0a;and `ipairs` are unreliable. With the option `null`, a string, number or boolean&#x0a;of your choice stands in for every null. At most 20,000,000 characters.&#x0a;Returns any — The value; nil if the text is just null.">
+				<Param name="text: string" />
+				<Param name="[options: { null?: string|number|boolean }]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.json.encode" func="yes">
+			<Overload retVal="string" descr="Turn a Lua value into JSON text. Strings, numbers, booleans and nested tables&#x0a;can be encoded, following the same rules as `opensak.settings.save()`: a table&#x0a;needs string keys, or 1, 2, 3, … for an array. Functions, cyclic tables and&#x0a;infinite numbers are refused. Object keys are sorted, so the same table always&#x0a;gives the same text. An empty table becomes `[]`, or `{}` with the option `empty&#x0a;= &quot;object&quot;`. Since a table cannot hold nil, write null with the option `null`:&#x0a;every value equal to it becomes null, also the one `opensak.json.decode()` put&#x0a;in. `indent`: spaces per level for readable text.&#x0a;Returns string — The JSON text.">
+				<Param name="value: any" />
+				<Param name="[options: { null?: string|number|boolean, empty?: &quot;array&quot;|&quot;object&quot;, indent?: integer }]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.list_dir" func="yes">
@@ -756,8 +779,13 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.log" func="yes">
-			<Overload descr="Write a message to OpenSAK's log file and the macro output. Run with `opensak&#x0a;--run-macro`, it goes to stderr while print() goes to stdout.">
+			<Overload descr="Write a message to OpenSAK's log file and the macro output. Run with `opensak&#x0a;--run-macro`, it goes to stderr while print() goes to stdout. A table is written&#x0a;out with its contents, as `opensak.inspect()` does.">
 				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.log_vars" func="yes">
+			<Overload descr="For debugging: write the variables in scope at this line to the log, one `name =&#x0a;value` line each, as `opensak.log()` does. The locals come first, in the order&#x0a;they were declared, then the arguments passed as `...`, then the upvalues&#x0a;(locals of an enclosing function that the code uses). With `globals = true` the&#x0a;globals the macro added or changed follow, sorted. Values are written as&#x0a;`opensak.inspect()` does, a table on one line. Call it from the macro's code:&#x0a;passed to `pcall()`, `coroutine.wrap()` or another library function, it raises&#x0a;an error.">
+				<Param name="[options: { depth?: integer, globals?: boolean }]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.logs" func="yes">
@@ -908,6 +936,11 @@
 			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
 				<Param name="coords: string" />
 				<Param name="[name: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.set_clipboard" func="yes">
+			<Overload descr="Put text on the system clipboard, replacing what is there (GSAK's Clip), e.g. to&#x0a;paste a downloaded page into a regex tester. At most 10,000,000 characters.&#x0a;Needs the user interface.">
+				<Param name="text: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.set_companion_table" func="yes">
@@ -1145,7 +1178,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.update" func="yes">
-			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). Before a macro's first change, OpenSAK asks the user&#x0a;to allow that macro (see Changing caches). To change many caches, run the loop&#x0a;inside opensak.transaction(): much faster, and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). `description` changes the listing description: a&#x0a;table like the one `opensak.description()` returns, where keys left out stay,&#x0a;`html` applies to both texts and `false` clears it all. An import replaces the&#x0a;description and `changed_date` unless the cache is locked. Before a macro's&#x0a;first change, OpenSAK asks the user to allow that macro (see Changing caches).&#x0a;To change many caches, run the loop inside opensak.transaction(): much faster,&#x0a;and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.CacheUpdate" />
 			</Overload>

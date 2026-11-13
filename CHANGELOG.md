@@ -4,6 +4,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.4] — Unreleased
+
+### Added
+
+- **Macros can use the clipboard (#1227)** — `opensak.set_clipboard(text)` and
+  `opensak.get_clipboard()` are GSAK's `Clip` and `GetClipText`, e.g. to paste
+  a downloaded page into a regex tester, or to try a macro on different texts.
+  The clipboard may hold private text, so reading it asks the user first, once
+  per run; a macro declares this with `read-clipboard` in its `Permissions`
+  header. The macro API is now version 5. Contributed by nagisml.
+- **Macros can read and write JSON** — `opensak.json.decode(text)` and
+  `opensak.json.encode(value)`, so a macro no longer needs a JSON parser of its
+  own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
+  default; the `null` option puts a value of your choice in its place and
+  writes it back as null. Contributed by nagisml.
+- **Macros can log their variables (#1276)** — for debugging,
+  `opensak.log_vars()` writes the variables in scope at that line to the log,
+  one `name = value` line each: locals, arguments and upvalues, tables on one
+  line. With `{ globals = true }` the globals the macro added or changed are
+  listed too. The new example macro `debugging_a_macro.lua` shows it next to
+  `opensak.log()` and `opensak.inspect()`. Contributed by nagisml.
+- **Macros can show what a table holds (#1275)** — `opensak.inspect(value)`
+  writes any value out as readable text: nested tables indented, keys sorted,
+  strings quoted, a table inside itself as `<cycle>`. `opensak.log()` now does
+  the same for a table, where it showed only the table's address. Contributed
+  by nagisml.
+- **Macros can change a cache's description and changed date** —
+  `opensak.update()` and `opensak.insert{}` take `description` (a table like
+  the one `opensak.description()` returns) and `changed_date`, which until now
+  needed `opensak.sql_write()`. Caches read by macros have the new field
+  `changed_date`. Contributed by nagisml.
+
+- **Cancel for imports, exports, Send to GPS and Move/Copy (#1265)** —
+  while a GPX/PQ import, a GPX/LOC/GGZ, KML or POI export, Send to GPS or
+  Move/Copy caches runs, the dialog's Close button reads **Cancel** and
+  stops it; Escape does the same. An import stops after the caches being
+  saved (those imported so far are kept); an export writes no file and
+  leaves a previous one as it was; Move/Copy stops between groups of
+  caches, so a cache is never left in both databases. Cancel in **Download
+  boundary data** now also stops the download between packs instead of
+  only before it starts. Contributed by nagisml.
+
+### Fixed
+
+- **KML export of large databases no longer runs out of memory (#1078)** —
+  the KML export (File export, the KML export dialog and macros using
+  `opensak.export_file(..., "kml")`) now writes the file one cache at a
+  time instead of building the whole document in memory, as the
+  GPX/LOC/GGZ export has done since #1075. A database with 100,000+
+  caches made OpenSAK crash. The content of the file is unchanged; a
+  failed or cancelled export keeps the previous file. Contributed by
+  nagisml.
+
+---
+
 ## [1.23.0-beta.3] — 2026-11-12
 
 > Headline: **macros without a window, and a Macros toolbar.**

@@ -129,6 +129,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — liest Dateien ausserhalb des Makro-Ordners und des temporären Ordners von OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — schreibt, verschiebt oder löscht Dateien ausserhalb des temporären Ordners von OpenSAK",
     "macro_mgr_perm_open":          "open — öffnet Dateien in ihrem Standardprogramm",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — liest die Zwischenablage",
     "macro_mgr_perm_run_macros":    "run-macros — führt andere Makros aus",
     "macro_mgr_perm_network":       "network — kontaktiert {hosts}",
     "macro_mgr_perm_unknown":       "Unbekannte Berechtigungen (für ein neueres OpenSAK?): {names}",
@@ -1961,6 +1962,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "{count} Cache(s) nach {target} kopieren?",
     "move_caches_done":                        "{count} Cache(s) erfolgreich verschoben.",
     "copy_caches_done":                        "{count} Cache(s) erfolgreich kopiert.",
+    "import_cancelled":                        "Import abgebrochen. Bis dahin importierte Caches bleiben erhalten.",
+    "export_cancelled":                        "Export abgebrochen.",
+    "move_caches_cancelled":                   "Abgebrochen — bis dahin {count} Cache(s) verschoben.",
+    "copy_caches_cancelled":                   "Abgebrochen — bis dahin {count} Cache(s) kopiert.",
     "move_caches_error":                       "Beim Verschieben der Caches ist ein Fehler aufgetreten:\n{message}",
     "copy_caches_error":                       "Beim Kopieren der Caches ist ein Fehler aufgetreten:\n{message}",
 

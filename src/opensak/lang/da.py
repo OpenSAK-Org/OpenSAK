@@ -128,6 +128,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — læser filer uden for makromappen og OpenSAKs midlertidige mappe",
     "macro_mgr_perm_write_files":   "write-files — skriver, flytter eller sletter filer uden for OpenSAKs midlertidige mappe",
     "macro_mgr_perm_open":          "open — åbner filer i deres standardprogram",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — læser udklipsholderen",
     "macro_mgr_perm_run_macros":    "run-macros — kører andre makroer",
     "macro_mgr_perm_network":       "network — kontakter {hosts}",
     "macro_mgr_perm_unknown":       "Ukendte tilladelser (til en nyere OpenSAK?): {names}",
@@ -1959,6 +1960,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "Kopiér {count} cache(s) til {target}?",
     "move_caches_done":                        "{count} cache(s) flyttet.",
     "copy_caches_done":                        "{count} cache(s) kopieret.",
+    "import_cancelled":                        "Import annulleret. Caches importeret indtil da bevares.",
+    "export_cancelled":                        "Eksport annulleret.",
+    "move_caches_cancelled":                   "Annulleret — {count} cache(s) var flyttet inden da.",
+    "copy_caches_cancelled":                   "Annulleret — {count} cache(s) var kopieret inden da.",
     "move_caches_error":                       "Der opstod en fejl under flytning af caches:\n{message}",
     "copy_caches_error":                       "Der opstod en fejl under kopiering af caches:\n{message}",
 
