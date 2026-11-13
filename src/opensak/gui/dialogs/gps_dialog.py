@@ -30,6 +30,14 @@ from opensak.utils.cancel import CancelFlag, Cancelled
 # Issue #656 (CheminerWill's follow-up suggestion): remember the "use
 # database name as filename" checkbox state across exports/sessions.
 _USE_DB_NAME_KEY = "gps.use_db_name_as_filename"
+# #775: where Send to GPS takes its content options (corrected coordinates,
+# children, logs, user note log, GPX version, what the limit counts) from:
+# "" = the defaults (what Send to GPS always wrote before), "last:" = the
+# settings of the last file export, "profile:<name>" = a saved export setting.
+_CONTENT_SETTINGS_KEY = "gps.content_settings"
+_CONTENT_DEFAULT = ""
+_CONTENT_LAST = "last:"
+_CONTENT_PROFILE = "profile:"
 
 
 def _sanitize_db_name_for_filename(name: str) -> str:
@@ -78,25 +86,48 @@ class ExportWorker(QThread):
     progress  = Signal(int, int)   # (done, total)
     cancelled = Signal()           # stopped by cancel (#1265)
 
-    def __init__(self, caches, device_path, filename, max_caches, export_format="gpx"):
+    def __init__(self, caches, device_path, filename, max_caches, export_format="gpx",
+                 settings=None):
         super().__init__()
+        from opensak.export.file_export_settings import FileExportSettings
+
         self.caches        = caches
         self.device_path   = device_path
         self.filename      = filename
         self.max_caches    = max_caches
         self.export_format = export_format   # "gpx" eller "ggz"
         self.cancel        = CancelFlag()
+        # #775: the file export settings supplying the content options.
+        self.settings      = settings if settings is not None else FileExportSettings()
+
+    def _select(self) -> list:
+        """The caches to send: max_caches of them, counted as the settings'
+        max_counts says (#775)."""
+        if self.max_caches <= 0:
+            return self.caches
+        if self.settings.max_counts != "waypoints":
+            return self.caches[:self.max_caches]
+        from opensak.export.file_export import select_for_export
+        return select_for_export(
+            self.caches, self.max_caches, "waypoints", self.export_format,
+            self.settings.content(),
+        )
 
     def run(self) -> None:
         try:
             from opensak.db.database import iter_caches_full
-            from opensak.gps.garmin import is_mtp_device
-            selected = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
+            from opensak.gps.garmin import gpx_bounds, is_mtp_device
+            selected = self._select()
+            content = self.settings.content().for_format(self.export_format)
+            use_corrected = self.settings.use_corrected_coords
             # #1075: reloaded and written a chunk at a time, so a large
             # export never holds every fully loaded cache in memory.
             caches = iter_caches_full(selected)
             total = len(selected)
+            # #700: the GPX <bounds>, needed before the first cache is written.
+            bounds = gpx_bounds(selected, use_corrected, True, content)
             cb = make_progress_cb(self.progress.emit, self.cancel)
+            options = {"content": content, "use_corrected": use_corrected}
 
             is_device = (
                 is_mtp_device(self.device_path)
@@ -110,25 +141,27 @@ class ExportWorker(QThread):
                 from opensak.gps.garmin import export_ggz_to_device, export_ggz_to_file
                 if is_device:
                     result = export_ggz_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total, bounds=bounds,
+                        **options,
                     )
                 else:
                     result = export_ggz_to_file(
                         caches,
                         self.device_path / f"{self.filename}.ggz",
-                        progress_cb=cb, total=total,
+                        progress_cb=cb, total=total, bounds=bounds, **options,
                     )
             else:
                 from opensak.gps.garmin import export_to_device, export_to_file
                 if is_device:
                     result = export_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total, bounds=bounds,
+                        **options,
                     )
                 else:
                     result = export_to_file(
                         caches,
                         self.device_path / f"{self.filename}.gpx",
-                        progress_cb=cb, total=total,
+                        progress_cb=cb, total=total, bounds=bounds, **options,
                     )
 
             self.finished.emit(result)
@@ -312,6 +345,27 @@ class GpsExportDialog(WorkerGuardMixin, QDialog):
         max_row.addStretch()
         opt_layout.addLayout(max_row)
 
+        # #775: the content options (children, logs, user note log, GPX
+        # version, corrected coordinates, what the limit counts) come from
+        # a file export setting, so they're set up in one place.
+        content_row = QHBoxLayout()
+        content_row.addWidget(QLabel(tr("gps_content_settings")))
+        self._content_combo = QComboBox()
+        self._content_combo.setToolTip(tr("gps_content_settings_tip"))
+        self._load_content_settings()
+        content_row.addWidget(self._content_combo, 1)
+        # Export settings are created and changed in the file export
+        # dialog; this opens it from here.
+        self._content_edit_btn = QPushButton(tr("edit"))
+        self._content_edit_btn.setToolTip(tr("gps_content_settings_edit_tip"))
+        self._content_edit_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self._content_edit_btn.setAutoDefault(False)
+        self._content_edit_btn.clicked.connect(self._edit_content_settings)
+        content_row.addWidget(self._content_edit_btn)
+        opt_layout.addLayout(content_row)
+
         # Slet eksisterende filer (kun relevant ved eksport direkte til enhed)
         self._cb_delete_gpx = QCheckBox(tr("gps_delete_cb"))
         self._cb_delete_gpx.setToolTip(tr("gps_delete_cb_tip"))
@@ -351,6 +405,66 @@ class GpsExportDialog(WorkerGuardMixin, QDialog):
         layout.addLayout(btn_row)
 
         self._selected_file_path: Path | None = None
+
+    def _load_content_settings(self) -> None:
+        """Fill the content settings combo — "Default" (what Send to GPS
+        always wrote), the last file export, then the saved export
+        settings — and select the one used last time."""
+        from opensak.export.file_export_settings import FileExportProfile
+
+        self._content_combo.addItem(tr("gps_content_settings_default"), _CONTENT_DEFAULT)
+        self._content_combo.addItem(tr("gps_content_settings_last_export"), _CONTENT_LAST)
+        for path in FileExportProfile.list_profiles():
+            try:
+                name = FileExportProfile.load(path).name
+            except Exception:
+                continue
+            self._content_combo.addItem(name, _CONTENT_PROFILE + name)
+        wanted = get_store().get(_CONTENT_SETTINGS_KEY, _CONTENT_DEFAULT)
+        self._content_combo.setCurrentIndex(max(0, self._content_combo.findData(wanted)))
+
+    def _edit_content_settings(self) -> None:
+        """Open the file export dialog, where export settings are created
+        and changed (#775). Afterwards the combo offers them all again and
+        selects the setting chosen there (or keeps its own choice)."""
+        if self._worker is not None and self._worker.isRunning():
+            return
+        from opensak.gui.dialogs.file_export_dialog import FileExportDialog
+
+        dlg = FileExportDialog(self._caches, self)
+        dlg.exec()
+        chosen = None
+        if dlg._settings_combo.currentData() is not None:
+            chosen = _CONTENT_PROFILE + dlg._settings_combo.currentText()
+        dlg.deleteLater()
+        current = self._content_combo.currentData()
+        self._content_combo.clear()
+        self._load_content_settings()
+        index = self._content_combo.findData(chosen or current)
+        if index >= 0:
+            self._content_combo.setCurrentIndex(index)
+
+    def _content_settings(self):
+        """The file export settings the content options come from (only
+        their content options are used: format, folder and file name are
+        this dialog's own)."""
+        from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
+
+        choice = self._content_combo.currentData() or _CONTENT_DEFAULT
+        get_store().set(_CONTENT_SETTINGS_KEY, choice)
+        if choice == _CONTENT_LAST:
+            return FileExportProfile.load_last_used()
+        if choice.startswith(_CONTENT_PROFILE):
+            name = choice[len(_CONTENT_PROFILE):]
+            for path in FileExportProfile.list_profiles():
+                try:
+                    profile = FileExportProfile.load(path)
+                except Exception:
+                    continue
+                if profile.name == name:
+                    return profile.settings
+        # The defaults: also when a saved setting was deleted meanwhile.
+        return FileExportSettings()
 
     def _scan_devices(self) -> None:
         """Scan for tilsluttede Garmin enheder."""
@@ -580,7 +694,8 @@ class GpsExportDialog(WorkerGuardMixin, QDialog):
         """Start selve export-arbejderen."""
         self._log.append(tr("gps_exporting", count=len(self._caches)))
         self._worker = ExportWorker(
-            self._caches, dest, filename, max_caches, self._export_format
+            self._caches, dest, filename, max_caches, self._export_format,
+            settings=self._content_settings(),
         )
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)

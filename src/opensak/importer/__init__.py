@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
+from opensak.export.gpx_content import is_user_note_log, normalize_note
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -579,6 +580,9 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             trackables.append({
                 "ref":  tb_el.get("ref"),
                 "name": _text(tb_el, "gs:name", NS),
+                # #700: the numeric trackable id, kept in tracking_code
+                # like the GSAK database import does.
+                "tracking_code": tb_el.get("id") or None,
             })
 
     # ── GSAK extensions (issue #58, #129, #73) ────────────────────────────────
@@ -1234,7 +1238,23 @@ def _upsert_cache(
 
     DUMMY_LOG_IDS = {"0", None, ""}
     seen_log_ids_this_file: set[str] = set()
+    # #775: an export with "user note as first log" writes the user note as
+    # a synthetic log (id -2 by "GSAK", as GSAK does). It is the user note,
+    # not a log: skipped when its text is the note in this file or the one
+    # the cache already has. GSAK's other notes of that form stay logs.
+    existing_note = (
+        cache.user_note.note
+        if existing is not None and cache.user_note is not None else None
+    )
+    user_notes = {
+        normalize_note(t) for t in (data.get("gsak_user_note"), existing_note) if t
+    }
     for idx, lg in enumerate(data.get("logs", [])):
+        if user_notes and is_user_note_log(
+            lg["log_id"], lg.get("finder"), lg.get("finder_id"),
+            lg.get("log_type"), lg.get("text"), user_notes,
+        ):
+            continue
         raw_id = lg["log_id"]
         is_dummy = raw_id in DUMMY_LOG_IDS
         if not is_dummy and raw_id is not None:
@@ -1323,7 +1343,8 @@ def _upsert_cache(
 
     # Trackables
     for tb in data.get("trackables", []):
-        session.add(Trackable(cache=cache, ref=tb["ref"], name=tb["name"]))
+        session.add(Trackable(cache=cache, ref=tb["ref"], name=tb["name"],
+                              tracking_code=tb.get("tracking_code")))
 
     # ── Issue #489/#491: Cache trackable count for fast UI display ──────────
     # Mirrors log_count above: old trackables were deleted at the start of
