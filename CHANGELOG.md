@@ -30,6 +30,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   status (#766) stays right for OpenSAK's own files. Contributed by
   nagisml.
 
+- **Special tags in the GPX/GGZ export (#454)** — templates for the
+  waypoint name (with a maximum length), the description (optionally
+  also the cache name) and an extra first log, filled per cache with
+  GSAK's special tags such as `%Name`, `%Dif`, `%Hint`, `%LastFound`
+  or `%FavPoints`. A GPS that shows logs but no hint can show it this
+  way. Also characters to remove from names and texts. In the file
+  export dialog, saved export settings and `opensak.export_gpx{}`; the
+  User Guide lists the tags. The extra log is skipped on re-import.
+  Contributed by nagisml.
+
 ### Changed
 
 - **GPX/GGZ export follows GSAK's file structure (#700)** — the header
