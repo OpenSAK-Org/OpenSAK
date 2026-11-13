@@ -1949,6 +1949,23 @@ def test_export_gpx_gsak_fields_off_for_a_device(tmp_path, export_cache, monkeyp
     assert "<gsak:UserFlag>" in target.read_text(encoding="utf-8")
 
 
+def test_export_gpx_corrected_final_wp(tmp_path, export_cache):
+    # #1303: a Final Location at GCEXP1's corrected coordinates, also with
+    # children = "none"; pois.child_waypoints = false leaves it out too.
+    target = tmp_path / "out" / "f.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}')
+    assert "<name>FLEXP1</name>" not in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, f'path = {str(target)!r}, corrected_final_wp = true, '
+                          'children = "none"')
+    text = target.read_text(encoding="utf-8")
+    assert '<wpt lat="46.500000" lon="7.500000">' in text
+    assert "<name>FLEXP1</name>" in text and "PKEXP1" not in text
+    _export_gpx(tmp_path, f'path = {str(target)!r}, corrected_final_wp = true, '
+                          'pois = { child_waypoints = false }, max = 1, '
+                          'max_counts = "waypoints"')
+    assert "<name>FL" not in target.read_text(encoding="utf-8")
+
+
 def test_export_gpx_special_tag_templates(tmp_path, export_cache):
     # #454/#950: the dialog's special-tag templates as export_gpx keys.
     target = tmp_path / "out" / "t.gpx"

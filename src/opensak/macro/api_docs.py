@@ -1347,6 +1347,7 @@ def render_lua_stub() -> str:
         "---@field user_note_log? boolean Write the user note as a first log, as GSAK does (default false).",
         '---@field version? "1.0"|"1.1" GPX version (GPX/GGZ, default "1.0").',
         "---@field gsak_fields? boolean Write GSAK's own fields (user flag, lock, user data, custom fields, ...), so GSAK reads them back (GPX/GGZ, default true; false with target \"device\").",
+        "---@field corrected_final_wp? boolean Add a Final Location waypoint at the corrected coordinates of each corrected cache, whatever `children` says, so an app that refreshes the cache online keeps the solution (GPX/GGZ, default false).",
         '---@field name_template? string Special tags for the waypoint name, e.g. "%drop2%con1" (GPX/GGZ, default "": the GC code).',
         "---@field name_max_chars? integer Cut waypoint names to this many characters, keeping them unique (default 0 = no limit).",
         '---@field desc_template? string Special tags for the waypoint description (GPX/GGZ, default "": "%name by %by (%dif/%ter)").',

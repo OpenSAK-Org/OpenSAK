@@ -1913,6 +1913,8 @@ STRINGS: dict[str, str] = {
     "file_export_gpx_version_tip": "GPX 1.0 er formatet for pocket queries fra geocaching.com og det, Garmin-enheder læser geocaches fra. GPX 1.1 er den nyere standard, som nogle apps kræver; Garmin-enheder viser måske ikke cache-detaljerne fra en 1.1-fil.",
     "file_export_gsak_fields": "Medtag GSAK-felter",
     "file_export_gsak_fields_tip": "Skriv også GSAK's egne felter (brugerflag, lås, brugerdata, brugerdefinerede felter og resten), så GSAK og OpenSAK kan læse dem tilbage fra filen. Slå det fra for filer til andre apps og enheder: de ignorerer felterne, som kun gør filen større",
+    "file_export_corrected_final_wp": "Final-waypoint ved korrigerede koordinater",
+    "file_export_corrected_final_wp_tip": "Tilføj et underwaypoint \"Final Location\" ved de korrigerede koordinater for hver cache med korrigerede koordinater, også når der ellers ikke skrives underwaypoints. Apps, der opdaterer en cache online, mister dens korrigerede koordinater, men beholder dens waypoints. OpenSAK springer dette waypoint over, når filen importeres igen",
     "file_export_texts_group": "Navne og tekster (GPX/GGZ)",
     "file_export_name_template": "Waypoint-navn:",
     "file_export_name_template_tip": "Særlige tags til hver caches waypoint-navn, f.eks. %drop2%con1 (se ⓘ-knappen). Tom: GC-koden.",

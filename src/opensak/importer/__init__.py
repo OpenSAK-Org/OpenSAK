@@ -23,7 +23,9 @@ from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
-from opensak.export.gpx_content import is_extra_info_log, is_user_note_log, normalize_note
+from opensak.export.gpx_content import (
+    is_corrected_final_wp, is_extra_info_log, is_user_note_log, normalize_note,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -990,6 +992,11 @@ def _parse_extra_wpt(wpt_el) -> Optional[dict]:
     desc    = _text(wpt_el, "gpx:desc",    gpx_ns)
     comment = _text(wpt_el, "gpx:cmt",     gpx_ns)
     name    = _text(wpt_el, "gpx:urlname", gpx_ns) or desc or raw_name
+
+    # #1303: the Final Location an OpenSAK export adds at the corrected
+    # coordinates isn't a real waypoint: skipped, like the extra-info log.
+    if is_corrected_final_wp(wp_type, comment):
+        return None
 
     return {
         "prefix":      prefix,

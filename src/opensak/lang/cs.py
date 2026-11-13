@@ -1909,6 +1909,8 @@ STRINGS: dict[str, str] = {
     "file_export_gpx_version_tip": "GPX 1.0 je formát pocket queries z geocaching.com, ze kterého přístroje Garmin čtou keše. GPX 1.1 je novější standard, který některé aplikace vyžadují; přístroje Garmin nemusí zobrazit podrobnosti keší ze souboru 1.1.",
     "file_export_gsak_fields": "Zahrnout pole GSAK",
     "file_export_gsak_fields_tip": "Zapsat i vlastní pole GSAK (uživatelský příznak, zámek, uživatelská data, vlastní pole a ostatní), aby je GSAK a OpenSAK ze souboru načetly zpět. Pro soubory pro jiné aplikace a přístroje vypněte: tato pole ignorují a soubor jen zvětšují",
+    "file_export_corrected_final_wp": "Waypoint Final na opravených souřadnicích",
+    "file_export_corrected_final_wp_tip": "U každé keše s opravenými souřadnicemi přidat podřízený waypoint „Final Location“ na opravených souřadnicích, i když se jinak podřízené waypointy nezapisují. Aplikace, které keš aktualizují online, ztratí její opravené souřadnice, ale ponechají její waypointy. OpenSAK tento waypoint při opětovném importu souboru přeskočí",
     "file_export_texts_group": "Názvy a texty (GPX/GGZ)",
     "file_export_name_template": "Název waypointu:",
     "file_export_name_template_tip": "Speciální značky pro název waypointu každé keše, např. %drop2%con1 (viz tlačítko ⓘ). Prázdné: kód GC.",

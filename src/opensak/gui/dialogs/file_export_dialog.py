@@ -370,6 +370,8 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._combo_max_counts.currentIndexChanged.connect(self._update_file_name_preview)
         self._combo_children.currentIndexChanged.connect(self._update_file_name_preview)
         self._combo_children.currentIndexChanged.connect(self._update_content_state)
+        self._chk_corrected_final.toggled.connect(self._update_file_name_preview)
+        self._chk_corrected_final.toggled.connect(self._update_content_state)
         self._chk_children_only.toggled.connect(self._update_file_name_preview)
         self._spin_max_logs.valueChanged.connect(self._update_content_state)
 
@@ -405,7 +407,8 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
 
     def _build_content_group(self) -> QGroupBox:
         """#775: child waypoints, logs, user note log and GPX version;
-        #1169: GSAK's own fields."""
+        #1169: GSAK's own fields; #1303: a Final Location waypoint at the
+        corrected coordinates."""
         group = QGroupBox(tr("file_export_content_group"))
         form = QFormLayout(group)
         self._combo_children = QComboBox()
@@ -417,6 +420,9 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         ):
             self._combo_children.addItem(tr(key), value)
         form.addRow(tr("file_export_children"), self._combo_children)
+        self._chk_corrected_final = QCheckBox(tr("file_export_corrected_final_wp"))
+        self._chk_corrected_final.setToolTip(tr("file_export_corrected_final_wp_tip"))
+        form.addRow(self._chk_corrected_final)
         self._chk_children_only = QCheckBox(tr("file_export_children_only"))
         self._chk_children_only.setToolTip(tr("file_export_children_only_tip"))
         form.addRow(self._chk_children_only)
@@ -512,7 +518,8 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         fmt = self._current_fmt()
         self._content_group.setEnabled(fmt != "loc")
         self._texts_group.setEnabled(fmt != "loc")
-        has_children = self._combo_children.currentData() != "none"
+        has_children = (self._combo_children.currentData() != "none"
+                        or self._chk_corrected_final.isChecked())
         self._chk_children_only.setEnabled(fmt == "gpx" and has_children)
         self._chk_my_logs.setEnabled(self._spin_max_logs.value() > 0)
 
@@ -526,6 +533,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             user_note_log=self._chk_user_note_log.isChecked(),
             version=self._combo_gpx_version.currentData(),
             gsak_fields=self._chk_gsak_fields.isChecked(),
+            corrected_final_wp=self._chk_corrected_final.isChecked(),
             **self._template_options(),
         )
 
@@ -548,7 +556,8 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         counts = None
         if max_counts == "waypoints" and self._spin_max.value():
             effective = content.for_format(fmt)
-            key = (fmt, effective.children, effective.children_only)
+            key = (fmt, effective.children, effective.children_only,
+                   effective.corrected_final_wp)
             if key not in self._wpt_counts:
                 with_coords = [c for c in self._caches if c.latitude is not None]
                 self._wpt_counts[key] = wpt_counts(with_coords, fmt, content)
@@ -576,6 +585,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             user_note_log=self._chk_user_note_log.isChecked(),
             gpx_version=self._combo_gpx_version.currentData(),
             gsak_fields=self._chk_gsak_fields.isChecked(),
+            corrected_final_wp=self._chk_corrected_final.isChecked(),
             **self._template_options(),
         )
 
@@ -600,6 +610,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         ):
             combo.setCurrentIndex(max(0, combo.findData(value)))
         self._chk_children_only.setChecked(settings.children_only)
+        self._chk_corrected_final.setChecked(settings.corrected_final_wp)
         self._spin_max_logs.setValue(settings.max_logs)
         self._chk_my_logs.setChecked(settings.my_logs_always)
         self._chk_user_note_log.setChecked(settings.user_note_log)
