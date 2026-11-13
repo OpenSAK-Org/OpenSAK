@@ -309,6 +309,5 @@ class UpdateLocationDialog(WorkerGuardMixin, QDialog):
         self._worker = None
 
     def _close_while_running(self) -> None:
-        # #1265: Escape and the window's close button cancel the lookup, the
-        # same as the Cancel button; the dialog stays open until it stops.
+        # #1265: Escape and the window's close button cancel the lookup.
         self._request_cancel()

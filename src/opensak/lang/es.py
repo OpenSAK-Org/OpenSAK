@@ -1961,6 +1961,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "¿Copiar {count} caché(s) a {target}?",
     "move_caches_done":                        "{count} caché(s) movida(s) correctamente.",
     "copy_caches_done":                        "{count} caché(s) copiada(s) correctamente.",
+    "import_cancelled":                        "Importación cancelada. Los cachés importados hasta entonces se conservan.",
+    "export_cancelled":                        "Exportación cancelada.",
+    "move_caches_cancelled":                   "Cancelado — {count} caché(s) movida(s) hasta entonces.",
+    "copy_caches_cancelled":                   "Cancelado — {count} caché(s) copiada(s) hasta entonces.",
     "move_caches_error":                       "Se produjo un error al mover las cachés:\n{message}",
     "copy_caches_error":                       "Se produjo un error al copiar las cachés:\n{message}",
 

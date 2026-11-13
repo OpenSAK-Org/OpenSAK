@@ -4,7 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [1.23.0-beta.4] — Unreleased
 
 ### Added
 
@@ -35,6 +35,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the one `opensak.description()` returns) and `changed_date`, which until now
   needed `opensak.sql_write()`. Caches read by macros have the new field
   `changed_date`. Contributed by nagisml.
+
+- **Cancel for imports, exports, Send to GPS and Move/Copy (#1265)** —
+  while a GPX/PQ import, a GPX/LOC/GGZ, KML or POI export, Send to GPS or
+  Move/Copy caches runs, the dialog's Close button reads **Cancel** and
+  stops it; Escape does the same. An import stops after the caches being
+  saved (those imported so far are kept); an export writes no file and
+  leaves a previous one as it was; Move/Copy stops between groups of
+  caches, so a cache is never left in both databases. Cancel in **Download
+  boundary data** now also stops the download between packs instead of
+  only before it starts. Contributed by nagisml.
 
 ---
 

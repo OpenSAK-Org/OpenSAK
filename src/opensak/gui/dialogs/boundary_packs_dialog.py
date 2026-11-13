@@ -14,6 +14,10 @@ from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to
 
 # ── Workers ───────────────────────────────────────────────────────────────────
 
+class _DownloadCancelled(Exception):
+    """Raised from the progress callback to stop fetch_all() between packs."""
+
+
 class _DownloadAllWorker(QThread):
     progress = Signal(int, int)   # (done, total)
     finished = Signal(int)        # downloaded count
@@ -24,6 +28,10 @@ class _DownloadAllWorker(QThread):
 
     def request_cancel(self) -> None:
         self._cancel = True
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel
 
     def run(self) -> None:
         from opensak.geo.store import default_data_dir
@@ -36,9 +44,14 @@ class _DownloadAllWorker(QThread):
             nonlocal downloaded
             downloaded = done
             self.progress.emit(done, total)
+            if self._cancel:
+                raise _DownloadCancelled
 
         if not self._cancel:
-            downloaded = packs.fetch_all(data_dir, progress_cb=_cb)
+            try:
+                downloaded = packs.fetch_all(data_dir, progress_cb=_cb)
+            except _DownloadCancelled:
+                pass
         self.finished.emit(downloaded)
 
 
@@ -128,7 +141,9 @@ class BoundaryDownloadDialog(WorkerGuardMixin, QDialog):
 
     def _on_done(self, downloaded: int) -> None:
         self._bar.setVisible(False)
-        if downloaded == 0:
+        if self._worker is not None and self._worker.cancel_requested:
+            self._status.setText(tr("boundary_dl_cancelled"))
+        elif downloaded == 0:
             self._status.setText(tr("boundary_dl_none"))
         else:
             self._status.setText(tr("boundary_dl_done", downloaded=downloaded))
@@ -139,10 +154,8 @@ class BoundaryDownloadDialog(WorkerGuardMixin, QDialog):
         self.reject()
 
     def _close_while_running(self) -> None:
-        # #1265: Cancel, Escape and the window's close button request the
-        # cancel, as Cancel did before. The dialog used to wait 2 s for the
-        # worker and close anyway, which aborted OpenSAK; now it stays open
-        # until the worker is done.
+        # #1265: Cancel, Escape and the window's close button cancel the
+        # download; the dialog stays open until the worker is done (_on_done).
         if self._worker is not None:
             self._worker.request_cancel()
             self._status.setText(tr("boundary_dl_cancelled"))
