@@ -48,6 +48,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Deleting many caches shows that OpenSAK is working (#645)** —
+  **Delete all caches in filter** and **Delete flagged caches** now show a
+  wait cursor and "Deleting N caches…" in the status bar while they run.
+  A large delete could look like nothing happened: measured on the current
+  version it takes about 2 seconds for 60,000 caches (longer on a slow disk
+  or with a virus scanner), and the list and map no longer freeze
+  afterwards, since they are reloaded in the background.
+
 - **KML export of large databases no longer runs out of memory (#1078)** —
   the KML export (File export, the KML export dialog and macros using
   `opensak.export_file(..., "kml")`) now writes the file one cache at a

@@ -386,6 +386,7 @@ STRINGS: dict[str, str] = {
     "status_cache_updated":         "Keš {gc_code} aktualizována",
     "status_cache_deleted":         "Keš {gc_code} smazána",
     "status_deleted_count":         "{count} kešů smazáno",
+    "status_deleting_count":        "Mazání {count} kešů…",
     "status_flags_cleared":         "Všechny příznaky odebrány",
     "status_flags_set":             "Příznak nastaven u {count} kešů",
     "status_flags_unset":           "Příznak odebrán u {count} kešů",

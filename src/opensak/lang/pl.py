@@ -388,6 +388,7 @@ STRINGS: dict[str, str] = {
     "status_cache_updated":         "Zaktualizowano skrytkę {gc_code}",
     "status_cache_deleted":         "Usunięto skrytkę {gc_code}",
     "status_deleted_count":         "Usunięto {count} skrytek",
+    "status_deleting_count":        "Usuwanie {count} skrytek…",
     "status_flags_cleared":         "Wyczyszczono wszystkie oznaczenia",
     "status_flags_set":             "Oznaczono {count} skrytek",
     "status_flags_unset":           "Usunięto oznaczenie z {count} skrytek",

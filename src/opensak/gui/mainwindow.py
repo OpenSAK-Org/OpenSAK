@@ -2914,12 +2914,25 @@ class MainWindow(QMainWindow):
             )
 
     def _bulk_delete_caches(self, gc_codes: list[str]) -> None:
-        """Delete caches and all child records by GC codes (bulk SQL)."""
+        """Delete caches and all child records by GC codes (bulk SQL).
+
+        #645: the delete runs on the GUI thread, about 2 s for 60,000 caches
+        and longer on a slow disk or with a virus scanner, so a wait cursor
+        and a status message show that OpenSAK is working. The status bar is
+        repainted directly rather than through processEvents(), so no other
+        event (a refresh result, a click) runs in the middle of the delete.
+        """
         from opensak.db.cache_delete import delete_caches
         from opensak.db.database import optimize_database
-        with get_session() as session:
-            delete_caches(session, gc_codes)
-        optimize_database()   # #1048
+        self._statusbar.showMessage(tr("status_deleting_count", count=len(gc_codes)))
+        self._statusbar.repaint()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            with get_session() as session:
+                delete_caches(session, gc_codes)
+            optimize_database()   # #1048
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def _set_flag_for_filtered(self, flagged: bool) -> None:
         """Issue #293: set or clear the user flag on every cache in the

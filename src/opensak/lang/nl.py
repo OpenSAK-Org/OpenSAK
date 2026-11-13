@@ -389,6 +389,7 @@ STRINGS: dict[str, str] = {
     "status_cache_updated":         "Cache {gc_code} bijgewerkt",
     "status_cache_deleted":         "Cache {gc_code} verwijderd",
     "status_deleted_count":         "{count} caches verwijderd",
+    "status_deleting_count":        "{count} caches verwijderen…",
     "status_flags_cleared":         "Alle markeringen gewist",
     "status_flags_set":             "{count} caches gemarkeerd",
     "status_flags_unset":           "Markering gewist van {count} caches",

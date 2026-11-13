@@ -386,6 +386,7 @@ STRINGS: dict[str, str] = {
     "status_cache_updated":         "Cache {gc_code} mise à jour",
     "status_cache_deleted":         "Cache {gc_code} supprimée",
     "status_deleted_count":         "{count} caches supprimées",
+    "status_deleting_count":        "Suppression de {count} caches…",
     "status_flags_cleared":         "Tous les drapeaux effacés",
     "status_flags_set":             "Drapeau placé sur {count} caches",
     "status_flags_unset":           "Drapeau retiré de {count} caches",
