@@ -6,10 +6,8 @@ og accepterer GPX filer i /Garmin/GPX/ mappen.
 
 Testet med: GPSMAP64s, Oregon750
 
-Corrected coordinates: Hvis en cache har bruger-korrigerede koordinater
-(user_note.is_corrected), bruges disse som waypoint-koordinater i GPX
-filen. De originale koordinater gemmes i en groundspeak:original_coords
-kommentar, så de ikke mistes.
+Corrected coordinates: if a cache has user-corrected coordinates
+(user_note.is_corrected), they are its waypoint position in the export.
 """
 
 from __future__ import annotations
@@ -594,6 +592,68 @@ def _effective_coords(cache, use_corrected: bool = True) -> tuple[float, float]:
     return cache.latitude, cache.longitude
 
 
+# (minlat, minlon, maxlat, maxlon) — the GPX <bounds> (#700)
+Bounds = tuple[float, float, float, float]
+
+_GPX_SCHEMA_LOCATION = (
+    "http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd"
+    " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd"
+    " http://www.gsak.net/xmlv1/6 http://www.gsak.net/xmlv1/6/gsak.xsd"
+)
+
+
+def gpx_bounds(
+    caches: Iterable, use_corrected: bool = True, child_waypoints: bool = True,
+) -> Optional[Bounds]:
+    """The GPX <bounds> of an export of *caches*: (minlat, minlon, maxlat,
+    maxlon) over every <wpt> _gpx_chunks() writes for them, i.e. each cache
+    at its export position and, with *child_waypoints*, its child
+    waypoints. None when no <wpt> would be written. A point at exactly
+    0/0 — GSAK's placeholder for a child waypoint without coordinates — is
+    written but left out, as GSAK does, so it doesn't stretch the box to
+    the equator.
+
+    #700: GSAK writes <bounds> before the first <wpt>, but the export is
+    streamed (#1075), so the bounds are computed up front without loading
+    the caches in full. Database caches (which the export reloads anyway)
+    are measured in the database, a chunk per query (export_bounds());
+    other objects, such as test stand-ins, from their attributes.
+    """
+    from opensak.db.database import export_bounds, is_db_cache
+
+    box: Optional[Bounds] = None
+
+    def _add(lat: float, lon: float) -> None:
+        nonlocal box
+        if lat == 0 and lon == 0:
+            return   # GSAK's "no coordinates" placeholder; GSAK leaves it out too
+        if box is None:
+            box = (lat, lon, lat, lon)
+        else:
+            box = (min(box[0], lat), min(box[1], lon),
+                   max(box[2], lat), max(box[3], lon))
+
+    db_ids: list[int] = []
+    for cache in caches:
+        if is_db_cache(cache):
+            db_ids.append(cache.id)
+            continue
+        if cache.latitude is None or cache.longitude is None:
+            continue
+        _add(*_effective_coords(cache, use_corrected))
+        if not child_waypoints:
+            continue
+        for wp in getattr(cache, "waypoints", None) or []:
+            if wp.latitude is not None and wp.longitude is not None:
+                _add(wp.latitude, wp.longitude)
+    if db_ids:
+        db_box = export_bounds(db_ids, use_corrected, child_waypoints)
+        if db_box is not None:
+            _add(db_box[0], db_box[1])
+            _add(db_box[2], db_box[3])
+    return box
+
+
 def generate_gpx(
     caches: list, filename: str = "opensak_export", progress_cb=None,
     use_corrected: bool = True,
@@ -623,19 +683,24 @@ def write_gpx(
     attributes: bool = True,
     child_waypoints: bool = True,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> int:
     """Write the GPX for *caches* to the text stream *out*, one cache at a
     time (#1075: building the whole document as one string ran out of memory
     for exports of 100,000+ caches).
 
     *caches* may be any iterable (e.g. iter_caches_full()); *total* is the
-    count passed to progress_cb and defaults to len(caches). Returns the
-    number of caches written.
+    count passed to progress_cb and defaults to len(caches). *bounds* is
+    the GPX <bounds> (see gpx_bounds()): computed here when *caches* is a
+    list, so a caller that streams an iterator passes it, or the file has
+    no <bounds>. Returns the number of caches written.
     """
+    if bounds is None and isinstance(caches, Sized):
+        bounds = gpx_bounds(caches, use_corrected, child_waypoints)
     count = 0
     for chunk, cache in _gpx_chunks(
         caches, filename, progress_cb, use_corrected, text,
-        attributes, child_waypoints, total,
+        attributes, child_waypoints, total, bounds,
     ):
         out.write(chunk)
         if cache is not None:
@@ -643,44 +708,71 @@ def write_gpx(
     return count
 
 
-def _xml_chunk(elem, level: int) -> str:
+def _xml_chunk(elem, level: int, short_empty: bool = True) -> str:
     """*elem* serialized exactly as it appears *level* deep in an _indent()ed
     document, without its tail — the caller writes the whitespace between
-    elements, so a document can be streamed element by element."""
+    elements, so a document can be streamed element by element.
+    *short_empty*=False writes empty elements as <x></x> instead of <x />."""
     import xml.etree.ElementTree as ET
 
     _indent(elem, level)
     elem.tail = None
-    return ET.tostring(elem, encoding="unicode")
+    return ET.tostring(elem, encoding="unicode", short_empty_elements=short_empty)
+
+
+def _rating(value) -> str:
+    """A difficulty/terrain rating as GSAK writes it in <desc>: 1, 1.5, 2."""
+    return f"{float(value or 1.0):g}"
+
+
+def _child_code(child_wp, gc_code: Optional[str]) -> str:
+    """The <name> of a child waypoint.
+
+    #700: GSAK writes the waypoint's own code (e.g. P0BWND7), which the GSAK
+    import keeps in wp_code. It is used when it ends with the cache's
+    GC-code suffix, since that is how an import attaches the waypoint to
+    its cache. Otherwise (GPX-imported and user-created waypoints have no
+    wp_code) the code is rebuilt as prefix + suffix (#753), which is
+    unique and attaches the same way.
+    """
+    suffix = gc_code[2:] if gc_code and len(gc_code) > 2 else ""
+    wp_code = getattr(child_wp, "wp_code", None)
+    if wp_code and suffix and len(wp_code) > len(suffix) \
+            and wp_code.upper().endswith(suffix.upper()):
+        return wp_code
+    return (child_wp.prefix or "WP") + suffix
 
 
 def _gpx_chunks(
     caches: Iterable, filename: str, progress_cb, use_corrected: bool,
     text: ExportText, attributes: bool, child_waypoints: bool,
-    total: Optional[int],
+    total: Optional[int], bounds: Optional[Bounds] = None,
 ) -> Iterator[tuple[str, Any]]:
     """
     Yield the GPX document as (text, cache) pieces. *cache* is set only on
     the piece holding that cache's own <wpt> element (GGZ needs its byte
     offset); every other piece has None.
 
-    Bruger GPX 1.0 med groundspeak:cache som DIREKTE child af <wpt> — ikke
-    pakket ind i et <extensions>-element (GPX 1.1-stil). Dette matcher GSAK's
-    og de facto-standarden for geocaching-GPX-filer, som Garmin-enheders
-    geocache-parser er bygget til at forvente (issue #656: en enhedstest
-    viste hint blev vist korrekt, men description/logs blev ikke, hvilket
-    passer med en firmware-parser der ikke finder groundspeak:cache når den
-    ligger i <extensions> og derfor falder tilbage til kun at vise
-    almindelig waypoint-info for de øvrige felter).
+    The file follows GSAK's own GPX 1.0 export (#700): the header elements
+    (desc, author, time, keywords, bounds) sit directly under <gpx> — the
+    <metadata> element is GPX 1.1 — and each <wpt> has GSAK's element order:
+    ele, time, name, desc, url, urlname, sym, type, gsak:wptExtension,
+    groundspeak:cache. groundspeak:cache is a direct child of <wpt>, not
+    wrapped in <extensions> (GPX 1.1 style): Garmin's geocache parser reads
+    the elements in sequence and expects GSAK's layout (#656). The elements
+    GSAK always writes (attributes, short_description, long_description,
+    encoded_hints, logs, travelbugs, and a child's cmt and url) are written
+    even when empty.
+    Each child waypoint follows its cache as a plain <wpt>.
 
-    Caches med korrigerede koordinater eksporteres med de korrigerede
-    koordinater som waypoint-position. De originale koordinater bevares
-    i en cmt (comment) feltom muligt.
+    Caches with corrected coordinates are written at the corrected position
+    unless use_corrected=False; like GSAK, the file doesn't repeat the
+    original coordinates in a <cmt>.
 
-    progress_cb(done, total): valgfrit kald per cache, så GUI kan vise fremgang.
-    use_corrected=False eksporterer altid de originale koordinater.
+    progress_cb(done, total): optional call per cache for GUI progress.
     *text* replaces cache names and waypoint descriptions (Lua macros);
-    attributes / child_waypoints=False leave those out.
+    attributes / child_waypoints=False leave those out. *bounds* is
+    written as <bounds> when given (see gpx_bounds()).
     """
     from xml.etree.ElementTree import Element, SubElement
     from datetime import datetime, timezone
@@ -688,22 +780,37 @@ def _gpx_chunks(
     # Root element — GPX 1.0, matching GSAK's own export format. The
     # groundspeak namespace is deliberately NOT declared here; it's declared
     # locally on each <groundspeak:cache> element instead (see below),
-    # mirroring GSAK's exact convention byte-for-byte.
+    # mirroring GSAK's exact convention.
     yield (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<gpx version="1.0" creator="OpenSAK"'
         ' xmlns="http://www.topografix.com/GPX/1/0"'
         ' xmlns:gsak="http://www.gsak.net/xmlv1/6"'
-        ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+        ' xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
+        ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+        f' xsi:schemaLocation="{_GPX_SCHEMA_LOCATION}">'
     ), None
 
-    # Metadata
-    metadata = Element("metadata")
-    name_el = SubElement(metadata, "name")
-    name_el.text = filename
-    time_el = SubElement(metadata, "time")
-    time_el.text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    yield "\n  " + _xml_chunk(metadata, 1), None
+    # Header, in GPX 1.0 order. GSAK has no <name>; it is kept for the file
+    # name, which GPX 1.0 allows first. "(HasChildren)" is how GSAK marks a
+    # file written with child waypoints.
+    header = [
+        ("name", filename),
+        ("desc", "Geocache file generated by OpenSAK"
+                 + (" (HasChildren)" if child_waypoints else "")),
+        ("author", "OpenSAK"),
+        ("time", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
+        ("keywords", "cache, geocache, groundspeak"),
+    ]
+    for tag, value in header:
+        el = Element(tag)
+        el.text = value
+        yield "\n  " + _xml_chunk(el, 1), None
+    if bounds is not None:
+        bounds_el = Element("bounds")
+        for key, coord in zip(("minlat", "minlon", "maxlat", "maxlon"), bounds):
+            bounds_el.set(key, f"{coord:.6f}")
+        yield "\n  " + _xml_chunk(bounds_el, 1), None
 
     if total is None:
         total = len(cast(Sized, caches))
@@ -715,32 +822,6 @@ def _gpx_chunks(
 
         # Brug korrigerede koordinater hvis de findes
         export_lat, export_lon = _effective_coords(cache, use_corrected)
-        has_corrected = (export_lat != cache.latitude or export_lon != cache.longitude)
-
-        wpt = Element("wpt")
-        wpt.set("lat", f"{export_lat:.6f}")
-        wpt.set("lon", f"{export_lon:.6f}")
-
-        if cache.hidden_date:
-            time_wpt = SubElement(wpt, "time")
-            time_wpt.text = cache.hidden_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        name_wpt = SubElement(wpt, "name")
-        name_wpt.text = cache.gc_code or ""
-
-        desc_wpt = SubElement(wpt, "desc")
-        desc_wpt.text = text.description(cache) or text.name(cache)
-
-        # Gem originale koordinater i comment-feltet hvis vi bruger korrigerede
-        if has_corrected:
-            cmt_wpt = SubElement(wpt, "cmt")
-            cmt_wpt.text = (
-                f"Original: {cache.latitude:.6f}, {cache.longitude:.6f} | "
-                f"Corrected coordinates used for export"
-            )
-
-        url_wpt = SubElement(wpt, "url")
-        url_wpt.text = f"https://coord.info/{cache.gc_code}"
 
         # Custom Waypoints (issue #141: Hotel/POI, Parking Area, Trailhead,
         # etc.) are stored as Cache rows for simplicity, but they aren't
@@ -750,6 +831,39 @@ def _gpx_chunks(
         # Export them instead as a plain GPX waypoint with a proper native
         # Garmin icon symbol, and skip the groundspeak:cache block entirely.
         is_custom_wp = (cache.cache_type or "") in CUSTOM_WP_TYPES
+
+        wpt = Element("wpt")
+        wpt.set("lat", f"{export_lat:.6f}")
+        wpt.set("lon", f"{export_lon:.6f}")
+
+        # #700: elevation, when known (0.0 is a real elevation).
+        elevation = getattr(cache, "elevation", None)
+        if elevation is not None:
+            SubElement(wpt, "ele").text = str(float(elevation))
+
+        if cache.hidden_date:
+            time_wpt = SubElement(wpt, "time")
+            time_wpt.text = cache.hidden_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        name_wpt = SubElement(wpt, "name")
+        name_wpt.text = cache.gc_code or ""
+
+        # #700: GSAK's summary "Name by Owner (D/T)" in <desc> and
+        # "Name by Owner" in <urlname>; a custom waypoint has neither.
+        cache_name = text.name(cache)
+        if is_custom_wp:
+            title = summary = cache_name
+        else:
+            title = f"{cache_name} by {cache.placed_by}" if cache.placed_by else cache_name
+            summary = f"{title} ({_rating(cache.difficulty)}/{_rating(cache.terrain)})"
+
+        desc_wpt = SubElement(wpt, "desc")
+        desc_wpt.text = text.description(cache) or summary
+
+        url_wpt = SubElement(wpt, "url")
+        url_wpt.text = f"https://coord.info/{cache.gc_code}"
+
+        SubElement(wpt, "urlname").text = title
 
         sym_wpt = SubElement(wpt, "sym")
         sym_wpt.text = (
@@ -763,6 +877,27 @@ def _gpx_chunks(
             type_wpt.text = cache.cache_type or "Waypoint"
         else:
             type_wpt.text = f"Geocache|{cache.cache_type or 'Traditional Cache'}"
+
+        # GSAK personal note — direct child of <wpt>, before
+        # groundspeak:cache as in GSAK's own files (#700; the importer
+        # searches descendants for it, so it accepts either placement on
+        # the way in). Applies regardless of custom-waypoint status.
+        note = getattr(cache, "user_note", None)
+        note_text = getattr(note, "note", None) if note else None
+        # Issue #1145: the found-by-me date, as GSAK writes it
+        # (<gsak:UserFound>2026-06-04</gsak:UserFound>, date only). Without
+        # it GSAK re-imports a found cache with a blank Found date whenever
+        # the user's own found log isn't in the file (logs trimmed, or the
+        # cache was marked found by hand). Only for found caches: unmarking
+        # clears found_date, but a stale one must never mark a cache found.
+        found_date = getattr(cache, "found_date", None) if getattr(cache, "found", False) else None
+        if note_text or found_date:
+            gsak_ext = SubElement(wpt, "gsak:wptExtension")
+            if found_date:
+                SubElement(gsak_ext, "gsak:UserFound").text = found_date.strftime("%Y-%m-%d")
+            if note_text:
+                gsak_note = SubElement(gsak_ext, "gsak:UserNote")
+                gsak_note.text = note_text
 
         if not is_custom_wp:
             # groundspeak:cache — direct child of <wpt>, no <extensions>
@@ -784,7 +919,7 @@ def _gpx_chunks(
             gs_cache.set("xmlns:groundspeak", "http://www.groundspeak.com/cache/1/0/1")
 
             gs_name = SubElement(gs_cache, "groundspeak:name")
-            gs_name.text = text.name(cache)
+            gs_name.text = cache_name
 
             gs_placed = SubElement(gs_cache, "groundspeak:placed_by")
             gs_placed.text = cache.placed_by or ""
@@ -811,10 +946,11 @@ def _gpx_chunks(
             # official Groundspeak cache.xsd element sequence (name,
             # placed_by, type, container, attributes, difficulty, terrain,
             # country, state, short_description, long_description,
-            # encoded_hints, logs).
-            if attributes and cache.attributes:
+            # encoded_hints, logs, travelbugs). #700: written even when
+            # empty, like GSAK; attributes=False still leaves them out.
+            if attributes:
                 gs_attrs = SubElement(gs_cache, "groundspeak:attributes")
-                for attr in cache.attributes:
+                for attr in cache.attributes or []:
                     gs_attr = SubElement(gs_attrs, "groundspeak:attribute")
                     gs_attr.set("id", str(attr.attribute_id))
                     gs_attr.set("inc", "1" if attr.is_on else "0")
@@ -838,33 +974,32 @@ def _gpx_chunks(
             # entirely, which is likely why some Garmin firmware doesn't
             # recognise OpenSAK's GPX/GGZ output as a geocaching file at
             # all, falling back to a plain waypoint. html reflects whether
-            # the source text contains HTML markup.)
-            if cache.short_description:
-                gs_short = SubElement(gs_cache, "groundspeak:short_description")
-                gs_short.set("html", "True" if cache.short_desc_html else "False")
-                gs_short.text = cache.short_description
+            # the source text contains HTML markup.) #700: GSAK always
+            # writes both, as a single space when empty (the importer
+            # strips it back to nothing).
+            gs_short = SubElement(gs_cache, "groundspeak:short_description")
+            gs_short.set("html", "True" if cache.short_description and cache.short_desc_html else "False")
+            gs_short.text = cache.short_description or " "
 
-            if cache.long_description:
-                gs_long = SubElement(gs_cache, "groundspeak:long_description")
-                gs_long.set("html", "True" if cache.long_desc_html else "False")
-                gs_long.text = cache.long_description
+            gs_long = SubElement(gs_cache, "groundspeak:long_description")
+            gs_long.set("html", "True" if cache.long_description and cache.long_desc_html else "False")
+            gs_long.text = cache.long_description or " "
 
             # encoded_hints must come AFTER the descriptions per cache.xsd —
             # previously written before them, which likely broke strict
             # sequential parsers partway through the cache block (issue
             # #656: hint displayed correctly on-device, but
             # description/logs did not, exactly as expected if a device
-            # parser gave up at this point).
-            if cache.encoded_hints:
-                gs_hints = SubElement(gs_cache, "groundspeak:encoded_hints")
-                gs_hints.text = cache.encoded_hints
+            # parser gave up at this point). #700: always written.
+            gs_hints = SubElement(gs_cache, "groundspeak:encoded_hints")
+            gs_hints.text = cache.encoded_hints or ""
 
             # Logs (issue #656 follow-up — previously hardcoded to only the
             # last 5, unlike GC.com/GSAK which include the full history.
             # Export all logs; sorted newest-first to match GC.com/GSAK
-            # ordering.)
+            # ordering.) #700: always written, empty without logs, like GSAK.
+            gs_logs = SubElement(gs_cache, "groundspeak:logs")
             if cache.logs:
-                gs_logs = SubElement(gs_cache, "groundspeak:logs")
                 _min_dt = datetime.min.replace(tzinfo=timezone.utc)
                 for log in sorted(
                     cache.logs,
@@ -893,43 +1028,30 @@ def _gpx_chunks(
                     gs_text.set("encoded", "False")
                     gs_text.text = log.text or ""
 
-        # GSAK personal note — direct child of <wpt>, matching GSAK's own
-        # convention (the importer already searches descendants for this,
-        # so it accepts either placement on the way in). Applies regardless
-        # of custom-waypoint status.
-        note = getattr(cache, "user_note", None)
-        note_text = getattr(note, "note", None) if note else None
-        # Issue #1145: the found-by-me date, as GSAK writes it
-        # (<gsak:UserFound>2026-06-04</gsak:UserFound>, date only). Without
-        # it GSAK re-imports a found cache with a blank Found date whenever
-        # the user's own found log isn't in the file (logs trimmed, or the
-        # cache was marked found by hand). Only for found caches: unmarking
-        # clears found_date, but a stale one must never mark a cache found.
-        found_date = getattr(cache, "found_date", None) if getattr(cache, "found", False) else None
-        if note_text or found_date:
-            gsak_ext = SubElement(wpt, "gsak:wptExtension")
-            if found_date:
-                SubElement(gsak_ext, "gsak:UserFound").text = found_date.strftime("%Y-%m-%d")
-            if note_text:
-                gsak_note = SubElement(gsak_ext, "gsak:UserNote")
-                gsak_note.text = note_text
+            # #700: the trackables in the cache, always written (empty when
+            # there are none) like GSAK. The id is the trackable's numeric
+            # id, kept in tracking_code; written only when known, like the
+            # owner and finder ids above.
+            gs_tbs = SubElement(gs_cache, "groundspeak:travelbugs")
+            for tb in getattr(cache, "trackables", None) or []:
+                gs_tb = SubElement(gs_tbs, "groundspeak:travelbug")
+                if tb.tracking_code:
+                    gs_tb.set("id", str(tb.tracking_code))
+                gs_tb.set("ref", tb.ref or "")
+                SubElement(gs_tb, "groundspeak:name").text = tb.name or ""
 
         yield "\n  ", None
-        yield _xml_chunk(wpt, 1), cache
+        yield _xml_chunk(wpt, 1, short_empty=False), cache
 
         # Issue #753: child waypoints (parking areas, trailheads, stages,
         # final locations, etc.) were never exported at all — the loop
         # above only ever emits the ONE <wpt> for the cache's own listing.
         # Each child Waypoint gets its own sibling <wpt> element, mirroring
-        # geocaching.com's own plain-waypoint convention (a <wpt> with no
+        # GSAK's plain-waypoint convention (a <wpt> with no
         # groundspeak:cache block, sym/type set from the waypoint's own
-        # type). Reconstructing <name> exactly as geocaching.com originally
-        # assigned it isn't possible — the importer only keeps the prefix
-        # (see _parse_extra_wpt above), not the original suffix — but
-        # prefix + this cache's own GC-code suffix produces a short, unique,
-        # GPX/GSAK/Garmin-compatible code, which is all a re-import or
-        # device needs; it need not be byte-identical to the original.
-        gc_suffix = cache.gc_code[2:] if cache.gc_code and len(cache.gc_code) > 2 else ""
+        # type). #700: like GSAK, <name> is the waypoint's own code (see
+        # _child_code), <desc> and <urlname> its name, and <cmt> and <url>
+        # are always written.
         for child_wp in (getattr(cache, "waypoints", None) or []) if child_waypoints else []:
             if child_wp.latitude is None or child_wp.longitude is None:
                 continue
@@ -942,23 +1064,13 @@ def _gpx_chunks(
                 cwpt_time = SubElement(cwpt, "time")
                 cwpt_time.text = child_wp.wp_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            cwpt_name = SubElement(cwpt, "name")
-            cwpt_name.text = (child_wp.prefix or "WP") + gc_suffix
-
-            if child_wp.comment:
-                cwpt_cmt = SubElement(cwpt, "cmt")
-                cwpt_cmt.text = child_wp.comment
-
-            if child_wp.description:
-                cwpt_desc = SubElement(cwpt, "desc")
-                cwpt_desc.text = child_wp.description
-
-            if child_wp.url:
-                cwpt_url = SubElement(cwpt, "url")
-                cwpt_url.text = child_wp.url
-
-            cwpt_urlname = SubElement(cwpt, "urlname")
-            cwpt_urlname.text = child_wp.name or child_wp.description or cwpt_name.text
+            code = _child_code(child_wp, cache.gc_code)
+            child_name = child_wp.name or child_wp.description or code
+            SubElement(cwpt, "name").text = code
+            SubElement(cwpt, "cmt").text = child_wp.comment or ""
+            SubElement(cwpt, "desc").text = child_name
+            SubElement(cwpt, "url").text = child_wp.url or ""
+            SubElement(cwpt, "urlname").text = child_name
 
             cwpt_sym = SubElement(cwpt, "sym")
             cwpt_sym.text = child_wp.wp_type or "Waypoint"
@@ -966,7 +1078,7 @@ def _gpx_chunks(
             cwpt_type = SubElement(cwpt, "type")
             cwpt_type.text = f"Waypoint|{child_wp.wp_type or 'Waypoint'}"
 
-            yield "\n  " + _xml_chunk(cwpt, 1), None
+            yield "\n  " + _xml_chunk(cwpt, 1, short_empty=False), None
 
     yield "\n</gpx>\n", None
 
@@ -1189,10 +1301,11 @@ def write_ggz(
     attributes: bool = True,
     child_waypoints: bool = True,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> int:
     """Write a GGZ (see generate_ggz) to the seekable binary stream *out*,
-    one cache at a time (#1075). *caches*, *total* and the return value are
-    as for write_gpx().
+    one cache at a time (#1075). *caches*, *total*, *bounds* and the return
+    value are as for write_gpx().
 
     The GPX and the index are streamed into temporary files first: the
     index needs the GPX's CRC and each cache's byte offset in it, and
@@ -1291,6 +1404,8 @@ def write_ggz(
         with zf.open(zi, "w") as dst:
             shutil.copyfileobj(src, dst)
 
+    if bounds is None and isinstance(caches, Sized):
+        bounds = gpx_bounds(caches, use_corrected, child_waypoints)
     count = 0
     with tempfile.TemporaryFile() as gpx_tmp, tempfile.TemporaryFile() as index_tmp:
         # ── GPX, collecting the index entries as each <wpt> is written ────────
@@ -1303,7 +1418,7 @@ def write_ggz(
         offsets_by_gc_code: dict = {}
         for chunk, cache in _gpx_chunks(
             caches, filename, progress_cb, use_corrected, text,
-            attributes, child_waypoints, total,
+            attributes, child_waypoints, total, bounds,
         ):
             data = chunk.encode("utf-8")
             if cache is not None:
@@ -1381,19 +1496,21 @@ def export_ggz_to_device(
     filename: str = "opensak",
     progress_cb=None,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil direkte til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
 
     *caches* may be any iterable (e.g. iter_caches_full()), streamed to the
-    file one by one (#1075); *total* is as for write_gpx().
+    file one by one (#1075); *total* and *bounds* are as for write_gpx().
     """
     result = ExportResult()
     result.device = device_root
 
     def _write(f) -> int:
-        return write_ggz(f, caches, filename, progress_cb=progress_cb, total=total)
+        return write_ggz(f, caches, filename, progress_cb=progress_cb, total=total,
+                         bounds=bounds)
 
     try:
         if is_mtp_device(device_root):
@@ -1434,11 +1551,12 @@ def export_ggz_to_file(
     output_path: Path,
     progress_cb=None,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil til en valgfri placering.
     Bruges når GPS ikke er tilsluttet direkte.
-    *caches* and *total* are as for export_ggz_to_device().
+    *caches*, *total* and *bounds* are as for export_ggz_to_device().
     """
     result = ExportResult()
 
@@ -1446,7 +1564,8 @@ def export_ggz_to_file(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         result.cache_count = write_export(
             output_path,
-            lambda f: write_ggz(f, caches, output_path.stem, progress_cb=progress_cb, total=total),
+            lambda f: write_ggz(f, caches, output_path.stem, progress_cb=progress_cb,
+                                total=total, bounds=bounds),
             binary=True,
         )
         result.file_path   = output_path
@@ -1578,17 +1697,19 @@ def export_to_device(
     filename: str = "opensak",
     progress_cb=None,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> ExportResult:
     """
     Eksportér caches til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
-    *caches* and *total* are as for export_ggz_to_device().
+    *caches*, *total* and *bounds* are as for export_ggz_to_device().
     """
     result = ExportResult()
     result.device = device_root
 
     def _write(f) -> int:
-        return write_gpx(f, caches, filename, progress_cb=progress_cb, total=total)
+        return write_gpx(f, caches, filename, progress_cb=progress_cb, total=total,
+                         bounds=bounds)
 
     try:
         if is_mtp_device(device_root):
@@ -1626,11 +1747,12 @@ def export_to_file(
     output_path: Path,
     progress_cb=None,
     total: Optional[int] = None,
+    bounds: Optional[Bounds] = None,
 ) -> ExportResult:
     """
     Eksportér caches til en GPX fil (valgfri placering).
     Bruges når GPS ikke er tilsluttet.
-    *caches* and *total* are as for export_ggz_to_device().
+    *caches*, *total* and *bounds* are as for export_ggz_to_device().
     """
     result = ExportResult()
 
@@ -1638,7 +1760,8 @@ def export_to_file(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         result.cache_count = write_export(
             output_path,
-            lambda f: write_gpx(f, caches, output_path.stem, progress_cb=progress_cb, total=total),
+            lambda f: write_gpx(f, caches, output_path.stem, progress_cb=progress_cb,
+                                total=total, bounds=bounds),
         )
         result.file_path   = output_path
     except Exception as e:
