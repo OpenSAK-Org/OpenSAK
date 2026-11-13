@@ -19,6 +19,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   setting, with an **Edit** button for them (#1093). The defaults keep
   today's files. Contributed by nagisml.
 
+- **GPX/GGZ export with GSAK's own fields (#1169)** — the new option
+  **Include GSAK fields** (on by default for file exports, off for Send
+  to GPS) writes GSAK's full `gsak:wptExtension`: user flag, lock, DNF,
+  watch, user data 1–4, the coordinates before correction, FTF,
+  favourite points, GC note, custom fields and the child waypoint
+  fields. The GPX import reads them back, matching custom fields by
+  name, so a round trip through GSAK or OpenSAK keeps them. Which file
+  came from which program is now decided by `<gpx creator>`, so found
+  status (#766) stays right for OpenSAK's own files. Contributed by
+  nagisml.
+
 ### Changed
 
 - **GPX/GGZ export follows GSAK's file structure (#700)** — the header
