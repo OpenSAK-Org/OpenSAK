@@ -23,6 +23,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from opensak.export.gpx_content import (
+    CHILDREN_CHOICES, GPX_VERSIONS, MAX_COUNTS_CHOICES, GpxContent,
+)
+
 EXPORT_FORMATS = ("gpx", "loc", "ggz")
 
 # What the export does when the target file already exists.
@@ -63,6 +67,42 @@ class FileExportSettings:
     file_name: str = ""
     folder: str = ""          # folder the export is written to ("" = ask)
     if_exists: str = "ask"    # "overwrite" | "ask" | "skip"
+    # #775: what max_records counts — "caches", or "waypoints" (each cache
+    # plus its children, as GSAK's "max waypoints").
+    max_counts: str = "caches"
+    # #775: GPX/GGZ content, see opensak.export.gpx_content.GpxContent.
+    children: str = "all"        # "all" | "flagged" | "unflagged" | "none"
+    children_only: bool = False  # child waypoints without their caches (GPX)
+    max_logs: int = 0            # logs per cache, newest first (0 = all)
+    my_logs_always: bool = False # own logs on top of max_logs
+    user_note_log: bool = False  # user note as a synthetic first log
+    gpx_version: str = "1.0"     # "1.0" | "1.1" (GPX and the GPX inside a GGZ)
+    gsak_fields: bool = True     # #1169: GSAK's full field set (GPX and GGZ)
+    # #454/#950: special-tag templates (GPX and GGZ), see GpxContent.
+    name_template: str = ""      # waypoint name ("" = GC code)
+    name_max_chars: int = 0      # 0 = no limit
+    desc_template: str = ""      # waypoint description ("" = "Name by Owner (D/T)")
+    desc_for_cache_name: bool = False
+    remove_chars: str = ""
+    first_log: str = ""          # extra-info log ("" = none)
+
+    def content(self) -> GpxContent:
+        """The GPX/GGZ content options of these settings."""
+        return GpxContent(
+            children=self.children,
+            children_only=self.children_only,
+            max_logs=self.max_logs,
+            my_logs_always=self.my_logs_always,
+            user_note_log=self.user_note_log,
+            version=self.gpx_version,
+            gsak_fields=self.gsak_fields,
+            name_template=self.name_template,
+            name_max_chars=self.name_max_chars,
+            desc_template=self.desc_template,
+            desc_for_cache_name=self.desc_for_cache_name,
+            remove_chars=self.remove_chars,
+            first_log=self.first_log,
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +113,20 @@ class FileExportSettings:
             "file_name": self.file_name,
             "folder": self.folder,
             "if_exists": self.if_exists,
+            "max_counts": self.max_counts,
+            "children": self.children,
+            "children_only": self.children_only,
+            "max_logs": self.max_logs,
+            "my_logs_always": self.my_logs_always,
+            "user_note_log": self.user_note_log,
+            "gpx_version": self.gpx_version,
+            "gsak_fields": self.gsak_fields,
+            "name_template": self.name_template,
+            "name_max_chars": self.name_max_chars,
+            "desc_template": self.desc_template,
+            "desc_for_cache_name": self.desc_for_cache_name,
+            "remove_chars": self.remove_chars,
+            "first_log": self.first_log,
         }
 
     @classmethod
@@ -103,6 +157,25 @@ class FileExportSettings:
         if_exists = data.get("if_exists", defaults.if_exists)
         if if_exists not in IF_EXISTS_CHOICES:
             if_exists = defaults.if_exists
+
+        def _choice(key: str, choices: tuple) -> Any:
+            value = data.get(key, getattr(defaults, key))
+            return value if value in choices else getattr(defaults, key)
+
+        def _flag(key: str) -> bool:
+            value = data.get(key, getattr(defaults, key))
+            return value if isinstance(value, bool) else getattr(defaults, key)
+
+        def _count(key: str) -> int:
+            value = data.get(key, getattr(defaults, key))
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                return getattr(defaults, key)
+            return value
+
+        def _string(key: str) -> str:
+            value = data.get(key, getattr(defaults, key))
+            return value if isinstance(value, str) else getattr(defaults, key)
+
         return cls(
             fmt=fmt,
             output_path=output_path,
@@ -111,6 +184,20 @@ class FileExportSettings:
             file_name=file_name,
             folder=folder,
             if_exists=if_exists,
+            max_counts=_choice("max_counts", MAX_COUNTS_CHOICES),
+            children=_choice("children", CHILDREN_CHOICES),
+            children_only=_flag("children_only"),
+            max_logs=_count("max_logs"),
+            my_logs_always=_flag("my_logs_always"),
+            user_note_log=_flag("user_note_log"),
+            gpx_version=_choice("gpx_version", GPX_VERSIONS),
+            gsak_fields=_flag("gsak_fields"),
+            name_template=_string("name_template"),
+            name_max_chars=_count("name_max_chars"),
+            desc_template=_string("desc_template"),
+            desc_for_cache_name=_flag("desc_for_cache_name"),
+            remove_chars=_string("remove_chars"),
+            first_log=_string("first_log"),
         )
 
 
