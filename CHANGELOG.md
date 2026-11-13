@@ -4,7 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.4] — Unreleased
+## [1.23.0-beta.4] — 2026-11-13
+
+> Headline: **Cancel for long jobs.** Imports, exports, Send to GPS and
+> Move/Copy caches can now be stopped with Cancel or Escape, without
+> leaving a half-written file or a cache in two databases. KML export of
+> very large databases no longer runs out of memory, and deleting many
+> caches shows that OpenSAK is working. For macro writers: the clipboard,
+> JSON, `opensak.inspect()` and `opensak.log_vars()` for debugging, and
+> macros can change a cache's description.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
 
 ### Added
 
@@ -13,7 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a downloaded page into a regex tester, or to try a macro on different texts.
   The clipboard may hold private text, so reading it asks the user first, once
   per run; a macro declares this with `read-clipboard` in its `Permissions`
-  header. The macro API is now version 5. Contributed by nagisml.
+  header. Contributed by nagisml.
 - **Macros can read and write JSON** — `opensak.json.decode(text)` and
   `opensak.json.encode(value)`, so a macro no longer needs a JSON parser of its
   own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
