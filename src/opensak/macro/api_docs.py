@@ -772,7 +772,10 @@ def _headless_section() -> list[str]:
         "| `choose_file`, `choose_folder` | Only `--arg` with the title as key. |",
         "| `open`, `refresh` | Do nothing. A file the macro didn't write needs `--yes`, "
         "as `open` asks about it first. |",
-        "| `set_center` | Not available: an error. |",
+        "| `set_center` | For this run only: distance and bearing are recalculated and "
+        "stored, so sorting by distance and distance filters work, and the database's "
+        "centre and distances are set back when the run ends. Needs a write approval "
+        "or `--allow-write`. |",
         "| `run_macro` | The called macro runs under the same rules. |",
         "| `switch_database`, `attach`, `copy_caches`, `move_caches`, the targets an import names | Take the "
         "database's lock until the run ends; a database in use stops the run with "

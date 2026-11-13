@@ -6769,7 +6769,8 @@ API: tuple[ApiFunction, ...] = (
                     "active database are recalculated and stored, so the "
                     "macro needs permission to change the database, and it "
                     "cannot be used inside opensak.transaction(). The "
-                    "centre stays when the macro ends.",
+                    "centre stays when the macro ends; in `opensak run` it "
+                    "lasts for that run only (see Macros without a window).",
         example='opensak.set_center("★ Home")\n'
                 'local c = opensak.cache("GC12345")\n'
                 'opensak.set_center(c.lat, c.lon, c.code)',
