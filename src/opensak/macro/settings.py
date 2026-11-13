@@ -65,8 +65,9 @@ def _dumps(data: Any) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-def to_json(value: Any, describe: Callable[[Any], Any], func: str) -> Any:
-    """Convert the Lua *value* to JSON-compatible Python data.
+def to_json(value: Any, describe: Callable[[Any], Any], func: str, verb: str = "save") -> Any:
+    """Convert the Lua *value* to JSON-compatible Python data; errors say
+    what cannot be done with *verb*.
 
     *describe* is a Lua function returning type(v) and, for a table, its
     address. The address detects cyclic tables: lupa wraps the same table
@@ -80,7 +81,7 @@ def to_json(value: Any, describe: Callable[[Any], Any], func: str) -> Any:
             return v
         if isinstance(v, float):
             if not math.isfinite(v):
-                raise MacroError(f"{func}: cannot save {v}{where} — only finite numbers")
+                raise MacroError(f"{func}: cannot {verb} {v}{where} — only finite numbers")
             return v
         if isinstance(v, bytes):
             raise MacroError(f"{func}: the text{where} is not valid UTF-8")
@@ -89,11 +90,11 @@ def to_json(value: Any, describe: Callable[[Any], Any], func: str) -> Any:
         if kind != "table":
             # The opensak functions are Python callables, userdata to Lua.
             shown = "function" if kind == "userdata" and callable(v) else kind
-            raise MacroError(f"{func}: cannot save a {shown}{where}")
+            raise MacroError(f"{func}: cannot {verb} a {shown}{where}")
         if len(active) >= MAX_DEPTH:
             raise MacroError(f"{func}: tables nested more than {MAX_DEPTH} levels deep{where}")
         if key in active:
-            raise MacroError(f"{func}: cannot save a cyclic table{where}")
+            raise MacroError(f"{func}: cannot {verb} a cyclic table{where}")
         active.add(key)
         try:
             items = list(v.items())
@@ -101,7 +102,7 @@ def to_json(value: Any, describe: Callable[[Any], Any], func: str) -> Any:
             if items and all(isinstance(k, int) and not isinstance(k, bool) for k in keys):
                 if sorted(keys) != list(range(1, len(keys) + 1)):
                     raise MacroError(
-                        f"{func}: cannot save a list with gaps{where} — its keys "
+                        f"{func}: cannot {verb} a list with gaps{where} — its keys "
                         "must be 1, 2, 3, …"
                     )
                 by_index = dict(items)
@@ -112,7 +113,7 @@ def to_json(value: Any, describe: Callable[[Any], Any], func: str) -> Any:
                 if not isinstance(k, str):
                     shown = helpers.lua_tostring(k)
                     raise MacroError(
-                        f"{func}: cannot save the key {shown}{where} — use string "
+                        f"{func}: cannot {verb} the key {shown}{where} — use string "
                         "keys, or 1, 2, 3, … for a list"
                     )
                 result[k] = convert(item, f"{path}.{k}" if path else k, active)

@@ -105,6 +105,8 @@ PERMISSIONS: dict[str, str] = {
                    "OpenSAK's temp folder, exports included (asks for folder "
                    "approval)",
     "open": "opens files in their default app with opensak.open()",
+    "read-clipboard": "reads the clipboard with opensak.get_clipboard() (asks "
+                      "the user)",
     "run-macros": "runs other macro files with opensak.run_macro(); what "
                   "those do is not covered by this macro's declaration",
 }

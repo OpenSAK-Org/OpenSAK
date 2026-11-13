@@ -567,12 +567,29 @@ def _check_delete_archived(ctx: Context, out: list[str]) -> None:
     assert ctx.host.filter_name() == "Traditionals"
 
 
+def _check_debugging(ctx, out):
+    # log() and inspect() write tables out (#1275), log_vars() the variables
+    # in scope (#1276); here the log is part of the output.
+    assert 'code = "GCEX003",' in out[1]
+    assert 'On one line: { code = "GCEX003", dt = { 4.0, 1.5 }, name = "Number Garden" }' in out
+    assert 'Top level only: { code = "GCEX003", dt = {...}, name = "Number Garden" }' in out
+    assert "a and b hold the same: true" in out
+    in_count = next(line for line in out if line.startswith("-- variables at")).split("\n")
+    assert in_count[1:] == ['c = { code = "GCEX006", difficulty = 1.0 }', 'd = "D1.0"',
+                            "-- upvalues", 'by_difficulty = { ["D1.0"] = 1 }', "counted = 1",
+                            "-- globals", 'last_code = "GCEX006"']
+    at_end = [line for line in out if line.startswith("-- variables at")][1].split("\n")
+    assert "counted = 8" in at_end and "-- globals" not in at_end
+    assert out[-1] == "Counted 8 caches in 6 difficulties."
+
+
 SCENARIOS: dict[str, Scenario] = {
     "delete_archived.lua": Scenario(setup=_filter_traditionals, check=_check_delete_archived),
     "corrected_coords_form.lua": Scenario(user=_coords_form, check=_check_coords_form),
     "corrected_coords_from_csv.lua": Scenario(setup=_csv_for_the_test_database,
                                               check=_check_csv),
     "database_statistics.lua": Scenario(check=_check_database_statistics),
+    "debugging_a_macro.lua": Scenario(check=_check_debugging),
     "distance_bearing.lua": Scenario(user=_distance_form, check=_check_distance_bearing),
     "dnf_alert.lua": Scenario(setup=_run_dnf_stats, check=_check_dnf_alert),
     "dnf_stats.lua": Scenario(check=_check_dnf_stats),

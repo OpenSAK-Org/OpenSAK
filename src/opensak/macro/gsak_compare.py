@@ -182,7 +182,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | BBcode | ❌ | |
 | CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
 | Centre | ✅ | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
-| Clip / GetClipText | ❌ | |
+| Clip / GetClipText | ✅ | `set_clipboard(text)`; `get_clipboard()` asks the user first |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |
 | Dualscreen / SplitScreen | 🚫 | GSAK UI |
 | GetEnvV | 🚫 | deliberately not exposed; `temp_dir`/`macros_dir` cover the common use |

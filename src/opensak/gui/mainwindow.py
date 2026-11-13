@@ -4146,6 +4146,14 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.macro_form import choose_folder_for_macro
         return choose_folder_for_macro(self._macro_parent(), title, start_dir)
 
+    def set_clipboard(self, text: str) -> None:
+        """MacroHost: opensak.set_clipboard()."""
+        QApplication.clipboard().setText(text)
+
+    def get_clipboard(self) -> str:
+        """MacroHost: opensak.get_clipboard()."""
+        return QApplication.clipboard().text()
+
     def show_form(self, form, events):
         """MacroHost: opensak.form{}."""
         from opensak.gui.dialogs.macro_form import FormDialog

@@ -128,6 +128,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — čte soubory mimo složku maker a dočasnou složku OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — zapisuje, přesouvá nebo maže soubory mimo dočasnou složku OpenSAK",
     "macro_mgr_perm_open":          "open — otevírá soubory ve výchozí aplikaci",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — čte schránku",
     "macro_mgr_perm_run_macros":    "run-macros — spouští jiná makra",
     "macro_mgr_perm_network":       "network — kontaktuje {hosts}",
     "macro_mgr_perm_unknown":       "Neznámá oprávnění (pro novější OpenSAK?): {names}",
