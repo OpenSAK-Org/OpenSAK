@@ -40,6 +40,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   User Guide lists the tags. The extra log is skipped on re-import.
   Contributed by nagisml.
 
+- **Final Location waypoint at the corrected coordinates (#1303)** — a
+  new GPX/GGZ export option adds a "Final Location" child waypoint at a
+  solved cache's corrected coordinates, so a phone app that replaces the
+  coordinates on an online refresh still keeps the solution. Only the
+  file changes, not the database; a Final Location already at those
+  coordinates isn't duplicated, and the GPX import skips the added
+  waypoint. In the file export dialog, saved export settings and
+  `opensak.export_gpx{ corrected_final_wp = true }`. Contributed by
+  nagisml.
+
 ### Changed
 
 - **GPX/GGZ export follows GSAK's file structure (#700)** — the header
