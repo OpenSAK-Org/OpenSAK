@@ -1377,6 +1377,9 @@ def render_lua_stub() -> str:
     lines.append("---@field [string] any")
 
     descriptions = {f.name: f.description for f in CACHE_FIELDS}
+    descriptions["description"] = ("The listing description, as `opensak.description()` "
+                                   "returns it; keys left out stay, `html` applies to both "
+                                   "and `false` clears it all.")
     lines += [
         "",
         "---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.",
