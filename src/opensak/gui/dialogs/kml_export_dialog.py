@@ -49,15 +49,19 @@ class _ExportWorker(QThread):
 
     def run(self) -> None:
         try:
-            from ...db.database import reload_caches_full
-            caches = reload_caches_full(self._caches)
-            self.cancel.raise_if_set()
+            # #1078: the caches are reloaded a chunk at a time while the
+            # file is written; the count for the document description comes
+            # from the table rows, which carry `found`.
+            from ...db.database import iter_caches_full
+            caches = list(self._caches)
             count = export_kml(
-                caches,
+                iter_caches_full(caches),
                 self._output_path,
                 include_waypoints=self._include_waypoints,
                 include_found=self._include_found,
                 progress_cb=make_progress_cb(self.progress.emit, self.cancel),
+                total=len(caches),
+                count=sum(1 for c in caches if self._include_found or not c.found),
             )
             self.finished.emit(count)
         except Cancelled:

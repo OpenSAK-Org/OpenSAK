@@ -59,7 +59,7 @@ def write_export_file(
     *attributes* (GPX/GGZ) and *child_waypoints* (GPX/GGZ/KML) can be left
     out. Returns the number of caches written.
 
-    #1075: GPX, LOC and GGZ are streamed — the caches are reloaded a chunk
+    #1075/#1078: GPX, LOC, GGZ and KML are streamed — the caches are reloaded a chunk
     at a time (iter_caches_full) and written one by one — so exporting
     100,000+ caches no longer holds them all, or the whole document, in
     memory. They are written to a temporary file next to *output_path* that
@@ -67,21 +67,21 @@ def write_export_file(
     truncated file behind.
     """
     from opensak.gps.garmin import write_gpx, write_loc, write_ggz
-    from opensak.db.database import iter_caches_full, reload_caches_full
+    from opensak.db.database import iter_caches_full
 
     if fmt not in EXPORT_FORMATS:
         raise ValueError(f"unknown export format {fmt!r}")
 
-    if fmt == "kml":
-        from opensak.export.kml import export_kml
-        caches = reload_caches_full(caches)
-        export_kml(caches, output_path, include_waypoints=child_waypoints,
-                   progress_cb=progress_cb, use_corrected=use_corrected, text=text,
-                   save=save)
-        return len([c for c in caches if c.latitude is not None])
-
     caches = list(caches)
     full = iter_caches_full(caches)
+
+    if fmt == "kml":
+        # #1078: KML is streamed the same way.
+        from opensak.export.kml import export_kml
+        export_kml(full, output_path, include_waypoints=child_waypoints,
+                   progress_cb=progress_cb, use_corrected=use_corrected, text=text,
+                   save=save, total=len(caches), count=len(caches))
+        return len([c for c in caches if c.latitude is not None])
 
     def _write(out) -> int:
         if fmt == "gpx":

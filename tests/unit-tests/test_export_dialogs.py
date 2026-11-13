@@ -80,6 +80,22 @@ class TestKmlExportWorker:
         w.run()
         assert errs and "kaboom" in errs[0]
 
+    @pytest.mark.parametrize("include_found, count", [(True, 3), (False, 2)])
+    def test_run_streams_chunked_reload(self, monkeypatch, include_found, count):
+        # #1078: the dialog hands export_kml() the chunked reload generator
+        # (not a fully reloaded list), with the totals from the table rows.
+        got = {}
+
+        def fake_export_kml(caches, path, **kw):
+            got["caches"], got["kw"] = caches, kw
+            return 0
+        monkeypatch.setattr(ked, "export_kml", fake_export_kml)
+        caches = [_cache(gc_code=f"GC{i}") for i in range(3)]
+        caches[0].found = True
+        KmlWorker(caches, "/tmp/x.kml", True, include_found).run()
+        assert not isinstance(got["caches"], list)
+        assert got["kw"]["total"] == 3 and got["kw"]["count"] == count
+
     def test_run_emits_progress(self, tmp_path):
         caches = [_cache(gc_code=f"GC{i}") for i in range(3)]
         w = KmlWorker(caches, str(tmp_path / "out.kml"), True, True)
@@ -181,7 +197,8 @@ class TestKmlExportDialog:
 # ── File export worker ────────────────────────────────────────────────────────
 
 class TestFileExportWorker:
-    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz")])
+    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz"),
+                                            ("kml", ".kml")])
     def test_run_writes_file(self, tmp_path, fmt, suffix):
         out = tmp_path / f"export{suffix}"
         w = FileWorker([_cache()], out, fmt)
@@ -201,9 +218,10 @@ class TestFileExportWorker:
         w.run()
         assert errs and "gen failed" in errs[0]
 
-    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz")])
+    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz"),
+                                            ("kml", ".kml")])
     def test_failed_export_keeps_existing_file(self, tmp_path, monkeypatch, fmt, suffix):
-        # #1075: the export streams into a temporary file, so a failure
+        # #1075/#1078: the export streams into a temporary file, so a failure
         # halfway neither truncates the previous export nor leaves the
         # temporary file behind.
         def boom(caches):
@@ -220,7 +238,8 @@ class TestFileExportWorker:
         assert out.read_bytes() == b"previous export"
         assert list(tmp_path.iterdir()) == [out]
 
-    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz")])
+    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz"),
+                                            ("kml", ".kml")])
     def test_run_emits_progress(self, tmp_path, fmt, suffix):
         caches = [_cache(gc_code=f"GC{i}") for i in range(3)]
         w = FileWorker(caches, tmp_path / f"export{suffix}", fmt)

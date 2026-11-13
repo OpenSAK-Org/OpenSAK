@@ -46,6 +46,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   boundary data** now also stops the download between packs instead of
   only before it starts. Contributed by nagisml.
 
+### Fixed
+
+- **KML export of large databases no longer runs out of memory (#1078)** —
+  the KML export (File export, the KML export dialog and macros using
+  `opensak.export_file(..., "kml")`) now writes the file one cache at a
+  time instead of building the whole document in memory, as the
+  GPX/LOC/GGZ export has done since #1075. A database with 100,000+
+  caches made OpenSAK crash. The content of the file is unchanged; a
+  failed or cancelled export keeps the previous file. Contributed by
+  nagisml.
+
 ---
 
 ## [1.23.0-beta.3] — 2026-11-12
