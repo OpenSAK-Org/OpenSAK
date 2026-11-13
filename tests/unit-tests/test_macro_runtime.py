@@ -1906,3 +1906,140 @@ def test_runtime_writes_files_only_through_safe_write():
         if name in writers and not any(k.arg == "save" for k in node.keywords):
             problems.append(f"line {node.lineno}: {name}() without save=")
     assert problems == []
+
+
+# ── #775: GPX/GGZ content options in export_gpx / export_file ────────────────
+
+def test_export_gpx_content_options(tmp_path, export_cache):
+    target = tmp_path / "out" / "o.gpx"
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, children = "none", '
+                                'max_logs = 1, my_logs_always = true, user_note_log = true, '
+                                'version = "1.1"')
+    assert out == [f"{target.resolve()}\t1"]
+    text = target.read_text(encoding="utf-8")
+    assert 'version="1.1"' in text and "<metadata>" in text
+    assert "PKEXP1" not in text
+    # A number works for the version too.
+    _export_gpx(tmp_path, f'path = {str(target)!r}, version = 1.1')
+    assert 'version="1.1"' in target.read_text(encoding="utf-8")
+
+
+def test_export_gpx_gsak_fields(tmp_path, export_cache):
+    # #1169: GSAK's own fields by default; gsak_fields = false leaves them out.
+    target = tmp_path / "out" / "g.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}')
+    text = target.read_text(encoding="utf-8")
+    assert "<gsak:UserFlag>" in text and "<gsak:Parent>GCEXP1</gsak:Parent>" in text
+    assert "<gsak:LatBeforeCorrect>46.000000</gsak:LatBeforeCorrect>" in text
+    _export_gpx(tmp_path, f'path = {str(target)!r}, gsak_fields = false')
+    text = target.read_text(encoding="utf-8")
+    assert "<gsak:UserFlag>" not in text and "<gsak:Parent>" not in text
+
+
+def test_export_gpx_gsak_fields_off_for_a_device(tmp_path, export_cache, monkeypatch):
+    # #1169: target = "device" leaves them out by default, as Send to GPS.
+    import opensak.gps.garmin as garmin
+    device = tmp_path / "GARMIN_DRIVE"
+    (device / "Garmin" / "GPX").mkdir(parents=True)
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    target = device / "Garmin" / "GPX" / "TestDB.gpx"
+    _export_gpx(tmp_path, 'target = "device"')
+    assert "<gsak:UserFlag>" not in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, 'target = "device", gsak_fields = true')
+    assert "<gsak:UserFlag>" in target.read_text(encoding="utf-8")
+
+
+def test_export_gpx_corrected_final_wp(tmp_path, export_cache):
+    # #1303: a Final Location at GCEXP1's corrected coordinates, also with
+    # children = "none"; pois.child_waypoints = false leaves it out too.
+    target = tmp_path / "out" / "f.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}')
+    assert "<name>FLEXP1</name>" not in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, f'path = {str(target)!r}, corrected_final_wp = true, '
+                          'children = "none"')
+    text = target.read_text(encoding="utf-8")
+    assert '<wpt lat="46.500000" lon="7.500000">' in text
+    assert "<name>FLEXP1</name>" in text and "PKEXP1" not in text
+    _export_gpx(tmp_path, f'path = {str(target)!r}, corrected_final_wp = true, '
+                          'pois = { child_waypoints = false }, max = 1, '
+                          'max_counts = "waypoints"')
+    assert "<name>FL" not in target.read_text(encoding="utf-8")
+
+
+def test_export_gpx_special_tag_templates(tmp_path, export_cache):
+    # #454/#950: the dialog's special-tag templates as export_gpx keys.
+    target = tmp_path / "out" / "t.gpx"
+    _export_gpx(tmp_path, f'''path = {str(target)!r},
+        name_template = "%drop2%typ1", name_max_chars = 4,
+        desc_template = "%name (%dif/%ter)", desc_for_cache_name = true,
+        remove_chars = "()", first_log = "Type: %typ\\nHint: %hint"''')
+    text = target.read_text(encoding="utf-8")
+    assert "<name>EXP1</name>" in text
+    assert "<desc>Export me 2/3.5</desc>" in text
+    assert "<groundspeak:name>Export me 2/3.5</groundspeak:name>" in text
+    # The hint line is left out: GCEXP1 has no hint.
+    assert ('<groundspeak:log id="-454">' in text
+            and "<groundspeak:text encoded=\"False\">Type: Multi-cache</groundspeak:text>" in text)
+
+
+def test_export_gpx_first_log_function(tmp_path, export_cache):
+    # first_log may be a function(c); nil writes no extra-info log.
+    target = tmp_path / "out" / "f.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}, '
+                          'first_log = function(c) return "Code " .. c.code end')
+    assert ">Code GCEXP1</groundspeak:text>" in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, f'path = {str(target)!r}, first_log = function(c) return nil end')
+    assert 'id="-454"' not in target.read_text(encoding="utf-8")
+
+
+def test_export_gpx_children_only(tmp_path, export_cache):
+    target = tmp_path / "out" / "c.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}, children_only = true')
+    text = target.read_text(encoding="utf-8")
+    assert "PKEXP1" in text and "groundspeak:cache" not in text
+
+
+def test_export_gpx_max_counts_waypoints(tmp_path, export_cache):
+    # GCEXP1 and its child are two <wpt>: a limit of 1 waypoint keeps nothing.
+    target = tmp_path / "out" / "w.gpx"
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 1, max_counts = "waypoints"')
+    assert out == ["nil"] and not target.exists()
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 2, max_counts = "waypoints"')
+    assert out == [f"{target.resolve()}\t1"]
+    # Without children (pois or children = "none") one waypoint is enough.
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 1, max_counts = "waypoints", '
+                                'pois = { child_waypoints = false }')
+    assert out == [f"{target.resolve()}\t1"]
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ('children = "some"', "children must be one of"),
+    ('max_counts = "all"', "max_counts must be one of"),
+    ("max_logs = -1", "max_logs must be a whole number"),
+    ("max_logs = 1.5", "max_logs must be a whole number"),
+    ('children_only = "yes"', "children_only must be true or false"),
+    ('user_note_log = 1', "user_note_log must be true or false"),
+    ('gsak_fields = "no"', "gsak_fields must be true or false"),
+    ('version = "2.0"', "version must be one of"),
+    ("name_template = 5", "name_template must be a string"),
+    ("name_max_chars = -1", "name_max_chars must be a whole number"),
+    ('desc_template = true', "desc_template must be a string"),
+    ('desc_for_cache_name = "yes"', "desc_for_cache_name must be true or false"),
+    ("remove_chars = 1", "remove_chars must be a string"),
+    ("first_log = 3", "first_log must be a function"),
+])
+def test_export_gpx_rejects_bad_content_options(tmp_path, export_cache, spec, msg):
+    path = str(tmp_path / "out" / "x.gpx")
+    with pytest.raises(MacroError, match=msg):
+        _export_gpx(tmp_path, f"path = {path!r}, {spec}")
+
+
+def test_export_file_uses_the_settings_content(tmp_path, export_cache):
+    runtime, out = _export_runtime(tmp_path, file_name="content", children="none",
+                                   gpx_version="1.1")
+    runtime.run("""
+        opensak.filter{ codes = {"GCEXP1"} }
+        print(opensak.export_file("GPX Export"))
+    """)
+    text = (tmp_path / "out" / "content.gpx").read_text(encoding="utf-8")
+    assert 'version="1.1"' in text and "PKEXP1" not in text

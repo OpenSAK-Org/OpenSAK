@@ -116,6 +116,9 @@ from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
 from opensak.export.cache_text import ExportText
 from opensak.export.file_export import EXPORT_FORMATS, select_for_export, write_export_file
+from opensak.export.gpx_content import (
+    CHILDREN_CHOICES, GPX_VERSIONS, MAX_COUNTS_CHOICES, GpxContent,
+)
 from opensak.export.file_export_settings import (
     FileExportProfile,
     FileExportSettings,
@@ -260,6 +263,16 @@ _COMPANION_TABLE_KEYS = ("name", "linked", "code_column", "description")
 EXPORT_KEYS = frozenset({
     "path", "format", "corrected", "max", "rename", "description", "pois",
     "if_exists", "target", "device",
+    # #775: GPX/GGZ content options (see export.gpx_content.GpxContent)
+    "max_counts", "children", "children_only", "max_logs", "my_logs_always",
+    "user_note_log", "version",
+    # #1169: GSAK's own fields
+    "gsak_fields",
+    # #454/#950: special-tag templates; first_log may also be a function
+    "name_template", "name_max_chars", "desc_template", "desc_for_cache_name",
+    "remove_chars", "first_log",
+    # #1303: a Final Location waypoint at the corrected coordinates
+    "corrected_final_wp",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # opensak.import_gsak(): the keys of its options table, and how many cache
@@ -4758,7 +4771,10 @@ class MacroRuntime:
                 f"export setting {name!r} has no folder — choose one in the "
                 "export dialog and save the setting again, or pass a folder"
             )
-        caches = select_for_export(self._host.filtered_caches(), settings.max_records)
+        caches = select_for_export(
+            self._host.filtered_caches(), settings.max_records, settings.max_counts,
+            settings.fmt, settings.content(),
+        )
         if not caches:
             return None
         file_name = expand_file_name(
@@ -4786,6 +4802,7 @@ class MacroRuntime:
                 caches, target, settings.fmt,
                 use_corrected=settings.use_corrected_coords,
                 save=self._safe_saver(target),
+                content=settings.content(),
             )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
@@ -4837,7 +4854,23 @@ class MacroRuntime:
             )
         rename = self._lua_function(func, "rename", opts.get("rename"))
         describe = self._lua_function(func, "description", opts.get("description"))
+        # #454: first_log is a special-tag template, or a function(c)
+        # returning the log text (nil: no extra-info log for that cache).
+        first_log = opts.get("first_log")
+        first_log_fn = None
+        if first_log is not None and not isinstance(first_log, str):
+            first_log_fn = self._lua_function(func, "first_log", first_log)
+            opts["first_log"] = ""
         attributes, child_waypoints = self._export_pois(func, opts.get("pois"))
+        max_counts, content = self._export_content(
+            func, opts, gsak_fields=target != "device",
+        )
+        if not child_waypoints:
+            # pois.child_waypoints = false: no children, also in the count;
+            # that includes the Final Location of corrected_final_wp.
+            import dataclasses
+            content = dataclasses.replace(content, children="none", children_only=False,
+                                          corrected_final_wp=False)
         if target == "device":
             folder = self._garmin_folder(func, opts.get("device"), fmt)
         else:
@@ -4847,7 +4880,9 @@ class MacroRuntime:
             if not folder.is_absolute():
                 folder = (self._base_dir or macros_dir()) / folder
 
-        caches = select_for_export(self._host.filtered_caches(), int(max_records))
+        caches = select_for_export(
+            self._host.filtered_caches(), int(max_records), max_counts, fmt, content,
+        )
         if not caches:
             return None
         file_name = expand_file_name(
@@ -4867,12 +4902,12 @@ class MacroRuntime:
 
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
                     return None
-        text = self._export_text(lua, func, caches, rename, describe)
+        text = self._export_text(lua, func, caches, rename, describe, first_log_fn)
         try:
             count = write_export_file(
                 caches, output, fmt, use_corrected=corrected, text=text,
                 attributes=attributes, child_waypoints=child_waypoints,
-                save=self._safe_saver(output),
+                save=self._safe_saver(output), content=content,
             )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
@@ -4889,6 +4924,65 @@ class MacroRuntime:
         if lua_type(value) != "function":
             raise MacroError(f"{func}: {key} must be a function(c), got {value!r}")
         return value
+
+    @staticmethod
+    def _export_content(
+        func: str, opts: dict, gsak_fields: bool = True,
+    ) -> tuple[str, GpxContent]:
+        """The #775 keys of an export_gpx table → (max_counts, content).
+        *gsak_fields* is the default of the gsak_fields key: off for a
+        device, as in Send to GPS (#1169)."""
+        def _choice(key: str, choices: tuple, default: str) -> str:
+            value = opts.get(key, default)
+            if value not in choices:
+                raise MacroError(
+                    f"{func}: {key} must be one of {', '.join(choices)}, got {value!r}"
+                )
+            return value
+
+        def _flag(key: str, default: bool = False) -> bool:
+            value = opts.get(key, default)
+            if not isinstance(value, bool):
+                raise MacroError(f"{func}: {key} must be true or false, got {value!r}")
+            return value
+
+        def _count(key: str) -> int:
+            value = opts.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or value < 0 or value != int(value):
+                raise MacroError(f"{func}: {key} must be a whole number >= 0, got {value!r}")
+            return int(value)
+
+        def _string(key: str) -> str:
+            value = opts.get(key, "")
+            if not isinstance(value, str):
+                raise MacroError(f"{func}: {key} must be a string, got {value!r}")
+            return value
+
+        max_logs = _count("max_logs")
+        version = opts.get("version", "1.0")
+        if isinstance(version, (int, float)) and not isinstance(version, bool):
+            version = f"{float(version):.1f}"   # Lua 1.1 → "1.1"
+        if version not in GPX_VERSIONS:
+            raise MacroError(
+                f"{func}: version must be one of {', '.join(GPX_VERSIONS)}, got {version!r}"
+            )
+        return _choice("max_counts", MAX_COUNTS_CHOICES, "caches"), GpxContent(
+            children=_choice("children", CHILDREN_CHOICES, "all"),
+            children_only=_flag("children_only"),
+            max_logs=max_logs,
+            my_logs_always=_flag("my_logs_always"),
+            user_note_log=_flag("user_note_log"),
+            version=version,
+            gsak_fields=_flag("gsak_fields", gsak_fields),
+            corrected_final_wp=_flag("corrected_final_wp"),
+            name_template=_string("name_template"),
+            name_max_chars=_count("name_max_chars"),
+            desc_template=_string("desc_template"),
+            desc_for_cache_name=_flag("desc_for_cache_name"),
+            remove_chars=_string("remove_chars"),
+            first_log=_string("first_log"),
+        )
 
     @staticmethod
     def _export_pois(func: str, value: Any) -> tuple[bool, bool]:
@@ -4911,18 +5005,21 @@ class MacroRuntime:
             result.append(on)
         return result[0], result[1]
 
-    def _export_text(self, lua, func: str, caches: list, rename, describe) -> ExportText:
-        """Call the macro's rename / description functions once per cache,
-        with the cache table (see Cache fields)."""
-        if rename is None and describe is None:
+    def _export_text(self, lua, func: str, caches: list, rename, describe,
+                     first_log=None) -> ExportText:
+        """Call the macro's rename / description / first_log functions once
+        per cache, with the cache table (see Cache fields)."""
+        if rename is None and describe is None and first_log is None:
             return ExportText()
         names: dict[str, str] = {}
         descriptions: dict[str, str] = {}
+        first_logs: dict[str, str] = {}
         codes = [c.gc_code for c in caches]
         for record in iter_records(get_session, codes, resolve_fields(None), self._db_file(None)):
             table = lua.table_from(record, recursive=True)
             for fn, key, result in ((rename, "rename", names),
-                                    (describe, "description", descriptions)):
+                                    (describe, "description", descriptions),
+                                    (first_log, "first_log", first_logs)):
                 if fn is None:
                     continue
                 value = fn(table)
@@ -4934,7 +5031,7 @@ class MacroRuntime:
                         f"default), got {value!r} for {record['code']}"
                     )
                 result[record["code"]] = str(value)
-        return ExportText(names, descriptions)
+        return ExportText(names, descriptions, first_logs)
 
     def _garmin_folder(self, func: str, device: Any, fmt: str) -> Path:
         """The GPX or GGZ folder of the connected Garmin device (the one
@@ -7411,11 +7508,30 @@ API: tuple[ApiFunction, ...] = (
                     "the file name; MTP devices are not supported yet). "
                     "Nothing is written when no cache with coordinates is "
                     "shown, or when the file exists and `if_exists` says "
-                    "skip (or ask, and the user answers No).",
+                    "skip (or ask, and the user answers No). The content "
+                    "keys `children`, `children_only`, `max_logs`, "
+                    "`my_logs_always`, `user_note_log`, `version`, "
+                    "`gsak_fields` and `max_counts` are the options of the "
+                    "export dialog (GPX/GGZ), as are its special-tag "
+                    "templates `name_template`, `name_max_chars`, "
+                    "`desc_template`, `desc_for_cache_name`, `remove_chars` "
+                    "and `first_log` (GSAK's tags, e.g. \"%drop2%con1\"). "
+                    "`first_log` may also be a function(c) returning the "
+                    "text of the extra-info first log (nil: none). `rename` "
+                    "and `description` win over the templates. `gsak_fields` "
+                    "is off by default with `target = \"device\"`, as in "
+                    "Send to GPS. `corrected_final_wp = true` adds a Final "
+                    "Location waypoint at the corrected coordinates of each "
+                    "corrected cache, whatever `children` says (not with "
+                    "`pois.child_waypoints = false`), so an app that "
+                    "refreshes the cache online keeps the solution.",
         example='local path, n = opensak.export_gpx{\n'
                 '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
                 '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'
-                '  pois = { child_waypoints = false },\n'
+                '  children = "flagged", max_logs = 2, user_note_log = true,\n'
+                '  name_template = "%drop2%con1", name_max_chars = 8,\n'
+                '  first_log = "Hint: %hint\\nFavorite Points: %FavPoints",\n'
+                '  max = 7000, max_counts = "waypoints",\n'
                 '}\n'
                 'if path then print(n .. " caches → " .. path) end',
         since=2,
