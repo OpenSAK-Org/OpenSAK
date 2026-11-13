@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.23.0-beta.5] — Unreleased
 
+### Added
+
+- **GPX/GGZ export options for children, logs, user note and GPX version
+  (#775)** — the file export dialog, saved export settings and
+  `opensak.export_gpx{}` can export all, only flagged, only unflagged or
+  no child waypoints (or only the child waypoints), limit the logs per
+  cache (optionally always keeping your own), write the user note as a
+  first log as GSAK does, write GPX 1.1 instead of 1.0, and count the
+  record limit in waypoints instead of caches. **Send to GPS** takes
+  these options from "Default", the last file export or a saved export
+  setting, with an **Edit** button for them (#1093). The defaults keep
+  today's files. Contributed by nagisml.
+
 ### Changed
 
 - **GPX/GGZ export follows GSAK's file structure (#700)** — the header
