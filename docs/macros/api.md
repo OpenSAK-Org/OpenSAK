@@ -60,9 +60,9 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.import_gpx`](#opensakimportgpx) | 3 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
-| [`opensak.update`](#opensakupdate) | 3, changed in 4 |
+| [`opensak.update`](#opensakupdate) | 3, changed in 4, changed in 5 |
 | [`opensak.macro_flag`](#opensakmacroflag) | 4 |
-| [`opensak.insert`](#opensakinsert) | 3, changed in 4 |
+| [`opensak.insert`](#opensakinsert) | 3, changed in 4, changed in 5 |
 | [`opensak.delete`](#opensakdelete) | 3 |
 | [`opensak.logs`](#opensaklogs) | 3 |
 | [`opensak.insert_log`](#opensakinsertlog) | 3 |
@@ -104,6 +104,8 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
 | [`opensak.choose_folder`](#opensakchoosefolder) | 3 |
+| [`opensak.set_clipboard`](#opensaksetclipboard) | 5 |
+| [`opensak.get_clipboard`](#opensakgetclipboard) | 5 |
 | [`opensak.message`](#opensakmessage) | 3 |
 | [`opensak.input`](#opensakinput) | 3 |
 | [`opensak.choose`](#opensakchoose) | 3 |
@@ -124,6 +126,8 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.shift_key`](#opensakshiftkey) | 5 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
+| [`opensak.inspect`](#opensakinspect) | 5 |
+| [`opensak.log_vars`](#opensaklogvars) | 5 |
 | [`opensak.exit`](#opensakexit) | 3 |
 | [`opensak.coords.parse`](#opensakcoordsparse) | 2, changed in 3 |
 | [`opensak.coords.format`](#opensakcoordsformat) | 2, changed in 3 |
@@ -139,6 +143,8 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.re.replace`](#opensakrereplace) | 2 |
 | [`opensak.re.split`](#opensakresplit) | 2 |
 | [`opensak.re.escape`](#opensakreescape) | 3 |
+| [`opensak.json.decode`](#opensakjsondecode) | 5 |
+| [`opensak.json.encode`](#opensakjsonencode) | 5 |
 | [`opensak.text.html_to_text`](#opensaktexthtmltotext) | 2 |
 | [`opensak.text.rot13`](#opensaktextrot13) | 2 |
 | [`opensak.text.digit_sum`](#opensaktextdigitsum) | 2 |
@@ -1178,7 +1184,7 @@ opensak.clear_corrected("GC12345")
 opensak.update(code, fields)
 ```
 
-Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
+Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). `description` changes the listing description: a table like the one `opensak.description()` returns, where keys left out stay, `html` applies to both texts and `false` clears it all. An import replaces the description and `changed_date` unless the cache is locked. Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 
 Parameters:
 
@@ -1187,12 +1193,14 @@ Parameters:
 
 Returns `boolean` — false if the cache is not in the database.
 
-Since API version 3. Changed in API version 4: `custom` changes custom fields.
+Since API version 3. Changed in API version 4: `custom` changes custom fields. Changed in API version 5: `description` and `changed_date` can be written.
 
 Example:
 
 ```lua
 opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })
+opensak.update("GC12345", { description = { long = "<p>Solved</p>", html = true },
+                            changed_date = "2026-10-31" })
 for c in opensak.caches{ found = true, fields = {"color"} } do
     if not c.color then opensak.update(c.code, { color = "#00AA00" }) end
 end
@@ -1239,7 +1247,7 @@ Parameters:
 
 Returns `string` — The cache code as stored (upper case).
 
-Since API version 3. Changed in API version 4: `custom` sets custom fields.
+Since API version 3. Changed in API version 4: `custom` sets custom fields. Changed in API version 5: `description` and `changed_date` can be set.
 
 Example:
 
@@ -2266,6 +2274,45 @@ if not folder then return end      -- cancelled
 opensak.export_gpx{ path = folder .. "/{filter}.gpx" }
 ```
 
+### opensak.set_clipboard
+
+```lua
+opensak.set_clipboard(text)
+```
+
+Put text on the system clipboard, replacing what is there (GSAK's Clip), e.g. to paste a downloaded page into a regex tester. At most 10,000,000 characters. Needs the user interface.
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Since API version 5.
+
+Example:
+
+```lua
+opensak.set_clipboard("Copied by a macro")
+```
+
+### opensak.get_clipboard
+
+```lua
+opensak.get_clipboard()
+```
+
+The text on the system clipboard (GSAK's GetClipText), e.g. to try a macro on different texts by copying them. The clipboard may hold private text, so the user is asked first, once per run; if they say no, the macro stops with an error. A macro that reads it should declare `read-clipboard` in its `Permissions` header. Needs the user interface.
+
+Returns `string` — The text, "" if the clipboard holds no text.
+
+Since API version 5.
+
+Example:
+
+```lua
+local text = opensak.get_clipboard()
+print(#text .. " bytes")
+```
+
 ### opensak.message
 
 ```lua
@@ -2692,7 +2739,7 @@ opensak.sleep(500)
 opensak.log(...)
 ```
 
-Write a message to OpenSAK's log file and the macro output. Run with `opensak --run-macro`, it goes to stderr while print() goes to stdout.
+Write a message to OpenSAK's log file and the macro output. Run with `opensak --run-macro`, it goes to stderr while print() goes to stdout. A table is written out with its contents, as `opensak.inspect()` does.
 
 Parameters:
 
@@ -2704,6 +2751,57 @@ Example:
 
 ```lua
 opensak.log("checked " .. opensak.count() .. " caches")
+opensak.log("cache:", opensak.cache("GC12345"))
+```
+
+### opensak.inspect
+
+```lua
+opensak.inspect(value [, options])
+```
+
+Any value as readable text, e.g. to see what a table holds while writing a macro: print() only shows a table's address. The list part comes first, then the other keys sorted, so the same table always gives the same text. Strings are quoted. A table nested deeper than `depth` shows as `{...}`, a table inside itself as `<cycle>`, a function as `<function>`; metatables are ignored. Short tables stay on one line. Text longer than 1,000,000 characters is cut off and ends with `... (truncated)`.
+
+Parameters:
+
+- `value` (`any`) — The value to show.
+- `options` (`{ depth?: integer, indent?: integer }`, optional) — `depth`: how many levels of nested tables to write out, 1 to 100 (default 10). `indent`: 0 to 8 spaces per level (default 2); 0 writes everything on one line.
+
+Returns `string` — The text.
+
+Since API version 5.
+
+Example:
+
+```lua
+print(opensak.inspect({ 10, 20, name = "Hut", tags = { "a", "b" } }))
+-- { 10, 20, name = "Hut", tags = { "a", "b" } }
+opensak.log(opensak.inspect(opensak.cache("GC12345"), { depth = 1 }))
+```
+
+### opensak.log_vars
+
+```lua
+opensak.log_vars([options])
+```
+
+For debugging: write the variables in scope at this line to the log, one `name = value` line each, as `opensak.log()` does. The locals come first, in the order they were declared, then the arguments passed as `...`, then the upvalues (locals of an enclosing function that the code uses). With `globals = true` the globals the macro added or changed follow, sorted. Values are written as `opensak.inspect()` does, a table on one line. Call it from the macro's code: passed to `pcall()`, `coroutine.wrap()` or another library function, it raises an error.
+
+Parameters:
+
+- `options` (`{ depth?: integer, globals?: boolean }`, optional) — `depth`: how many levels of nested tables to write out, 1 to 100 (default 2); deeper ones show as `{...}`. `globals`: also write the globals the macro added or changed (default false).
+
+Since API version 5.
+
+Example:
+
+```lua
+local name, tags = "Hut", { "a", "b" }
+opensak.log_vars()
+-- -- variables at macro:2
+-- name = "Hut"
+-- tags = { "a", "b" }
+opensak.log_vars({ globals = true, depth = 1 })
 ```
 
 ### opensak.exit
@@ -3096,6 +3194,59 @@ Example:
 ```lua
 local pattern = "^" .. opensak.re.escape("Bonus (1/3)") .. "$"
 print(opensak.re.match("Bonus (1/3)", pattern))  -- true
+```
+
+### opensak.json.decode
+
+```lua
+opensak.json.decode(text [, options])
+```
+
+Turn JSON text into Lua values, e.g. what `opensak.get_url()` downloaded: an object becomes a table with string keys, an array a list starting at 1. Invalid JSON is an error. A Lua table cannot hold nil, so by default a null member is simply absent (it reads as nil) and a null array item leaves a gap, where `#` and `ipairs` are unreliable. With the option `null`, a string, number or boolean of your choice stands in for every null. At most 20,000,000 characters.
+
+Parameters:
+
+- `text` (`string`) — The JSON text.
+- `options` (`{ null?: string|number|boolean }`, optional) — `null`: the value to use for every null.
+
+Returns `any` — The value; nil if the text is just null.
+
+Since API version 5.
+
+Example:
+
+```lua
+local q = opensak.json.decode('{"Name": "Hut", "MultiChoiceOptions": null}')
+print(q.Name)                -- Hut
+print(q.MultiChoiceOptions)  -- nil
+local a = opensak.json.decode("[1, null, 3]", { null = false })
+print(#a, a[2])              -- 3   false
+```
+
+### opensak.json.encode
+
+```lua
+opensak.json.encode(value [, options])
+```
+
+Turn a Lua value into JSON text. Strings, numbers, booleans and nested tables can be encoded, following the same rules as `opensak.settings.save()`: a table needs string keys, or 1, 2, 3, … for an array. Functions, cyclic tables and infinite numbers are refused. Object keys are sorted, so the same table always gives the same text. An empty table becomes `[]`, or `{}` with the option `empty = "object"`. Since a table cannot hold nil, write null with the option `null`: every value equal to it becomes null, also the one `opensak.json.decode()` put in. `indent`: spaces per level for readable text.
+
+Parameters:
+
+- `value` (`any`) — The value to encode.
+- `options` (`{ null?: string|number|boolean, empty?: "array"|"object", indent?: integer }`, optional) — `null`: the value to write as null. `empty`: what an empty table becomes. `indent`: 0 to 8 spaces per level.
+
+Returns `string` — The JSON text.
+
+Since API version 5.
+
+Example:
+
+```lua
+print(opensak.json.encode({ name = "Hut", tags = {"a", "b"} }))
+-- {"name":"Hut","tags":["a","b"]}
+print(opensak.json.encode({ note = "<null>" }, { null = "<null>" }))
+-- {"note":null}
 ```
 
 ### opensak.text.html_to_text
@@ -4502,6 +4653,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
 | `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh. |
 | `last_user_update` | `string?` | When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate). |
+| `changed_date` | `string?` | When the listing last changed, as the import file says, "YYYY-MM-DDTHH:MM:SS". |
 | `custom` | `table<string, any>` | The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). |
 
 ## Database tables for macros
@@ -4555,7 +4707,7 @@ One row per cache (and per custom waypoint, see `parent_gc_code`).
 | `owner_name` | text | `owner` | Owner's geocaching.com name. |
 | `owner_id` | text |  | Owner's geocaching.com member id. |
 | `hidden_date` | date and time | `hidden` | Hidden (placed) date. |
-| `last_updated` | date and time |  | When the listing last changed, as the import file says. |
+| `last_updated` | date and time | `changed_date` | When the listing last changed, as the import file says. |
 | `available` | 0 / 1 | `available` | 1 = not disabled. |
 | `archived` | 0 / 1 | `archived` | 1 = archived. |
 | `premium_only` | 0 / 1 | `premium` | 1 = premium-member only. |
@@ -4700,7 +4852,7 @@ Which function to use:
 
 Start with the dedicated functions: they take Lua values, check each field (type, range, date format) with a clear error message, and need no knowledge of the database schema. `opensak.sql_write()` only refuses protected columns and what SQLite itself rejects; it works with the tables and columns of [Database tables for macros](#database-tables-for-macros), but what it may change is not part of that promise.
 
-Writable cache fields: `name`, `type`, `container`, `lat`, `lon`, `difficulty`, `terrain`, `owner`, `placed_by`, `hidden`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `available`, `archived`, `premium`, `country`, `state`, `county`, `elevation`, `favorite_points`, `find_count`, `user_flag`, `user_sort`, `user_data`, `color`, `locked`, `watch`, `macro_flag`, `macro_sort`, `note`, `gc_note`, `hint`, `url`, `symbol`, `corrected`. `false` clears a field that is not a boolean, and "" clears a text field. `user_data` takes the slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes `{ lat = .., lon = .. }` or a coordinate string. Dates are `"YYYY-MM-DD"`. `opensak.insert{}` also needs `code`, and `name`, `type`, `lat`, `lon`.
+Writable cache fields: `name`, `type`, `container`, `lat`, `lon`, `difficulty`, `terrain`, `owner`, `placed_by`, `hidden`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `available`, `archived`, `premium`, `country`, `state`, `county`, `elevation`, `favorite_points`, `find_count`, `user_flag`, `user_sort`, `user_data`, `color`, `locked`, `watch`, `macro_flag`, `macro_sort`, `note`, `gc_note`, `hint`, `description`, `changed_date`, `url`, `symbol`, `corrected`. `false` clears a field that is not a boolean, and "" clears a text field. `user_data` takes the slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes `{ lat = .., lon = .. }` or a coordinate string. Dates are `"YYYY-MM-DD"`. `opensak.insert{}` also needs `code`, and `name`, `type`, `lat`, `lon`.
 
 These fields cannot be written:
 
@@ -4843,6 +4995,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — Enter or remove the corrected coordinates of the selected cache
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
 - [`database_statistics.lua`](../../macros/examples/database_statistics.lua) — Write an HTML page with statistics and maps of all caches in the database
+- [`debugging_a_macro.lua`](../../macros/examples/debugging_a_macro.lua) — See what a macro works with: opensak.log() with tables, opensak.inspect() and opensak.log_vars()
 - [`delete_archived.lua`](../../macros/examples/delete_archived.lua) — Delete the archived caches you haven't found from the active database
 - [`distance_bearing.lua`](../../macros/examples/distance_bearing.lua) — List the caches around any point with distance and compass direction (GSAK's g_Distance, g_Bearing1/2 and g_Project in SQL)
 - [`dnf_alert.lua`](../../macros/examples/dnf_alert.lua) — Filter the unfound caches with several DNFs since their last find, from dnf_stats.lua's data
@@ -4899,6 +5052,7 @@ Both are **information only**: a declaration never approves anything. OpenSAK as
 | `read-files` | reads files or folders outside the macros folder and OpenSAK's temp folder (asks for folder approval); a file the user picks in choose_file() does not count |
 | `write-files` | writes, copies, moves or deletes files or folders outside OpenSAK's temp folder, exports included (asks for folder approval) |
 | `open` | opens files in their default app with opensak.open() |
+| `read-clipboard` | reads the clipboard with opensak.get_clipboard() (asks the user) |
 | `run-macros` | runs other macro files with opensak.run_macro(); what those do is not covered by this macro's declaration |
 | `none` | needs none of these |
 
@@ -5150,7 +5304,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | BBcode | ❌ | |
 | CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
 | Centre | ✅ | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
-| Clip / GetClipText | ❌ | |
+| Clip / GetClipText | ✅ | `set_clipboard(text)`; `get_clipboard()` asks the user first |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |
 | Dualscreen / SplitScreen | 🚫 | GSAK UI |
 | GetEnvV | 🚫 | deliberately not exposed; `temp_dir`/`macros_dir` cover the common use |
