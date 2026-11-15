@@ -88,6 +88,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   database leaves the active filter with no caches, OpenSAK now asks
   whether to clear the filter. Reported by Peter Floyd.
 
+- **The filter dropdown shows the filter that is applied (#1308)** — after
+  loading a saved filter profile, changing its criteria in **Set filter**
+  (or clicking **Reset all tabs**) and clicking Apply, the toolbar dropdown
+  still showed the old profile, and that profile was stored for the
+  database, so it came back instead of the new filter when the database was
+  opened again. A status-bar count click (Found, Owned, Inactive) and a
+  macro's `opensak.filter{}` label were also stored as if they were
+  profiles. Now only a saved profile applied unchanged is shown and stored
+  as the active profile; any other filter shows "Active (unsaved)", with
+  its name in the 🔍 label, the info bar, `opensak.filter_name()` and
+  `{filter}` in export file names. **Reset all tabs** also sets the
+  dialog's profile back to "None". Reported by nagisml.
+
 ---
 
 ## [1.23.0-beta.4] — 2026-11-13

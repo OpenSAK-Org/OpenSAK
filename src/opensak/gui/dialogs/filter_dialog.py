@@ -946,6 +946,8 @@ class FilterDialog(QDialog):
                 rect.x() + (rect.width()  - w) // 2,
                 rect.y() + (rect.height() - h) // 2,
             )
+        # #1308: (profile name, criteria right after it was loaded or saved)
+        self._profile_snapshot: tuple[str, dict] | None = None
         self._setup_ui()
         if last_profile_name:
             for i in range(self._profile_combo.count()):
@@ -1032,7 +1034,7 @@ class FilterDialog(QDialog):
         btn_row.addWidget(apply_btn)
 
         reset_btn = QPushButton(tr("filter_reset_all_btn"))
-        reset_btn.clicked.connect(self._reset_all)
+        reset_btn.clicked.connect(self._on_reset_all_clicked)
         btn_row.addWidget(reset_btn)
 
         reset_tab_btn = QPushButton(tr("filter_reset_tab_btn"))
@@ -3017,6 +3019,18 @@ class FilterDialog(QDialog):
         self._lp_exclude.setChecked(False)
         self._lp_replace.setChecked(True)
 
+    def _on_reset_all_clicked(self) -> None:
+        """The "Reset all tabs" button (#1308): besides clearing every tab,
+        set the profile combo back to "None" — the criteria are no longer
+        the loaded profile's. _reset_all() itself can't do this, because
+        _load_filterset() calls it while a profile is being loaded."""
+        self._reset_all()
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.setCurrentIndex(0)
+        self._profile_combo.blockSignals(False)
+        self._del_btn.setEnabled(False)
+        self._profile_snapshot = None
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
@@ -3104,7 +3118,7 @@ class FilterDialog(QDialog):
                 spin1.setValue(low)
                 spin2.setValue(high)
 
-    def _build_filterset(self) -> FilterSet:
+    def _build_filterset(self, quiet: bool = False) -> FilterSet:
         self._order_distance_ranges()
         fs = FilterSet(mode="AND", negate=self._invert_cb.isChecked())
 
@@ -3167,7 +3181,8 @@ class FilterDialog(QDialog):
                 self._dir_enabled.isChecked() and legacy_dir is None):
             center = self._center_picker.get_center()
             if center is None:
-                QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
+                if not quiet:
+                    QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
             else:
                 lat, lon = center
                 center_state = self._center_picker.to_state()
@@ -3358,6 +3373,7 @@ class FilterDialog(QDialog):
     def _on_profile_selected(self, index: int) -> None:
         path = self._profile_combo.currentData()
         self._del_btn.setEnabled(path is not None)
+        self._profile_snapshot = None
         if path is None:
             return
         try:
@@ -3366,6 +3382,30 @@ class FilterDialog(QDialog):
             self._load_filterset(profile.filterset)
         except Exception as e:
             QMessageBox.warning(self, tr("error"), tr("filter_load_error", error=e))
+            return
+        self._remember_profile(self._profile_combo.currentText())
+
+    def _remember_profile(self, name: str) -> None:
+        """#1308: note the criteria as they stand right after *name* was
+        loaded (or saved), so _apply() can tell whether they were changed.
+        Built from the tabs rather than taken from the profile file, so a
+        profile whose stored form differs from what the tabs produce (older
+        formats, defaults) still counts as unchanged."""
+        try:
+            self._profile_snapshot = (name, self._build_filterset(quiet=True).to_dict())
+        except Exception:
+            self._profile_snapshot = None
+
+    def _applied_profile_name(self, fs: FilterSet) -> str:
+        """#1308: the selected profile's name if *fs* is still that profile,
+        else "" — so the main window shows "Active (unsaved)" and does not
+        store a profile whose criteria aren't the ones applied."""
+        if self._profile_combo.currentData() is None or self._profile_snapshot is None:
+            return ""
+        name, criteria = self._profile_snapshot
+        if name != self._profile_combo.currentText() or fs.to_dict() != criteria:
+            return ""
+        return name
 
     def _save_profile(self) -> None:
         # Suggest a name for the selected profile so it can easily be overwritten.
@@ -3392,6 +3432,9 @@ class FilterDialog(QDialog):
             if self._profile_combo.itemText(i) == name:
                 self._profile_combo.setCurrentIndex(i)
                 break
+        # #1308: what was just saved is the profile, whether or not selecting
+        # it above reloaded the tabs.
+        self._profile_snapshot = (self._profile_combo.currentText(), fs.to_dict())
         # issue #682: rapportér straks til MainWindow at en ny profil er
         # gemt, uanset om dialogen bagefter lukkes med Apply eller bare
         # med Close/Escape — samme mønster som profile_deleted (#491).
@@ -3670,12 +3713,8 @@ class FilterDialog(QDialog):
             return
 
         fs = self._build_filterset()
-        profile_name = (
-            self._profile_combo.currentText()
-            if self._profile_combo.currentData() is not None
-            else ""
-        )
-        self.filter_applied.emit(fs, SortSpec("name"), profile_name)
+        # #1308: report the profile only if its criteria are unchanged.
+        self.filter_applied.emit(fs, SortSpec("name"), self._applied_profile_name(fs))
         self.accept()
 
 

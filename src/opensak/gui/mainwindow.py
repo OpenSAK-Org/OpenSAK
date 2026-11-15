@@ -234,6 +234,11 @@ class MainWindow(QMainWindow):
         self._current_filterset = FilterSet()
         self._current_sort = SortSpec("name", ascending=True)
         self._active_filter_name = ""
+        # #1308: the name shown for a filter that is not a saved profile —
+        # a status-bar count click ("Found") or a macro's label. Kept apart
+        # from _active_filter_name, which is only ever a saved profile
+        # applied as it is, and is what gets stored for the database.
+        self._filter_label = ""
         self._trip_planner_win: TripPlannerDialog | None = None
         self._db_count: int = 0
         self._map_maximized: bool = False
@@ -1887,8 +1892,8 @@ class MainWindow(QMainWindow):
         self._db_count = total_in_db
 
         # Filter name: named profile > generic "Active" > empty (shows None)
-        if self._active_filter_name:
-            filter_name = self._active_filter_name
+        if self._filter_display_name():
+            filter_name = self._filter_display_name()
         elif self._current_filterset.active_count() > 0:
             filter_name = tr("infobar_filter_active", count=self._current_filterset.active_count())
         else:
@@ -1970,7 +1975,8 @@ class MainWindow(QMainWindow):
         else:
             return
 
-        self._on_filter_applied(fs, self._current_sort, label)
+        # #1308: "Found" etc. is a label, not a saved profile.
+        self._on_filter_applied(fs, self._current_sort, "", label=label)
 
     def _build_current_filterset(self) -> FilterSet:
         """Build a FilterSet from the current quick filter + search box."""
@@ -3154,6 +3160,7 @@ class MainWindow(QMainWindow):
                         # sort er altid "name" (filter-dialogen har ingen
                         # sort-valg) og ville ellers overskrive brugerens valg.
                         self._active_filter_name = profile.name
+                        self._filter_label = ""
                         self._set_clear_filter_active(True)
                         if hasattr(self, "_filter_lbl"):
                             self._filter_lbl.setText(f"🔍 {profile.name}")
@@ -3165,6 +3172,7 @@ class MainWindow(QMainWindow):
         # Ingen gemt profil — nulstil filter
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
+        self._filter_label = ""
         self._set_clear_filter_active(self._has_active_filter())
         if hasattr(self, "_filter_lbl"):
             self._filter_lbl.setText("")
@@ -3254,7 +3262,8 @@ class MainWindow(QMainWindow):
             return  # too few points — the map only offers this for valid shapes
         self._show_filter_dialog(filterset, "", initial_tab="line_polygon")
 
-    def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
+    def _on_filter_applied(self, filterset, sort, profile_name: str,
+                           label: str = "") -> None:
         with get_session() as session:
             # `sort` from the dialog is always SortSpec("name") — ignore it
             # and keep the user's column sort for this database.
@@ -3275,20 +3284,29 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self._show_filter_dialog(filterset, profile_name))
             return
 
-        self._show_filter_result(filterset, profile_name, caches)
+        self._show_filter_result(filterset, profile_name, caches, label=label)
 
-    def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
+    def _show_filter_result(self, filterset, profile_name: str, caches: list,
+                            label: str = "") -> None:
         """Make *filterset* the active filter and show its (non-empty) *caches*,
         queried with _with_search_boxes().
 
-        Shared by the "Set filter" dialog and Lua macros (opensak.filter).
+        Shared by the "Set filter" dialog, the status-bar count clicks and
+        Lua macros (opensak.filter).
+
+        #1308: *profile_name* is a saved profile that *filterset* is, as it
+        is, or "" for any other filter; only a profile name becomes the
+        active profile (toolbar dropdown) and is stored for the database.
+        *label* names a filter that is not a profile, in the 🔍 label, the
+        info bar, opensak.filter_name() and {filter} in export file names.
         """
         self._current_filterset = filterset
         self._active_filter_name = profile_name
+        self._filter_label = "" if profile_name else label
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
-        label = profile_name if profile_name else tr("filter_active_label")
-        self._filter_lbl.setText(f"🔍 {label}")
+        shown = self._filter_display_name() or tr("filter_active_label")
+        self._filter_lbl.setText(f"🔍 {shown}")
         # Signals blocked: *caches* is already the result without a preset.
         self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
@@ -3335,6 +3353,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
+            self._filter_label = ""
             self._set_clear_filter_active(self._has_active_filter())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
@@ -3367,6 +3386,7 @@ class MainWindow(QMainWindow):
     def _clear_filter(self) -> None:
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
+        self._filter_label = ""
         for field in (self._search_gc, self._search_box):
             field.blockSignals(True)
             field.clear()
@@ -3393,6 +3413,28 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+
+    def _filter_display_name(self) -> str:
+        """#1308: the active filter's name for display — the saved profile,
+        else the label of a status-bar click or macro filter, else ""."""
+        return self._active_filter_name or self._filter_label
+
+    def _is_saved_profile(self, name: str, filterset: FilterSet) -> bool:
+        """#1308: True if *name* is a saved filter profile and *filterset* has
+        exactly its criteria — e.g. opensak.filter_profile(), or a restored
+        filter that was a profile. A macro label that happens to match a
+        profile name, with other criteria, is not that profile."""
+        if not name:
+            return False
+        from opensak.filters.engine import FilterProfile
+        for path in FilterProfile.list_profiles():
+            try:
+                profile = FilterProfile.load(path)
+            except Exception:
+                continue
+            if profile.name == name:
+                return profile.filterset.to_dict() == filterset.to_dict()
+        return False
 
     def _has_active_filter(self) -> bool:
         """True if any filter is in effect: a saved profile, an unsaved
@@ -3485,6 +3527,7 @@ class MainWindow(QMainWindow):
         self._current_filterset = profile.filterset
         # Profilens sort ignoreres bevidst — se _load_sort_for_active_db().
         self._active_filter_name = profile.name
+        self._filter_label = ""
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
         self._filter_lbl.setText(f"🔍 {profile.name}")
@@ -3634,7 +3677,7 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
         dlg = FileExportDialog(
-            caches, parent=self, filter_name=self._active_filter_name,
+            caches, parent=self, filter_name=self._filter_display_name(),
             center_name=get_settings().active_home_name or "",
         )
         dlg.exec()
@@ -3657,7 +3700,7 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.poi_export_dialog import PoiExportDialog
         dlg = PoiExportDialog(
-            caches, parent=self, filter_name=self._active_filter_name,
+            caches, parent=self, filter_name=self._filter_display_name(),
             center_name=get_settings().active_home_name or "",
         )
         dlg.exec()
@@ -4001,7 +4044,8 @@ class MainWindow(QMainWindow):
                 columns=self._visible_table_columns(),
             )
         if caches:
-            self._show_filter_result(filterset, label, caches)
+            profile = label if self._is_saved_profile(label, filterset) else ""
+            self._show_filter_result(filterset, profile, caches, label=label)
         return len(caches)
 
     def clear_filter(self) -> None:
@@ -4027,8 +4071,9 @@ class MainWindow(QMainWindow):
             )
 
     def filter_name(self) -> str:
-        """MacroHost: name of the active filter ("" = none)."""
-        return self._active_filter_name
+        """MacroHost: name of the active filter ("" = none): the profile, or
+        the label of opensak.filter{} (#1308)."""
+        return self._filter_display_name()
 
     def active_filterset(self) -> FilterSet:
         """MacroHost: the whole active filter, quick filter and search boxes
