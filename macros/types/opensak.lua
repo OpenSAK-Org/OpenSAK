@@ -977,7 +977,7 @@ function opensak.center() end
 ---@return {name: string, lat: number, lon: number, active: boolean}[] # One table per saved centre point.
 function opensak.centers() end
 
----Change the active centre point, like the centre drop-down in the toolbar (GSAK's Centre): a saved centre point by name, or coordinates with an optional name to show. Coordinates are not saved as a user location. Distance and bearing of every cache in the active database are recalculated and stored, so the macro needs permission to change the database, and it cannot be used inside opensak.transaction(). The centre stays when the macro ends.
+---Change the active centre point, like the centre drop-down in the toolbar (GSAK's Centre): a saved centre point by name, or coordinates with an optional name to show. Coordinates are not saved as a user location. Distance and bearing of every cache in the active database are recalculated and stored, so the macro needs permission to change the database, and it cannot be used inside opensak.transaction(). The centre stays when the macro ends; in `opensak run` it lasts for that run only (see Macros without a window).
 ---
 ---Since API version 3.
 ---
