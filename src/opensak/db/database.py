@@ -1748,7 +1748,7 @@ def _child_filter(children: str) -> list:
 
 def export_bounds(
     cache_ids: list[int], use_corrected: bool = True, child_waypoints: bool = True,
-    children: str = "all", caches: bool = True,
+    children: str = "all", caches: bool = True, corrected_final_wp: bool = False,
 ) -> tuple[float, float, float, float] | None:
     """(minlat, minlon, maxlat, maxlon) over the caches with *cache_ids*
     that have coordinates, each at its export position (the corrected
@@ -1759,7 +1759,9 @@ def export_bounds(
     gps.garmin's gpx_bounds(). #775: *children* limits the child waypoints
     to the flagged or unflagged ones ("none" leaves them out), and
     *caches*=False leaves the caches' own points out (an export of the
-    child waypoints only).
+    child waypoints only). #1303: *corrected_final_wp* adds the corrected
+    coordinates of the caches that have them (the Final Location the
+    export adds there), whatever *children* says.
 
     #700: the GPX <bounds> must be written before the first <wpt>, while
     the caches are only loaded in full as they are written (#1075), so the
@@ -1821,6 +1823,16 @@ def export_bounds(
                     )
                     .one()
                 )
+            if corrected_final_wp:
+                rows.append(
+                    session.query(
+                        func.min(UserNote.corrected_lat), func.min(UserNote.corrected_lon),
+                        func.max(UserNote.corrected_lat), func.max(UserNote.corrected_lon),
+                    )
+                    .join(Cache, Cache.id == UserNote.cache_id)
+                    .filter(*_corrected_final_filter(chunk, for_bounds=True))
+                    .one()
+                )
             for row in rows:
                 if row[0] is None:
                     continue
@@ -1832,35 +1844,88 @@ def export_bounds(
     return box
 
 
-def export_child_counts(cache_ids: list[int], children: str = "all") -> dict[int, int]:
+def _corrected_final_filter(cache_ids: list[int], for_bounds: bool = False) -> list:
+    """SQL conditions selecting the user notes of the caches in
+    *cache_ids* that get a Final Location at their corrected coordinates
+    (#1303): corrected, with both coordinates, on a cache with coordinates
+    (others aren't exported). Joined with Cache. *for_bounds* also leaves
+    out corrected coordinates at 0/0, like any 0/0 point in the bounds."""
+    from typing import Any
+    from sqlalchemy import or_
+    from opensak.db.models import Cache, UserNote
+
+    conditions: list[Any] = [
+        UserNote.cache_id.in_(cache_ids),
+        UserNote.is_corrected.is_(True),
+        UserNote.corrected_lat.isnot(None),
+        UserNote.corrected_lon.isnot(None),
+        Cache.latitude.isnot(None),
+        Cache.longitude.isnot(None),
+    ]
+    if for_bounds:
+        conditions.append(or_(UserNote.corrected_lat != 0, UserNote.corrected_lon != 0))
+    return conditions
+
+
+def export_child_counts(
+    cache_ids: list[int], children: str = "all", corrected_final_wp: bool = False,
+) -> dict[int, int]:
     """cache id → the number of child waypoints an export writes for it:
-    those with coordinates that pass the #775 *children* choice. Caches
+    those with coordinates that pass the #775 *children* choice, plus, with
+    *corrected_final_wp* (#1303), the Final Location the export adds at the
+    corrected coordinates (see GpxContent.corrected_final_wp_for(): not
+    when a written child is already a Final Location there). Caches
     without such children are left out. Chunked like export_bounds().
 
     #775: an export limit that counts waypoints (GSAK's "max waypoints")
     needs each cache's number of children before the export starts.
     """
     from sqlalchemy import func
-    from opensak.db.models import Waypoint
+    from opensak.db.models import Cache, UserNote, Waypoint
+    from opensak.export.gpx_content import CORRECTED_FINAL_WP_TYPE, same_position
 
     counts: dict[int, int] = {}
-    if children == "none":
+    if not cache_ids or (children == "none" and not corrected_final_wp):
         return counts
     with get_session() as session:
         for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
             chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
-            rows = (
-                session.query(Waypoint.cache_id, func.count(Waypoint.id))
-                .filter(
-                    Waypoint.cache_id.in_(chunk),
-                    Waypoint.latitude.isnot(None),
-                    Waypoint.longitude.isnot(None),
-                    *_child_filter(children),
+            child_conditions = [
+                Waypoint.cache_id.in_(chunk),
+                Waypoint.latitude.isnot(None),
+                Waypoint.longitude.isnot(None),
+                *_child_filter(children),
+            ]
+            if children != "none":
+                rows = (
+                    session.query(Waypoint.cache_id, func.count(Waypoint.id))
+                    .filter(*child_conditions)
+                    .group_by(Waypoint.cache_id)
+                    .all()
                 )
-                .group_by(Waypoint.cache_id)
+                counts.update({cache_id: n for cache_id, n in rows})
+            if not corrected_final_wp:
+                continue
+            finals: dict[int, list[tuple[float, float]]] = {}
+            if children != "none":
+                for cache_id, lat, lon in (
+                    session.query(Waypoint.cache_id, Waypoint.latitude, Waypoint.longitude)
+                    .filter(*child_conditions, Waypoint.wp_type == CORRECTED_FINAL_WP_TYPE)
+                    .all()
+                ):
+                    if lat is not None and lon is not None:
+                        finals.setdefault(cache_id, []).append((lat, lon))
+            for cache_id, lat, lon in (
+                session.query(UserNote.cache_id, UserNote.corrected_lat, UserNote.corrected_lon)
+                .join(Cache, Cache.id == UserNote.cache_id)
+                .filter(*_corrected_final_filter(chunk))
                 .all()
-            )
-            counts.update({cache_id: n for cache_id, n in rows})
+            ):
+                if lat is None or lon is None:
+                    continue   # excluded by the filter; for the type checker
+                if any(same_position(f, (lat, lon)) for f in finals.get(cache_id, [])):
+                    continue
+                counts[cache_id] = counts.get(cache_id, 0) + 1
     return counts
 
 

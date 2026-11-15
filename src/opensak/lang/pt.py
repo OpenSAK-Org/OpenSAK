@@ -1914,6 +1914,8 @@ STRINGS: dict[str, str] = {
     "file_export_gpx_version_tip": "GPX 1.0 é o formato das pocket queries do geocaching.com, de onde os aparelhos Garmin leem as geocaches. GPX 1.1 é a norma mais recente de que algumas apps precisam; os aparelhos Garmin podem não mostrar os detalhes das caches de um ficheiro 1.1.",
     "file_export_gsak_fields": "Incluir campos do GSAK",
     "file_export_gsak_fields_tip": "Escrever também os campos próprios do GSAK (marca do utilizador, bloqueio, dados do utilizador, campos personalizados e o resto), para que o GSAK e o OpenSAK os leiam de volta do ficheiro. Desligue para ficheiros destinados a outras apps e aparelhos: ignoram estes campos, que só tornam o ficheiro maior",
+    "file_export_corrected_final_wp": "Waypoint final nas coordenadas corrigidas",
+    "file_export_corrected_final_wp_tip": "Adicionar um waypoint filho \"Final Location\" nas coordenadas corrigidas de cada cache que as tenha, também quando não são escritos outros waypoints filhos. As apps que atualizam uma cache online perdem as coordenadas corrigidas, mas mantêm os waypoints. O OpenSAK ignora este waypoint quando o ficheiro é importado de novo",
     "file_export_texts_group": "Nomes e textos (GPX/GGZ)",
     "file_export_name_template": "Nome do waypoint:",
     "file_export_name_template_tip": "Etiquetas especiais para o nome do waypoint de cada cache, p. ex. %drop2%con1 (ver o botão ⓘ). Vazio: o código GC.",

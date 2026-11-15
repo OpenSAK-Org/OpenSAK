@@ -1914,6 +1914,8 @@ STRINGS: dict[str, str] = {
     "file_export_gpx_version_tip": "GPX 1.0 to format pocket queries z geocaching.com, z którego urządzenia Garmin odczytują skrzynki. GPX 1.1 to nowszy standard, którego wymagają niektóre aplikacje; urządzenia Garmin mogą nie pokazać szczegółów skrzynek z pliku 1.1.",
     "file_export_gsak_fields": "Dołącz pola GSAK",
     "file_export_gsak_fields_tip": "Zapisz także własne pola GSAK (flaga użytkownika, blokada, dane użytkownika, pola niestandardowe i reszta), aby GSAK i OpenSAK odczytały je z pliku. Wyłącz dla plików przeznaczonych dla innych aplikacji i urządzeń: ignorują te pola, które tylko powiększają plik",
+    "file_export_corrected_final_wp": "Punkt Final na poprawionych współrzędnych",
+    "file_export_corrected_final_wp_tip": "Dodaj punkt podrzędny „Final Location” na poprawionych współrzędnych każdej skrzynki, która je ma, także gdy inne punkty podrzędne nie są zapisywane. Aplikacje odświeżające skrzynkę online tracą jej poprawione współrzędne, ale zachowują jej punkty. OpenSAK pomija ten punkt przy ponownym imporcie pliku",
     "file_export_texts_group": "Nazwy i teksty (GPX/GGZ)",
     "file_export_name_template": "Nazwa punktu:",
     "file_export_name_template_tip": "Znaczniki specjalne dla nazwy punktu każdej skrzynki, np. %drop2%con1 (zob. przycisk ⓘ). Puste: kod GC.",

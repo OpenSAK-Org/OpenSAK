@@ -78,6 +78,7 @@ class FileExportSettings:
     user_note_log: bool = False  # user note as a synthetic first log
     gpx_version: str = "1.0"     # "1.0" | "1.1" (GPX and the GPX inside a GGZ)
     gsak_fields: bool = True     # #1169: GSAK's full field set (GPX and GGZ)
+    corrected_final_wp: bool = False  # #1303: Final Location at the corrected coords
     # #454/#950: special-tag templates (GPX and GGZ), see GpxContent.
     name_template: str = ""      # waypoint name ("" = GC code)
     name_max_chars: int = 0      # 0 = no limit
@@ -96,6 +97,7 @@ class FileExportSettings:
             user_note_log=self.user_note_log,
             version=self.gpx_version,
             gsak_fields=self.gsak_fields,
+            corrected_final_wp=self.corrected_final_wp,
             name_template=self.name_template,
             name_max_chars=self.name_max_chars,
             desc_template=self.desc_template,
@@ -121,6 +123,7 @@ class FileExportSettings:
             "user_note_log": self.user_note_log,
             "gpx_version": self.gpx_version,
             "gsak_fields": self.gsak_fields,
+            "corrected_final_wp": self.corrected_final_wp,
             "name_template": self.name_template,
             "name_max_chars": self.name_max_chars,
             "desc_template": self.desc_template,
@@ -192,6 +195,7 @@ class FileExportSettings:
             user_note_log=_flag("user_note_log"),
             gpx_version=_choice("gpx_version", GPX_VERSIONS),
             gsak_fields=_flag("gsak_fields"),
+            corrected_final_wp=_flag("corrected_final_wp"),
             name_template=_string("name_template"),
             name_max_chars=_count("name_max_chars"),
             desc_template=_string("desc_template"),

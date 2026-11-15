@@ -3,7 +3,8 @@ src/opensak/export/gpx_content.py — what a GPX/GGZ export writes per cache
 (#775): which child waypoints, how many logs, the user note as a first log,
 and the GPX version; whether it writes GSAK's own fields (#1169); and the
 templates for waypoint names, descriptions and the extra-info log (#454,
-#950; see special_tags.py).
+#950; see special_tags.py); and a Final Location waypoint at the corrected
+coordinates (#1303).
 
 Qt-free, so the GPX/GGZ writers (gps/garmin.py), the export settings, the
 export dialogs, Lua macros and the GPX importer share one definition. The
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Optional
 
 # Which child waypoints an export writes: all of them, only those with or
@@ -42,6 +44,15 @@ EXTRA_INFO_LOG_ID = "-454"
 EXTRA_INFO_LOG_FINDER = "OpenSAK"
 EXTRA_INFO_LOG_FINDER_ID = "0"
 EXTRA_INFO_LOG_TYPE = "Write note"
+
+# #1303: the Final Location child an export adds at a cache's corrected
+# coordinates. The comment is fixed (not translated): it marks the
+# waypoint, so a re-import recognises it and doesn't store it as a real
+# child (see is_corrected_final_wp()).
+CORRECTED_FINAL_WP_TYPE = "Final Location"
+CORRECTED_FINAL_WP_PREFIX = "FL"
+CORRECTED_FINAL_WP_NAME = "Final Location"
+CORRECTED_FINAL_WP_COMMENT = "Final location from corrected coordinates (OpenSAK)"
 
 
 def normalize_note(text: Optional[str]) -> str:
@@ -72,6 +83,33 @@ def is_user_note_log(
         and (log_type or "").strip() == USER_NOTE_LOG_TYPE
         and normalize_note(text) in notes
         and normalize_note(text) != ""
+    )
+
+
+def corrected_coords(cache: Any) -> Optional[tuple[float, float]]:
+    """The corrected coordinates of *cache*, or None when it has none."""
+    note = getattr(cache, "user_note", None)
+    if not note or not getattr(note, "is_corrected", False):
+        return None
+    lat, lon = getattr(note, "corrected_lat", None), getattr(note, "corrected_lon", None)
+    if lat is None or lon is None:
+        return None
+    return lat, lon
+
+
+def same_position(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    """True if two positions are the same as an export writes them (6
+    decimals, about 0.1 m)."""
+    return round(a[0], 6) == round(b[0], 6) and round(a[1], 6) == round(b[1], 6)
+
+
+def is_corrected_final_wp(wp_type: Optional[str], comment: Optional[str]) -> bool:
+    """True if a GPX child waypoint is the Final Location an OpenSAK
+    export added at the corrected coordinates (#1303), which an import
+    skips: the corrected coordinates come back with the cache itself."""
+    return (
+        (wp_type or "").strip() == CORRECTED_FINAL_WP_TYPE
+        and (comment or "").strip() == CORRECTED_FINAL_WP_COMMENT
     )
 
 
@@ -108,6 +146,11 @@ class GpxContent:
     desc_for_cache_name: bool = False  # desc_template also as the cache name
     remove_chars: str = ""         # characters removed from names and descriptions
     first_log: str = ""            # the extra-info log's text ("" = no such log)
+    # #1303: a Final Location child at the corrected coordinates of each
+    # cache that has them, written regardless of the children choice. Apps
+    # that refresh a cache online lose its corrected coordinates, but keep
+    # its child waypoints.
+    corrected_final_wp: bool = False
 
     def __post_init__(self) -> None:
         if self.children not in CHILDREN_CHOICES:
@@ -139,7 +182,7 @@ class GpxContent:
         return GpxContent()
 
     def writes_children(self) -> bool:
-        return self.children != "none"
+        return self.children != "none" or self.corrected_final_wp
 
     def wants_child(self, waypoint: Any) -> bool:
         """True if *waypoint* passes the children choice (coordinates
@@ -153,12 +196,58 @@ class GpxContent:
 
     def child_waypoints(self, cache: Any) -> list:
         """The child waypoints of *cache* the export writes, in order:
-        those passing the children choice that have coordinates."""
-        return [
+        those passing the children choice that have coordinates, then the
+        generated Final Location (#1303, see corrected_final_wp())."""
+        children = [
             wp for wp in (getattr(cache, "waypoints", None) or [])
             if wp.latitude is not None and wp.longitude is not None
             and self.wants_child(wp)
         ]
+        final = self.corrected_final_wp_for(cache, children)
+        return children + [final] if final is not None else children
+
+    def corrected_final_wp_for(self, cache: Any, children: list) -> Optional[Any]:
+        """#1303: the Final Location waypoint to add to *cache*, whose
+        written children are *children*, or None: when the option is off,
+        the cache has no corrected coordinates, or one of *children* is
+        already a Final Location there (a final the user added by hand).
+
+        Its code is FL + the GC code's suffix, like GSAK's child codes; F1
+        to F9 when a written child already has that code. It is "made by
+        the user" (gsak:Child_ByGSAK), as a GSAK macro's child would be."""
+        if not self.corrected_final_wp:
+            return None
+        position = corrected_coords(cache)
+        if position is None:
+            return None
+        if any(
+            (wp.wp_type or "") == CORRECTED_FINAL_WP_TYPE
+            and same_position((wp.latitude, wp.longitude), position)
+            for wp in children
+        ):
+            return None
+        gc_code = getattr(cache, "gc_code", None) or ""
+        suffix = gc_code[2:] if len(gc_code) > 2 else ""
+        taken = {
+            ((getattr(wp, "wp_code", None) or "").upper(), (wp.prefix or "").upper())
+            for wp in children
+        }
+        used = {code for code, _ in taken} | {
+            prefix + suffix.upper() for _, prefix in taken
+        }
+        prefix = next(
+            (p for p in [CORRECTED_FINAL_WP_PREFIX] + [f"F{n}" for n in range(1, 10)]
+             if (p + suffix).upper() not in used),
+            CORRECTED_FINAL_WP_PREFIX,
+        )
+        return SimpleNamespace(
+            prefix=prefix, wp_code=prefix + suffix if suffix else None,
+            wp_type=CORRECTED_FINAL_WP_TYPE,
+            name=CORRECTED_FINAL_WP_NAME, description=CORRECTED_FINAL_WP_NAME,
+            comment=CORRECTED_FINAL_WP_COMMENT, url=None, wp_date=None,
+            latitude=position[0], longitude=position[1],
+            created_by_user=True, wp_flag=False,
+        )
 
     def select_logs(self, logs: Iterable, is_mine: Optional[Callable[[Any], bool]] = None) -> list:
         """*logs* newest first, cut to max_logs. With my_logs_always the

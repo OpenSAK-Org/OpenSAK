@@ -108,6 +108,8 @@ class TestFileExportProfile:
             "gpx_version": "1.0",
             # #1169
             "gsak_fields": True,
+            # #1303
+            "corrected_final_wp": False,
             # #454 / #950
             "name_template": "", "name_max_chars": 0, "desc_template": "",
             "desc_for_cache_name": False, "remove_chars": "", "first_log": "",

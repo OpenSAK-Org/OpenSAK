@@ -659,7 +659,8 @@ def gpx_bounds(
             _add(wp.latitude, wp.longitude)
     if db_ids:
         db_box = export_bounds(db_ids, use_corrected, with_children,
-                               children=content.children, caches=with_caches)
+                               children=content.children, caches=with_caches,
+                               corrected_final_wp=with_children and content.corrected_final_wp)
         if db_box is not None:
             _add(db_box[0], db_box[1])
             _add(db_box[2], db_box[3])

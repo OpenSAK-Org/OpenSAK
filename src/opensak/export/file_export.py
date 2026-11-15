@@ -49,6 +49,7 @@ def wpt_counts(caches: list, fmt: str = "gpx",
         return [own for _ in caches]
     db_counts = export_child_counts(
         [c.id for c in caches if is_db_cache(c)], content.children,
+        corrected_final_wp=content.corrected_final_wp,
     )
     return [
         own + (db_counts.get(c.id, 0) if is_db_cache(c) else len(content.child_waypoints(c)))

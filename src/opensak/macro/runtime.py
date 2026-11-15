@@ -271,6 +271,8 @@ EXPORT_KEYS = frozenset({
     # #454/#950: special-tag templates; first_log may also be a function
     "name_template", "name_max_chars", "desc_template", "desc_for_cache_name",
     "remove_chars", "first_log",
+    # #1303: a Final Location waypoint at the corrected coordinates
+    "corrected_final_wp",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # opensak.import_gsak(): the keys of its options table, and how many cache
@@ -4864,9 +4866,11 @@ class MacroRuntime:
             func, opts, gsak_fields=target != "device",
         )
         if not child_waypoints:
-            # pois.child_waypoints = false: no children, also in the count.
+            # pois.child_waypoints = false: no children, also in the count;
+            # that includes the Final Location of corrected_final_wp.
             import dataclasses
-            content = dataclasses.replace(content, children="none", children_only=False)
+            content = dataclasses.replace(content, children="none", children_only=False,
+                                          corrected_final_wp=False)
         if target == "device":
             folder = self._garmin_folder(func, opts.get("device"), fmt)
         else:
@@ -4971,6 +4975,7 @@ class MacroRuntime:
             user_note_log=_flag("user_note_log"),
             version=version,
             gsak_fields=_flag("gsak_fields", gsak_fields),
+            corrected_final_wp=_flag("corrected_final_wp"),
             name_template=_string("name_template"),
             name_max_chars=_count("name_max_chars"),
             desc_template=_string("desc_template"),
@@ -7515,7 +7520,11 @@ API: tuple[ApiFunction, ...] = (
                     "text of the extra-info first log (nil: none). `rename` "
                     "and `description` win over the templates. `gsak_fields` "
                     "is off by default with `target = \"device\"`, as in "
-                    "Send to GPS.",
+                    "Send to GPS. `corrected_final_wp = true` adds a Final "
+                    "Location waypoint at the corrected coordinates of each "
+                    "corrected cache, whatever `children` says (not with "
+                    "`pois.child_waypoints = false`), so an app that "
+                    "refreshes the cache online keeps the solution.",
         example='local path, n = opensak.export_gpx{\n'
                 '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
                 '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'
