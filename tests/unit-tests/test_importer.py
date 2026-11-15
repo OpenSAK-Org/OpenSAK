@@ -483,10 +483,10 @@ def bad_cache_gpx(tmp_path, monkeypatch) -> Path:
     """GCBAD01 can't be parsed; the caches around it can."""
     real_parse = importer._parse_wpt
 
-    def parse(wpt_el):
+    def parse(wpt_el, *args):
         if importer._wpt_code(wpt_el) == "GCBAD01":
             raise AttributeError("'NoneType' object has no attribute 'xpath'")
-        return real_parse(wpt_el)
+        return real_parse(wpt_el, *args)
 
     monkeypatch.setattr(importer, "_parse_wpt", parse)
     gpx = build_gpx(cache_wpt("GCOK001"), "\n\n", cache_wpt("GCBAD01"), cache_wpt("GCOK002"))
@@ -525,7 +525,7 @@ def test_zip_parse_error_names_cache_and_line(tmp_path, bad_cache_gpx, english):
 
 
 def test_parse_error_without_a_code_still_reports(tmp_path, monkeypatch, english):
-    def parse(wpt_el):
+    def parse(wpt_el, *args):
         raise ValueError("broken")
 
     monkeypatch.setattr(importer, "_parse_wpt", parse)

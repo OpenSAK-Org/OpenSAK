@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import platform
 import pytest
 
+from opensak.export.gpx_content import GpxContent
 from opensak.gps.garmin import (
     GARMIN_GGZ_SUBPATH,
     GARMIN_GPX_SUBPATH,
@@ -676,13 +677,15 @@ class TestGenerateGpx:
         result = generate_gpx([_cache(user_note=n)])
         assert "http://www.gsak.net/xmlv1/6" in result
 
+    # #1169: with "Include GSAK fields" off, the extension holds only the
+    # user note and the found date, and is left out without them.
     def test_no_gsak_extension_when_note_absent(self):
-        result = generate_gpx([_cache(user_note=None)])
+        result = generate_gpx([_cache(user_note=None)], content=GpxContent(gsak_fields=False))
         assert "gsak:wptExtension" not in result
 
     def test_no_gsak_extension_when_note_is_empty_string(self):
         n = _note(is_corrected=False, note="")
-        result = generate_gpx([_cache(user_note=n)])
+        result = generate_gpx([_cache(user_note=n)], content=GpxContent(gsak_fields=False))
         assert "gsak:wptExtension" not in result
 
     def test_empty_cache_list_produces_valid_gpx(self):

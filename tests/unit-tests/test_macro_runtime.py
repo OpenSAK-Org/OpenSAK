@@ -1924,6 +1924,31 @@ def test_export_gpx_content_options(tmp_path, export_cache):
     assert 'version="1.1"' in target.read_text(encoding="utf-8")
 
 
+def test_export_gpx_gsak_fields(tmp_path, export_cache):
+    # #1169: GSAK's own fields by default; gsak_fields = false leaves them out.
+    target = tmp_path / "out" / "g.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}')
+    text = target.read_text(encoding="utf-8")
+    assert "<gsak:UserFlag>" in text and "<gsak:Parent>GCEXP1</gsak:Parent>" in text
+    assert "<gsak:LatBeforeCorrect>46.000000</gsak:LatBeforeCorrect>" in text
+    _export_gpx(tmp_path, f'path = {str(target)!r}, gsak_fields = false')
+    text = target.read_text(encoding="utf-8")
+    assert "<gsak:UserFlag>" not in text and "<gsak:Parent>" not in text
+
+
+def test_export_gpx_gsak_fields_off_for_a_device(tmp_path, export_cache, monkeypatch):
+    # #1169: target = "device" leaves them out by default, as Send to GPS.
+    import opensak.gps.garmin as garmin
+    device = tmp_path / "GARMIN_DRIVE"
+    (device / "Garmin" / "GPX").mkdir(parents=True)
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    target = device / "Garmin" / "GPX" / "TestDB.gpx"
+    _export_gpx(tmp_path, 'target = "device"')
+    assert "<gsak:UserFlag>" not in target.read_text(encoding="utf-8")
+    _export_gpx(tmp_path, 'target = "device", gsak_fields = true')
+    assert "<gsak:UserFlag>" in target.read_text(encoding="utf-8")
+
+
 def test_export_gpx_children_only(tmp_path, export_cache):
     target = tmp_path / "out" / "c.gpx"
     _export_gpx(tmp_path, f'path = {str(target)!r}, children_only = true')
@@ -1951,6 +1976,7 @@ def test_export_gpx_max_counts_waypoints(tmp_path, export_cache):
     ("max_logs = 1.5", "max_logs must be a whole number"),
     ('children_only = "yes"', "children_only must be true or false"),
     ('user_note_log = 1', "user_note_log must be true or false"),
+    ('gsak_fields = "no"', "gsak_fields must be true or false"),
     ('version = "2.0"', "version must be one of"),
 ])
 def test_export_gpx_rejects_bad_content_options(tmp_path, export_cache, spec, msg):

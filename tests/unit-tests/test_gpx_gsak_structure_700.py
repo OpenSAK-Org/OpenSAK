@@ -19,6 +19,7 @@ from opensak.db.database import export_bounds, get_session, init_db
 from opensak.db.models import Cache, Trackable, UserNote, Waypoint
 from opensak.export.cache_text import ExportText
 from opensak.export.file_export import write_export_file
+from opensak.export.gpx_content import GpxContent
 from opensak.gps.garmin import generate_ggz, generate_gpx, gpx_bounds, write_gpx
 from opensak.importer import import_gpx
 
@@ -274,7 +275,9 @@ class TestChildWpt:
     def test_element_order_and_always_written_elements(self):
         wpt = _wpts(generate_gpx([_cache(waypoints=[_child(
             wp_date=datetime(2026, 11, 11, tzinfo=timezone.utc))])]))[1]
-        assert _tags(wpt) == ["time", "name", "cmt", "desc", "url", "urlname", "sym", "type"]
+        # #1169: GSAK's child fields (gsak:wptExtension) come last.
+        assert _tags(wpt) == ["time", "name", "cmt", "desc", "url", "urlname", "sym", "type",
+                              "wptExtension"]
         assert wpt.findtext(f"{GPX}cmt") == ""   # <cmt></cmt>
         assert wpt.findtext(f"{GPX}url") == ""   # <url></url>
 
@@ -372,7 +375,9 @@ def _golden_cache() -> SimpleNamespace:
 
 
 def test_golden_gpx():
-    gpx = generate_gpx([_golden_cache()], filename="golden")
+    # Without GSAK's own fields (#1169 has its own golden test with them).
+    gpx = generate_gpx([_golden_cache()], filename="golden",
+                       content=GpxContent(gsak_fields=False))
     head, body = gpx.split("\n  <wpt ", 1)
     assert "\n  " + "<wpt " + body == "\n" + GOLDEN_WPTS
     assert re.sub(r"<time>[^<]*</time>", "<time/>", head).endswith(

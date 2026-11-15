@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional, Sized, cast
 
@@ -34,6 +35,7 @@ from opensak.utils.constants import CUSTOM_WP_TYPES
 if TYPE_CHECKING:
     from opensak.gps.mtp import MTPDevice
 
+logger = logging.getLogger(__name__)
 
 # ── Garmin GPX/GGZ mapper på enheden ──────────────────────────────────────────
 
@@ -755,6 +757,197 @@ def _child_code(child_wp, gc_code: Optional[str]) -> str:
     return (child_wp.prefix or "WP") + suffix
 
 
+# #1169: caches per query when an export loads the custom field values —
+# the chunk iter_caches_full() reloads, so at most about two chunks of
+# caches are in memory at a time.
+CUSTOM_DATA_CHUNK = 500
+
+# A cache's custom field values for gsak:CustomData: (name, value) pairs in
+# the fields' order.
+CustomData = list[tuple[str, Any]]
+
+
+def _custom_data(chunk: list) -> dict[str, CustomData]:
+    """The custom field values of the database caches in *chunk*, by GC
+    code (#1169), read from the active database's caches_all view: each
+    field's stored value, or its default where nothing is stored. Empty
+    when the database has no custom fields or they can't be read (the
+    export goes on without them)."""
+    from opensak.db import custom_fields
+    from opensak.db.database import is_db_cache
+
+    codes = [c.gc_code for c in chunk if is_db_cache(c) and c.gc_code]
+    if not codes:
+        return {}
+    try:
+        values = custom_fields.active_values(codes=codes)
+    except Exception:
+        logger.warning("GPX export: custom field values not available", exc_info=True)
+        return {}
+    names = [f.name for f in values.fields]
+    n = len(names)
+    return {code: list(zip(names, row[:n])) for code, row in values.rows.items()}
+
+
+def _with_custom_data(caches: Iterable, enabled: bool) -> Iterator[tuple[Any, CustomData]]:
+    """*caches* with their custom field values (see _custom_data()).
+
+    The export is streamed (#1075), so the values are loaded for a run of
+    up to CUSTOM_DATA_CHUNK database caches at a time, not per cache. Only
+    database caches are held back for that; any other object (they have no
+    custom values) passes straight through. Without *enabled*, nothing is
+    loaded and every cache gets no values."""
+    from opensak.db.database import is_db_cache
+
+    if not enabled:
+        for cache in caches:
+            yield cache, []
+        return
+    run: list = []
+
+    def _flush() -> Iterator[tuple[Any, CustomData]]:
+        values = _custom_data(run)
+        for held in run:
+            yield held, values.get(held.gc_code or "", [])
+        run.clear()
+
+    for cache in caches:
+        if not is_db_cache(cache):
+            yield from _flush()
+            yield cache, []
+            continue
+        run.append(cache)
+        if len(run) >= CUSTOM_DATA_CHUNK:
+            yield from _flush()
+    yield from _flush()
+
+
+def _gsak_bool(value: Any) -> str:
+    return "true" if value else "false"
+
+
+def _gsak_date(value: Any) -> str:
+    """A date as GSAK writes it in its fields: YYYY-MM-DD."""
+    return value.strftime("%Y-%m-%d")
+
+
+def _custom_value(value: Any) -> str:
+    """A custom field value as GSAK writes it in CustomData: as stored
+    (0/1 for a boolean, 0.0 for a real), empty for no value."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def custom_data_text(gc_code: str, values: CustomData) -> str:
+    """The text of gsak:CustomData (#1169), as GSAK writes it: one line
+    per field, in the fields' order, ``Custom_Start:<name>:Custom_Data:
+    <value>:Custom_End``, then an empty line. Like GSAK, the first line is
+    its cCode column (the GC code); the GPX importer skips it."""
+    lines = [f"Custom_Start:cCode:Custom_Data:{gc_code}:Custom_End"]
+    lines += [
+        f"Custom_Start:{name}:Custom_Data:{_custom_value(value)}:Custom_End"
+        for name, value in values
+    ]
+    return "\n" + "\n".join(lines) + "\n\n"
+
+
+def _gsak_cache_extension(
+    wpt, cache, found_date, note_text: Optional[str], use_corrected: bool,
+    gsak_fields: bool, custom: CustomData,
+) -> None:
+    """Add a cache's gsak:wptExtension to *wpt*.
+
+    #1169: with *gsak_fields*, GSAK's full field set in GSAK's order (as in
+    GSAK's own exports): UserFlag, Lock, DNF, Watch, UserData, UserFound,
+    DNFDate, LatBeforeCorrect/LonBeforeCorrect, FirstToFind, User2-4,
+    County, UserSort, SmartName, LastGpxDate, Code, Resolution, IsPremium,
+    FavPoints, GcNote, Guid, CacheImages, LogImages, CustomData. OpenSAK
+    stores no SmartName, Resolution or images: written empty. GSAK's
+    StateBeforeCorrect/CountyBeforeCorrect are left out (not stored).
+    gsak:UserNote, which GSAK doesn't write but other tools read (#537),
+    comes last. Without *gsak_fields*, only UserFound and UserNote, and
+    no extension at all when the cache has neither.
+    """
+    from xml.etree.ElementTree import SubElement
+
+    if not gsak_fields:
+        if note_text or found_date:
+            ext = SubElement(wpt, "gsak:wptExtension")
+            if found_date:
+                SubElement(ext, "gsak:UserFound").text = _gsak_date(found_date)
+            if note_text:
+                SubElement(ext, "gsak:UserNote").text = note_text
+        return
+
+    ext = SubElement(wpt, "gsak:wptExtension")
+
+    def _add(tag: str, text: str) -> None:
+        SubElement(ext, f"gsak:{tag}").text = text
+
+    _add("UserFlag", _gsak_bool(getattr(cache, "user_flag", False)))
+    _add("Lock", _gsak_bool(getattr(cache, "locked", False)))
+    _add("DNF", _gsak_bool(getattr(cache, "dnf", False)))
+    _add("Watch", _gsak_bool(getattr(cache, "watch", False)))
+    _add("UserData", getattr(cache, "user_data_1", None) or "")
+    if found_date:
+        _add("UserFound", _gsak_date(found_date))
+    dnf_date = getattr(cache, "dnf_date", None)
+    if dnf_date:
+        _add("DNFDate", _gsak_date(dnf_date))
+    # The <wpt> holds the corrected position: the original one goes here,
+    # as in GSAK, so an import puts each back where it belongs. Not when
+    # the export writes the original coordinates (use_corrected=False):
+    # the <wpt> would then be taken for the corrected position.
+    note = getattr(cache, "user_note", None)
+    if (use_corrected and note is not None and getattr(note, "is_corrected", False)
+            and note.corrected_lat is not None and note.corrected_lon is not None):
+        _add("LatBeforeCorrect", f"{cache.latitude:.6f}")
+        _add("LonBeforeCorrect", f"{cache.longitude:.6f}")
+    _add("FirstToFind", _gsak_bool(getattr(cache, "first_to_find", False)))
+    _add("User2", getattr(cache, "user_data_2", None) or "")
+    _add("User3", getattr(cache, "user_data_3", None) or "")
+    _add("User4", getattr(cache, "user_data_4", None) or "")
+    _add("County", getattr(cache, "county", None) or "")
+    _add("UserSort", str(getattr(cache, "user_sort", None) or 0))
+    _add("SmartName", "")
+    last_gpx = getattr(cache, "last_gpx_update", None)
+    if last_gpx:
+        _add("LastGpxDate", _gsak_date(last_gpx))
+    _add("Code", cache.gc_code or "")
+    _add("Resolution", "")
+    _add("IsPremium", _gsak_bool(getattr(cache, "premium_only", False)))
+    _add("FavPoints", str(getattr(cache, "favorite_points", None) or 0))
+    _add("GcNote", getattr(cache, "gc_note", None) or "")
+    _add("Guid", getattr(cache, "guid", None) or "")
+    _add("CacheImages", "")
+    _add("LogImages", "")
+    _add("CustomData", custom_data_text(cache.gc_code or "", custom))
+    if note_text:
+        _add("UserNote", note_text)
+
+
+def _gsak_child_extension(cwpt, child_wp, cache, code: str) -> None:
+    """#1169: a child waypoint's gsak:wptExtension, as GSAK writes it:
+    Parent (the cache's GC code), Child_ByGSAK (made by the user, not
+    loaded from a GPX), Child_Flag, SmartName (empty), LastGpxDate (the
+    cache's) and Code (the waypoint's <name>)."""
+    from xml.etree.ElementTree import SubElement
+
+    ext = SubElement(cwpt, "gsak:wptExtension")
+    SubElement(ext, "gsak:Parent").text = cache.gc_code or ""
+    SubElement(ext, "gsak:Child_ByGSAK").text = _gsak_bool(
+        getattr(child_wp, "created_by_user", False))
+    SubElement(ext, "gsak:Child_Flag").text = _gsak_bool(getattr(child_wp, "wp_flag", False))
+    SubElement(ext, "gsak:SmartName").text = ""
+    last_gpx = getattr(cache, "last_gpx_update", None)
+    if last_gpx:
+        SubElement(ext, "gsak:LastGpxDate").text = _gsak_date(last_gpx)
+    SubElement(ext, "gsak:Code").text = code
+
+
 def _gpx_chunks(
     caches: Iterable, filename: str, progress_cb, use_corrected: bool,
     text: ExportText, attributes: bool, child_waypoints: bool,
@@ -772,7 +965,9 @@ def _gpx_chunks(
     none; or only the children, without their caches), cuts the logs to
     max_logs per cache (newest first; the user's own logs kept on top with
     my_logs_always), adds the user note as a synthetic first log, and
-    writes GPX 1.1 instead of 1.0 (see _to_gpx_1_1()).
+    writes GPX 1.1 instead of 1.0 (see _to_gpx_1_1()). With gsak_fields
+    (#1169), each cache and child waypoint gets GSAK's full field set (see
+    _gsak_cache_extension() and _gsak_child_extension()).
 
     The file follows GSAK's own GPX 1.0 export (#700): the header elements
     (desc, author, time, keywords, bounds) sit directly under <gpx> — the
@@ -856,7 +1051,8 @@ def _gpx_chunks(
 
     if total is None:
         total = len(cast(Sized, caches))
-    for i, cache in enumerate(caches, 1):
+    caches_with_custom = _with_custom_data(caches, content.gsak_fields)
+    for i, (cache, custom) in enumerate(caches_with_custom, 1):
         if progress_cb:
             progress_cb(i, total)
         if cache.latitude is None or cache.longitude is None:
@@ -933,13 +1129,8 @@ def _gpx_chunks(
         # cache was marked found by hand). Only for found caches: unmarking
         # clears found_date, but a stale one must never mark a cache found.
         found_date = getattr(cache, "found_date", None) if getattr(cache, "found", False) else None
-        if note_text or found_date:
-            gsak_ext = SubElement(wpt, "gsak:wptExtension")
-            if found_date:
-                SubElement(gsak_ext, "gsak:UserFound").text = found_date.strftime("%Y-%m-%d")
-            if note_text:
-                gsak_note = SubElement(gsak_ext, "gsak:UserNote")
-                gsak_note.text = note_text
+        _gsak_cache_extension(wpt, cache, found_date, note_text, use_corrected,
+                              content.gsak_fields, custom)
 
         if not is_custom_wp:
             # groundspeak:cache — direct child of <wpt>, no <extensions>
@@ -1135,6 +1326,9 @@ def _gpx_chunks(
 
             cwpt_type = SubElement(cwpt, "type")
             cwpt_type.text = f"Waypoint|{child_wp.wp_type or 'Waypoint'}"
+
+            if content.gsak_fields:
+                _gsak_child_extension(cwpt, child_wp, cache, code)
 
             if gpx_1_1:
                 _to_gpx_1_1(cwpt)

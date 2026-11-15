@@ -1,7 +1,7 @@
 """
 src/opensak/export/gpx_content.py — what a GPX/GGZ export writes per cache
 (#775): which child waypoints, how many logs, the user note as a first log,
-and the GPX version.
+and the GPX version; and whether it writes GSAK's own fields (#1169).
 
 Qt-free, so the GPX/GGZ writers (gps/garmin.py), the export settings, the
 export dialogs, Lua macros and the GPX importer share one definition. The
@@ -74,6 +74,11 @@ class GpxContent:
     my_logs_always: bool = False   # the user's own logs on top of max_logs
     user_note_log: bool = False    # the user note as a synthetic first log
     version: str = "1.0"           # one of GPX_VERSIONS
+    # #1169: GSAK's full field set in gsak:wptExtension (GSAK's "Include
+    # GSAK extra fields"): user flag, lock, user data, custom fields, the
+    # child waypoints' Parent/Child_* and the rest. Off writes only
+    # UserFound and UserNote, as before, for files meant for other apps.
+    gsak_fields: bool = True
 
     def __post_init__(self) -> None:
         if self.children not in CHILDREN_CHOICES:

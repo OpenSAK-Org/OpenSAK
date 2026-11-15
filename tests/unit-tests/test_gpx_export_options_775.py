@@ -266,7 +266,8 @@ class TestGpx11:
         # the waypoint name stays in the link text.
         children = _root(self._gpx()).findall(f"{GPX11}wpt")[1:]
         for child in children:
-            assert _tags(child) == ["name", "cmt", "desc", "link", "sym", "type"]
+            # #1169: GSAK's child fields go into <extensions>, last.
+            assert _tags(child) == ["name", "cmt", "desc", "link", "sym", "type", "extensions"]
         assert children[0].find(f"{GPX11}link").get("href") == "https://example.com/pk"
         assert children[1].find(f"{GPX11}link").get("href") == ""
         assert children[1].findtext(f"{GPX11}link/{GPX11}text") == "Child S1"
@@ -538,7 +539,8 @@ def test_gps_dialog_defaults_to_the_old_behaviour(qtbot, gps_dialog_env):
     dlg = GpsExportDialog(caches=[])
     qtbot.addWidget(dlg)
     assert dlg._content_combo.currentData() == ""
-    assert dlg._content_settings() == FileExportSettings()
+    # The defaults, without GSAK's own fields (#1169).
+    assert dlg._content_settings() == FileExportSettings(gsak_fields=False)
 
 
 def test_gps_dialog_offers_the_saved_settings(qtbot, gps_dialog_env):
@@ -562,7 +564,7 @@ def test_gps_dialog_offers_the_saved_settings(qtbot, gps_dialog_env):
     assert dlg2._content_combo.currentData() == "profile:c:geo"
     # A setting deleted meanwhile falls back to the defaults.
     FileExportProfile.profile_path("c:geo").unlink()
-    assert dlg2._content_settings() == FileExportSettings()
+    assert dlg2._content_settings() == FileExportSettings(gsak_fields=False)
 
 
 def test_gps_dialog_opens_the_export_dialog_for_new_settings(qtbot, monkeypatch, gps_dialog_env):

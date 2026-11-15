@@ -334,12 +334,70 @@ def _parse_extra_waypoints(tree) -> dict[str, list[dict]]:
     return result
 
 
+# ── GSAK fields (#1169) ───────────────────────────────────────────────────────
+
+def _gpx_creator(path: Path) -> Optional[str]:
+    """The creator attribute of a GPX file's root element, or None (#1169:
+    tells GSAK's files from OpenSAK's own, see _parse_wpt())."""
+    events = _iterparse(path, events=("start",))
+    try:
+        for _event, elem in events:
+            return elem.get("creator")
+    except Exception:
+        return None
+    finally:
+        events.close()   # closes the file now, not when collected
+    return None
+
+
+def _creator_rules(creator: Optional[str]) -> Optional[bool]:
+    """Whether a file by *creator* gets GSAK's rules (#766): True for
+    GSAK, False for OpenSAK's own export, None when the creator doesn't
+    say (no creator, or another program) and the GSAK fields decide."""
+    name = (creator or "").strip().lower()
+    if name.startswith("gsak"):
+        return True
+    if name.startswith("opensak"):
+        return False
+    return None
+
+
+# One line of gsak:CustomData: Custom_Start:<name>:Custom_Data:<value>:Custom_End.
+# The value may hold ":" (a time like 12:30) and line breaks; it ends at the
+# ":Custom_End" closing its line.
+_CUSTOM_LINE = re.compile(
+    r"Custom_Start:([^:\r\n]*):Custom_Data:(.*?):Custom_End[ \t]*(?=\r?\n|$)", re.S,
+)
+# GSAK's first CustomData line is its cCode column, the cache's GC code.
+_CUSTOM_CODE_NAME = "ccode"
+
+
+def parse_custom_data(text: Optional[str]) -> dict[str, str]:
+    """The fields of a gsak:CustomData text as {name: value} (#1169), in
+    the file's order, values as written. GSAK's cCode line is left out."""
+    result: dict[str, str] = {}
+    for match in _CUSTOM_LINE.finditer(text or ""):
+        name = match.group(1).strip()
+        if name and name.lower() != _CUSTOM_CODE_NAME:
+            result[name] = match.group(2).replace("\r\n", "\n")
+    return result
+
+
+def _gsak_flag(ext, tag: str) -> Optional[bool]:
+    """A true/false GSAK field, None when the file doesn't have it."""
+    el = ext.find(tag)
+    if el is None or not el.text or not el.text.strip():
+        return None
+    return el.text.strip().lower() == "true"
+
+
 # ── Main cache parser ─────────────────────────────────────────────────────────
 
-def _parse_wpt(wpt_el) -> Optional[dict]:
+def _parse_wpt(wpt_el, creator: Optional[str] = None) -> Optional[dict]:
     """
     Parse a single <wpt> element from a Pocket Query GPX file.
     Returns a dict of fields ready to construct/update a Cache, or None on error.
+    *creator* is the file's <gpx creator> (see _creator_rules()).
     """
     try:
         lat = float(wpt_el.get("lat"))
@@ -514,29 +572,33 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     # sym-is-absent guard below (which exists to protect OpenSAK's own
     # re-exports) wrongly blocks the log-based fallback.
     #
-    # OpenSAK's own export (garmin.py) only ever writes <gsak:UserNote> and
-    # <gsak:UserFound> (#1145) inside <gsak:wptExtension> — never any of
-    # GSAK's other per-cache fields. Keep both OUT of _GSAK_ONLY_TAGS, or
-    # OpenSAK's own re-exports would be taken for GSAK files. So the
-    # presence of any of those OTHER fields (already parsed
-    # a little further down for issue #269/#521/#129/#73) is a reliable
-    # fingerprint that this wpt genuinely came from GSAK itself, as opposed
-    # to OpenSAK's own re-export or a raw geocaching.com Pocket Query
-    # (neither of which ever populate them).
+    # #1169: the file's <gpx creator> says it first: "GSAK" gets GSAK's
+    # rules, "OpenSAK" OpenSAK's — OpenSAK's own export writes GSAK's full
+    # field set too now (UserFlag and the rest), so the fields alone can't
+    # tell the two apart any more.
+    #
+    # For a file whose creator doesn't say (none, or another program), the
+    # fields decide, as before: the presence of any of GSAK's per-cache
+    # fields (parsed a little further down for issue #269/#521/#129/#73)
+    # marks a wpt from GSAK, as opposed to a raw geocaching.com Pocket
+    # Query, which never has them. <gsak:UserNote> and <gsak:UserFound>
+    # (#1145) stay out of _GSAK_ONLY_TAGS: older OpenSAK exports write them.
     _GSAK_ONLY_TAGS = (
         "UserFlag", "FirstToFind", "UserSort", "IsPremium",
         "UserData", "User2", "User3", "User4", "FavPoints", "County",
         "LatN", "LongE", "LatBeforeCorrect", "LonBeforeCorrect",
     )
-    is_gsak_source = False
-    for gsak_uri in _GSAK_NAMESPACES:
-        _gsak_ext_probe = wpt_el.find(f".//{{{gsak_uri}}}wptExtension")
-        if _gsak_ext_probe is not None and any(
-            _gsak_ext_probe.find(f"{{{gsak_uri}}}{tag}") is not None
-            for tag in _GSAK_ONLY_TAGS
-        ):
-            is_gsak_source = True
-            break
+    by_creator = _creator_rules(creator)
+    is_gsak_source = bool(by_creator)
+    if by_creator is None:
+        for gsak_uri in _GSAK_NAMESPACES:
+            _gsak_ext_probe = wpt_el.find(f".//{{{gsak_uri}}}wptExtension")
+            if _gsak_ext_probe is not None and any(
+                _gsak_ext_probe.find(f"{{{gsak_uri}}}{tag}") is not None
+                for tag in _GSAK_ONLY_TAGS
+            ):
+                is_gsak_source = True
+                break
 
     # ── Issue #766: found-by-me fallback via log list ───────────────────────
     # sym="Geocache Found" is the Groundspeak/GC.com Pocket Query convention,
@@ -633,11 +695,33 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     # FROM GSAK with "Include GSAK fields" checked.
     gsak_county: Optional[str] = None
 
+    # #1169: the rest of GSAK's fields, written by GSAK and by OpenSAK's own
+    # export (option "Include GSAK fields"). None = not in the file.
+    gsak_lock: Optional[bool] = None
+    gsak_dnf: Optional[bool] = None
+    gsak_dnf_date: Optional[datetime] = None
+    gsak_watch: Optional[bool] = None
+    gsak_gc_note: Optional[str] = None
+    gsak_guid: Optional[str] = None
+    gsak_custom: Optional[dict[str, str]] = None
+
     for gsak_uri in _GSAK_NAMESPACES:
         # Search descendants: gsak:wptExtension may be a direct <wpt> child (GSAK
         # format) or nested inside <extensions> (OpenSAK GPX 1.1 export).
         gsak_ext = wpt_el.find(f".//{{{gsak_uri}}}wptExtension")
         if gsak_ext is not None:
+            gsak_lock = _gsak_flag(gsak_ext, f"{{{gsak_uri}}}Lock")
+            gsak_dnf = _gsak_flag(gsak_ext, f"{{{gsak_uri}}}DNF")
+            gsak_watch = _gsak_flag(gsak_ext, f"{{{gsak_uri}}}Watch")
+            gsak_dnf_date = _parse_gsak_date(gsak_ext.findtext(f"{{{gsak_uri}}}DNFDate"))
+            gc_note_text = (gsak_ext.findtext(f"{{{gsak_uri}}}GcNote") or "").strip()
+            gsak_gc_note = gc_note_text or None
+            guid_text = (gsak_ext.findtext(f"{{{gsak_uri}}}Guid") or "").strip()
+            gsak_guid = guid_text or None
+            custom_el = gsak_ext.find(f"{{{gsak_uri}}}CustomData")
+            if custom_el is not None:
+                gsak_custom = parse_custom_data(custom_el.text)
+
             ftf_el = gsak_ext.find(f"{{{gsak_uri}}}FirstToFind")
             if ftf_el is not None and ftf_el.text:
                 gsak_ftf = ftf_el.text.strip().lower() == "true"
@@ -781,6 +865,13 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_fav_points":   gsak_fav_points,
         "gsak_user_note":    gsak_user_note,
         "gsak_user_found":   gsak_user_found,
+        "gsak_lock":         gsak_lock,
+        "gsak_dnf":          gsak_dnf,
+        "gsak_dnf_date":     gsak_dnf_date,
+        "gsak_watch":        gsak_watch,
+        "gsak_gc_note":      gsak_gc_note,
+        "gsak_guid":         gsak_guid,
+        "gsak_custom":       gsak_custom,
         "found_by_me":       found_by_me,
         # Issue #1140: the waypoint symbol as given (GSAK's Symbol column).
         "symbol":            sym_raw.strip() if sym_raw and sym_raw.strip() else None,
@@ -813,8 +904,32 @@ def _parse_extra_wpt(wpt_el) -> Optional[dict]:
     if len(raw_name) < 2:
         return None
 
+    # #1169: GSAK's child fields (written by GSAK and OpenSAK's export):
+    # the parent's GC code, made by the user (Child_ByGSAK) and the
+    # waypoint's flag. None = not in the file.
+    parent: Optional[str] = None
+    created_by_user: Optional[bool] = None
+    wp_flag: Optional[bool] = None
+    for gsak_uri in _GSAK_NAMESPACES:
+        gsak_ext = wpt_el.find(f".//{{{gsak_uri}}}wptExtension")
+        if gsak_ext is not None:
+            parent = (gsak_ext.findtext(f"{{{gsak_uri}}}Parent") or "").strip() or None
+            created_by_user = _gsak_flag(gsak_ext, f"{{{gsak_uri}}}Child_ByGSAK")
+            wp_flag = _gsak_flag(gsak_ext, f"{{{gsak_uri}}}Child_Flag")
+            break
+    parent_suffix = parent[2:] if parent and len(parent) > 2 else ""
+
     # Forsøg 2-bogstavs prefix først, derefter 1-bogstavs med tal (P0, P1, 01, 02 osv.)
-    if len(raw_name) >= 3 and raw_name[:2].upper() in _KNOWN_PREFIXES:
+    if parent_suffix and len(raw_name) > len(parent_suffix) \
+            and raw_name.upper().endswith(parent_suffix.upper()):
+        # #1169: the file names the parent, so the code splits there, also
+        # for codes the prefix rules below cut in the wrong place (GSAK's
+        # "FLBQT2B" would become F + LBQT2B and miss its cache GCBQT2B).
+        prefix = raw_name[:len(raw_name) - len(parent_suffix)]
+        suffix = parent_suffix
+        wp_type_fallback = _KNOWN_PREFIXES.get(
+            prefix.upper(), _KNOWN_SINGLE_PREFIXES.get(prefix[:1].upper(), "Waypoint"))
+    elif len(raw_name) >= 3 and raw_name[:2].upper() in _KNOWN_PREFIXES:
         # Kendt 2-bogstavs prefix: PK, FN, TH osv.
         prefix = raw_name[:2].upper()
         suffix = raw_name[2:]
@@ -872,6 +987,8 @@ def _parse_extra_wpt(wpt_el) -> Optional[dict]:
         "comment":     comment,
         "latitude":    lat,
         "longitude":   lon,
+        "created_by_user": created_by_user,
+        "wp_flag":     wp_flag,
     }
 
 
@@ -927,6 +1044,9 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
                 comment=wp["comment"],
                 latitude=wp["latitude"],
                 longitude=wp["longitude"],
+                # #1169: GSAK's Child_ByGSAK / Child_Flag when the file has them.
+                created_by_user=bool(wp.get("created_by_user")),
+                wp_flag=bool(wp.get("wp_flag")),
             ))
             count += 1
 
@@ -1514,6 +1634,15 @@ def _upsert_cache(
         else:
             # Brugeren har IKKE fundet denne cache — FTF ikke relevant
             cache.first_to_find = False
+    elif data.get("gsak_ftf") is not None:
+        # #1169: GSAK's FirstToFind flag also without logs in the file (a
+        # file with the logs cut, or a cache without any).
+        cache.first_to_find = data["gsak_ftf"]
+    # #1169: GSAK's DNFDate, when the file has it, is the date GSAK (or
+    # OpenSAK) had — it wins over the guess from the logs in this file,
+    # which may have been cut (max logs per cache).
+    if data.get("gsak_dnf_date") is not None:
+        cache.dnf_date = data["gsak_dnf_date"]
 
     # ── GSAK personal/user fields (issue #269) ────────────────────────────────
     # UserFlag, IsPremium, UserSort, UserData1-4 and FavPoints are only ever
@@ -1537,6 +1666,21 @@ def _upsert_cache(
         cache.user_data_4 = data["gsak_user_data_4"]
     if data.get("gsak_fav_points") is not None:
         cache.favorite_points = data["gsak_fav_points"]
+    # #1169: the rest of GSAK's fields, by the same rule.
+    if data.get("gsak_dnf") is not None:
+        cache.dnf = data["gsak_dnf"]
+    if data.get("gsak_watch") is not None:
+        cache.watch = data["gsak_watch"]
+    if data.get("gsak_gc_note"):
+        cache.gc_note = data["gsak_gc_note"]
+    if data.get("gsak_guid"):
+        cache.guid = data["gsak_guid"]
+    # Lock (#202) only ever locks: the file's data was applied above (an
+    # existing locked cache kept its own), and from now on imports leave
+    # the cache alone. A file saying "not locked" doesn't unlock a cache
+    # the user locked here; unlocking stays the user's choice.
+    if data.get("gsak_lock"):
+        cache.locked = True
 
     # ── GSAK personal note (issue #389) ──────────────────────────────────────
     # Write only when GSAK supplied a non-empty note, and never overwrite an
@@ -1816,6 +1960,73 @@ class ImportResult:
         return "\n".join(lines)
 
 
+class _CustomValueImport:
+    """#1169: the gsak:CustomData values of the imported caches, written
+    to the target database's custom fields (db/custom_fields.py).
+
+    Values are matched to the fields by name and converted to the field's
+    type (a value that doesn't fit is stored as it is, as the GSAK
+    database import does). Fields the database doesn't have are skipped
+    and named in the import summary: they aren't created, since their
+    type can't be known from the file. Written per batch, after the
+    caches are committed (main database first, then the companion), and
+    only for caches that were saved.
+    """
+
+    def __init__(self, session: Session):
+        bind = session.get_bind()
+        database = getattr(getattr(bind, "url", None), "database", None)
+        self.db_path = Path(database) if database and database != ":memory:" else None
+        self._fields: Optional[dict] = None
+        self._pending: list[tuple[str, dict[str, str]]] = []
+        self.unknown: set[str] = set()
+        self.error: Optional[Exception] = None
+
+    def collect(self, batch: list[dict]) -> None:
+        for data in batch:
+            custom = data.get("gsak_custom")
+            if custom:
+                self._pending.append((data["gc_code"], custom))
+
+    def flush(self, saved: dict[str, int]) -> None:
+        """Write the collected values of the caches in *saved* (GC code →
+        id of the caches the import saved so far)."""
+        pending, self._pending = self._pending, []
+        if not pending or self.db_path is None or self.error is not None:
+            return
+        from opensak.db import custom_fields
+
+        try:
+            if self._fields is None:
+                self._fields = {f.name.lower(): f for f in custom_fields.fields(self.db_path)}
+            rows: list[tuple[str, dict]] = []
+            for code, values in pending:
+                if code not in saved:
+                    continue
+                parsed: dict = {}
+                for name, raw in values.items():
+                    field_ = self._fields.get(name.lower())
+                    if field_ is None:
+                        self.unknown.add(name)
+                        continue
+                    parsed[field_.name], _ok = custom_fields.convert(field_.type, raw)
+                if parsed:
+                    rows.append((code, parsed))
+            if rows:
+                custom_fields.write_values(self.db_path, rows)
+        except Exception as exc:
+            logger.warning("Could not save the custom field values", exc_info=exc)
+            self.error = exc
+
+    def report(self, result: "ImportResult") -> None:
+        if self.unknown:
+            names = sorted(self.unknown, key=str.lower)
+            result.warnings.append(tr(
+                "import_custom_fields_unknown", count=len(names), names=", ".join(names)))
+        if self.error is not None:
+            result.errors.append(tr("import_custom_fields_error", error=self.error))
+
+
 def _parse_gpx_to_data(
     gpx_path: Path,
     wpts_path: Optional[Path] = None,
@@ -1831,6 +2042,7 @@ def _parse_gpx_to_data(
     errors: list[str] = []
 
     try:
+        creator = _gpx_creator(gpx_path)
         context = _iterparse(gpx_path, events=("end",), tag=None)
 
         for event, elem in context:
@@ -1838,7 +2050,7 @@ def _parse_gpx_to_data(
 
             if local_tag == "wpt":
                 try:
-                    data = _parse_wpt(elem)
+                    data = _parse_wpt(elem, creator)
                     if data is not None:
                         caches.append(data)
                     else:
@@ -1905,9 +2117,12 @@ def import_gpx(
 
     # Preload existing gc_codes once so new caches skip the per-cache SELECT.
     existing_ids = _load_existing_gc_map(db_session)
+    custom_values = _CustomValueImport(db_session)
     _enter_bulk_import_pragmas(db_session)
 
     try:
+        # #1169: GSAK's file or OpenSAK's own (see _parse_wpt()).
+        creator = _gpx_creator(gpx_path)
         # Stream the XML using iterparse to avoid loading the entire file into RAM
         context = _iterparse(gpx_path, events=("end",), tag=None)
 
@@ -1923,7 +2138,7 @@ def import_gpx(
 
             if local_tag == "wpt":
                 try:
-                    data = _parse_wpt(elem)
+                    data = _parse_wpt(elem, creator)
 
                     if data is not None:
                         batch.append(data)
@@ -1949,21 +2164,27 @@ def import_gpx(
                 # Flush a full batch to disk and clear the session to save RAM.
                 if len(batch) >= batch_size:
                     _flush_cache_batch(db_session, batch, source, existing_ids, result)
+                    custom_values.collect(batch)
                     batch.clear()
                     db_session.commit()
                     db_session.expunge_all()
+                    custom_values.flush(existing_ids)
                     if should_cancel is not None and should_cancel():
                         result.cancelled = True
                         break
 
         if result.cancelled:
+            custom_values.report(result)
             context.close()   # closes the file now, not when collected
             return result
 
         # Flush the trailing partial batch and commit the remainder.
         _flush_cache_batch(db_session, batch, source, existing_ids, result)
+        custom_values.collect(batch)
         batch.clear()
         db_session.commit()
+        custom_values.flush(existing_ids)
+        custom_values.report(result)
 
         # Handle Extra Waypoints (Deduplication and Linking)
         if extra_wpts:
@@ -2065,6 +2286,7 @@ def import_zip(
         # Step 2: Write all parsed cache data sequentially (single session).
         db_session = make_session(_bind_of(session))
         existing_ids = _load_existing_gc_map(db_session)
+        custom_values = _CustomValueImport(db_session)
         _enter_bulk_import_pragmas(db_session)
         try:
             for gpx_path, caches, extra_wpts in parsed_files:
@@ -2075,11 +2297,14 @@ def import_zip(
                         db_session, caches[i:i + 200], source,
                         existing_ids, overall_result,
                     )
+                    custom_values.collect(caches[i:i + 200])
                     db_session.commit()
+                    custom_values.flush(existing_ids)
                     if _cancelled():
                         break
                 db_session.expunge_all()
                 if overall_result.cancelled:
+                    custom_values.report(overall_result)
                     return overall_result
 
                 if extra_wpts:
@@ -2092,6 +2317,8 @@ def import_zip(
                             unique_wpts.append(wp)
                     overall_result.waypoints += _insert_extra_wpts(db_session, unique_wpts)
                     db_session.commit()
+
+            custom_values.report(overall_result)
 
             # Step 3: Link all companion files against the now-complete cache table.
             for companion_path in companions:

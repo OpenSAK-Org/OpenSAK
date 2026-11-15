@@ -398,7 +398,8 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         layout.addLayout(btn_row)
 
     def _build_content_group(self) -> QGroupBox:
-        """#775: child waypoints, logs, user note log and GPX version."""
+        """#775: child waypoints, logs, user note log and GPX version;
+        #1169: GSAK's own fields."""
         group = QGroupBox(tr("file_export_content_group"))
         form = QFormLayout(group)
         self._combo_children = QComboBox()
@@ -429,6 +430,10 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._combo_gpx_version.addItem("GPX 1.1", "1.1")  # i18n: ignore — format name
         self._combo_gpx_version.setToolTip(tr("file_export_gpx_version_tip"))
         form.addRow(tr("file_export_gpx_version"), self._combo_gpx_version)
+        self._chk_gsak_fields = QCheckBox(tr("file_export_gsak_fields"))
+        self._chk_gsak_fields.setToolTip(tr("file_export_gsak_fields_tip"))
+        self._chk_gsak_fields.setChecked(True)
+        form.addRow(self._chk_gsak_fields)
         self._content_group = group
         return group
 
@@ -451,6 +456,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             my_logs_always=self._chk_my_logs.isChecked(),
             user_note_log=self._chk_user_note_log.isChecked(),
             version=self._combo_gpx_version.currentData(),
+            gsak_fields=self._chk_gsak_fields.isChecked(),
         )
 
     def _select(self) -> list:
@@ -488,6 +494,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             my_logs_always=self._chk_my_logs.isChecked(),
             user_note_log=self._chk_user_note_log.isChecked(),
             gpx_version=self._combo_gpx_version.currentData(),
+            gsak_fields=self._chk_gsak_fields.isChecked(),
         )
 
     def _apply_settings(self, settings: FileExportSettings) -> None:
@@ -514,6 +521,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._spin_max_logs.setValue(settings.max_logs)
         self._chk_my_logs.setChecked(settings.my_logs_always)
         self._chk_user_note_log.setChecked(settings.user_note_log)
+        self._chk_gsak_fields.setChecked(settings.gsak_fields)
         self._update_content_state()
         self._update_file_name_preview()
 

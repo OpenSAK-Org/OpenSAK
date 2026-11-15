@@ -126,16 +126,20 @@ def test_gsak_export_found_status_detected_via_lat_before_correct(tmp_path, fres
         assert cache.found is True
 
 
-def test_gsak_export_without_fingerprint_still_uses_old_guard(tmp_path, fresh_db, found_username):
+@pytest.mark.parametrize("creator", ['creator="OpenSAK"', ""])
+def test_gsak_export_without_fingerprint_still_uses_old_guard(
+        tmp_path, fresh_db, found_username, creator):
     # Regression guard: a plain <sym>Geocache</sym> with NO GSAK-only
     # wptExtension fields at all (e.g. only gsak:UserNote, matching
     # OpenSAK's own re-export) must still be treated as authoritative
     # "not found" -- the fallback must not fire just because a
-    # gsak:wptExtension element exists.
+    # gsak:wptExtension element exists. #1169: a file whose creator is
+    # GSAK gets GSAK's rules (test_gpx_gsak_fields_1169.py), so this is
+    # OpenSAK's own file, or one without a creator.
     gpx = _gsak_gpx(gsak_extension="""
             <gsak:wptExtension>
               <gsak:UserNote>Nice spot.</gsak:UserNote>
-            </gsak:wptExtension>""")
+            </gsak:wptExtension>""").replace('creator="GSAK"', creator)
     f = _write_gpx(tmp_path, gpx)
     with get_session() as s:
         import_gpx(f, s)
