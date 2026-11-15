@@ -254,6 +254,9 @@ class MainWindow(QMainWindow):
         # without needing to cancel/terminate the older QThread — see
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
+        # #1315: generation of a refresh after a bulk action, whose result
+        # should offer to clear a filter it left empty (None = no offer).
+        self._offer_clear_filter_generation: Optional[int] = None
         self._active_refresh_workers: list[RefreshWorker] = []
         # Start time per refresh generation, for the timing log lines in
         # _on_refresh_result(). Popped when the result (or error) comes back.
@@ -1703,7 +1706,7 @@ class MainWindow(QMainWindow):
             return combined
         return quick_fs
 
-    def _refresh_cache_list(self) -> None:
+    def _refresh_cache_list(self, offer_clear_if_empty: bool = False) -> None:
         """Reload caches from DB applying current filters.
 
         Combines the advanced filter (self._current_filterset, set via the
@@ -1720,12 +1723,21 @@ class MainWindow(QMainWindow):
         finishes (e.g. two quick database switches, or fast typing in the
         search box), the older worker's result is discarded by generation
         number rather than cancelled — see RefreshWorker's docstring.
+
+        #1315: *offer_clear_if_empty* is for bulk actions (clearing flags,
+        deleting or moving caches) that can leave the active filter with no
+        caches. If the reloaded list is empty, the user is asked whether to
+        clear the filter, instead of being left with an empty list and no
+        explanation. Ordinary refreshes (typing in a search box, choosing a
+        filter) never ask.
         """
         _t0 = time.monotonic()
         fs = self._build_active_filterset()
 
         self._refresh_generation += 1
         generation = self._refresh_generation
+        if offer_clear_if_empty:
+            self._offer_clear_filter_generation = generation
         map_enabled = get_settings().map_enabled
 
         # Issue #647: wait cursor while the worker runs, so a multi-second
@@ -1799,6 +1811,30 @@ class MainWindow(QMainWindow):
             "mainwindow: _refresh_cache_list done (+%.2fs total)",
             time.monotonic() - _t0,
         )
+        # #1315: a superseded result returned above, so this is the newest
+        # refresh; it covers a pending offer from an earlier bulk action too.
+        if self._offer_clear_filter_generation is not None:
+            self._offer_clear_filter_generation = None
+            self._offer_to_clear_empty_filter()
+
+    def _offer_to_clear_empty_filter(self) -> None:
+        """#1315: after a bulk action, ask whether to clear a filter that no
+        longer matches any cache. Asks only when the list is empty, a filter
+        is in effect and the database still has caches, so clearing the
+        filter would show something."""
+        if self._cache_table.row_count() != 0:
+            return
+        if not self._has_active_filter() or not getattr(self, "_db_count", 0):
+            return
+        reply = QMessageBox.question(
+            self,
+            tr("filter_no_results_title"),
+            tr("filter_now_empty_msg"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._clear_filter()
 
     def _clear_detail_if_filtered_out(self) -> None:
         """#1313: empty the detail panel when the cache it shows is no longer
@@ -1828,6 +1864,7 @@ class MainWindow(QMainWindow):
         self._refresh_started_at.pop(generation, None)
         logger.error("mainwindow: RefreshWorker failed (generation=%s): %s", generation, message)
         if generation == self._refresh_generation:
+            self._offer_clear_filter_generation = None   # #1315: no list to judge
             self._statusbar.showMessage(tr("status_refresh_failed"), 6000)
 
     def _cleanup_refresh_worker(self, worker: RefreshWorker) -> None:
@@ -2872,7 +2909,7 @@ class MainWindow(QMainWindow):
             self._detail_panel.clear()
             self._act_wp_edit.setEnabled(False)
             self._act_wp_delete.setEnabled(False)
-            self._refresh_cache_list()
+            self._refresh_cache_list(offer_clear_if_empty=True)
             self._statusbar.showMessage(
                 tr("status_cache_deleted", gc_code=cache.gc_code), 3000
             )
@@ -2900,7 +2937,7 @@ class MainWindow(QMainWindow):
             self._detail_panel.clear()
             self._act_wp_edit.setEnabled(False)
             self._act_wp_delete.setEnabled(False)
-            self._refresh_cache_list()
+            self._refresh_cache_list(offer_clear_if_empty=True)
             self._statusbar.showMessage(
                 tr("status_deleted_count", count=len(gc_codes)), 3000
             )
@@ -2928,7 +2965,7 @@ class MainWindow(QMainWindow):
             self._detail_panel.clear()
             self._act_wp_edit.setEnabled(False)
             self._act_wp_delete.setEnabled(False)
-            self._refresh_cache_list()
+            self._refresh_cache_list(offer_clear_if_empty=True)
             self._statusbar.showMessage(
                 tr("status_deleted_count", count=len(gc_codes)), 3000
             )
@@ -2974,7 +3011,7 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
         changed = set_user_flag((c.gc_code for c in caches), flagged)
-        self._refresh_cache_list()
+        self._refresh_cache_list(offer_clear_if_empty=True)
         self._statusbar.showMessage(
             tr("status_flags_set" if flagged else "status_flags_unset", count=changed), 3000
         )
@@ -2994,7 +3031,7 @@ class MainWindow(QMainWindow):
                 session.query(CacheModel).filter(
                     CacheModel.user_flag == True  # noqa: E712
                 ).update({CacheModel.user_flag: False}, synchronize_session=False)
-            self._refresh_cache_list()
+            self._refresh_cache_list(offer_clear_if_empty=True)
             self._statusbar.showMessage(tr("status_flags_cleared"), 3000)
 
     def _open_move_caches_dialog(self) -> None:
@@ -3029,7 +3066,7 @@ class MainWindow(QMainWindow):
         self._detail_panel.clear()
         self._act_wp_edit.setEnabled(False)
         self._act_wp_delete.setEnabled(False)
-        self._refresh_cache_list()
+        self._refresh_cache_list(offer_clear_if_empty=True)
 
     def _on_flags_changed(self) -> None:
         """Opdatér statuslinjen når et flag toggler."""

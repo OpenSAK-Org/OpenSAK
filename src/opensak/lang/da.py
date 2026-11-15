@@ -45,6 +45,7 @@ STRINGS: dict[str, str] = {
     "filter_active_label":          "🔍 Filter aktivt",
     "filter_no_results_title":      "Ingen matchende caches",
     "filter_no_results_msg":        "Dette filter matcher ingen caches og er derfor ikke blevet anvendt. Justér kriterierne og prøv igen.",
+    "filter_now_empty_msg":         "Ingen caches matcher længere det aktive filter.\n\nVil du rydde filteret?",
 
     # ── Menulinje ─────────────────────────────────────────────────────────────
     "menu_file":                    "&Fil",

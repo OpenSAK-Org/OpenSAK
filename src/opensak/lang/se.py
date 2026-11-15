@@ -45,6 +45,7 @@ STRINGS: dict[str, str] = {
     "filter_active_label":          "🔍 Filter aktivt",
     "filter_no_results_title":      "Inga matchande caches",
     "filter_no_results_msg":        "Det här filtret matchar inga caches och har därför inte tillämpats. Justera kriterierna och försök igen.",
+    "filter_now_empty_msg":         "Inga cacher matchar längre det aktiva filtret.\n\nRensa filtret?",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Fil",

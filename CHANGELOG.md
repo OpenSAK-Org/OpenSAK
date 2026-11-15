@@ -81,6 +81,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   now emptied, as when a database is opened. A cache that is still in the
   list stays shown.
 
+- **An empty list after Clear all flags is explained (#1315)** — with a
+  filter such as "User flag = set" active, **Clear all flags in database**
+  left an empty cache list with no explanation, as if the data were gone.
+  When clearing or setting flags, deleting caches or moving them to another
+  database leaves the active filter with no caches, OpenSAK now asks
+  whether to clear the filter. Reported by Peter Floyd.
+
 ---
 
 ## [1.23.0-beta.4] — 2026-11-13

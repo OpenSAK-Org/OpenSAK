@@ -45,6 +45,7 @@ STRINGS: dict[str, str] = {
     "filter_active_label":          "🔍 Filtr aktivní",
     "filter_no_results_title":      "Žádné odpovídající keše",
     "filter_no_results_msg":        "Tento filtr neodpovídá žádné keši, a proto nebyl použit. Upravte kritéria a zkuste to znovu.",
+    "filter_now_empty_msg":         "Aktivnímu filtru už neodpovídá žádná keš.\n\nZrušit filtr?",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Soubor",

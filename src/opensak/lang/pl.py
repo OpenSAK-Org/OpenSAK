@@ -47,6 +47,7 @@ STRINGS: dict[str, str] = {
     "filter_active_label":          "🔍 Filtr aktywny",
     "filter_no_results_title":      "Brak pasujących skrytek",
     "filter_no_results_msg":        "Ten filtr nie pasuje do żadnej skrytki, więc nie został zastosowany. Zmień kryteria i spróbuj ponownie.",
+    "filter_now_empty_msg":         "Żadna skrytka nie pasuje już do aktywnego filtra.\n\nWyczyścić filtr?",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Plik",
