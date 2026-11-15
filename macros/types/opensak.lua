@@ -225,6 +225,7 @@
 ---@field my_logs_always? boolean Keep your own logs on top of `max_logs` (default false).
 ---@field user_note_log? boolean Write the user note as a first log, as GSAK does (default false).
 ---@field version? "1.0"|"1.1" GPX version (GPX/GGZ, default "1.0").
+---@field gsak_fields? boolean Write GSAK's own fields (user flag, lock, user data, custom fields, ...), so GSAK reads them back (GPX/GGZ, default true; false with target "device").
 ---@field device? string The device's folder, when several Garmin devices are connected.
 
 ---The table passed to `opensak.form{}`.
@@ -1629,7 +1630,7 @@ function opensak.delete_folder(path) end
 ---@return integer?
 function opensak.export_file(setting, folder) end
 
----Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No). The content keys `children`, `children_only`, `max_logs`, `my_logs_always`, `user_note_log`, `version` and `max_counts` are the options of the export dialog (GPX/GGZ).
+---Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No). The content keys `children`, `children_only`, `max_logs`, `my_logs_always`, `user_note_log`, `version`, `gsak_fields` and `max_counts` are the options of the export dialog (GPX/GGZ); `gsak_fields` is off by default with `target = "device"`, as in Send to GPS.
 ---
 ---Since API version 2.
 ---
