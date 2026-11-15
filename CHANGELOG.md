@@ -50,6 +50,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `opensak.export_gpx{ corrected_final_wp = true }`. Contributed by
   nagisml.
 
+- **`opensak.set_center()` in `opensak run` (#1304)** — a macro run
+  without a window can now change the centre point, so one that writes a
+  file per location (set the centre, sort by distance, export the nearest
+  caches) also runs from Task Scheduler, launchd, cron or systemd. As in
+  OpenSAK, distance and bearing are recalculated, so sorting by distance
+  and distance filters work right after it; it needs a write approval or
+  `--allow-write`. The new centre lasts for the run only: when the run
+  ends, also after an error, every database it changed gets its own
+  centre and distances back, and the centre OpenSAK shows stays as it
+  was. Follow-up to #1203. Contributed by nagisml.
+
 ### Changed
 
 - **GPX/GGZ export follows GSAK's file structure (#700)** — the header
