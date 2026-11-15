@@ -20,7 +20,9 @@ def test_macro_filter_selects_caches(seeded_window):
     """)
     assert "n=2 shown=2" in out
     assert seeded_window._cache_table.row_count() == 2
-    assert seeded_window._active_filter_name == "From macro"
+    # #1308: a macro label is the filter's name, not a saved profile.
+    assert seeded_window.filter_name() == "From macro"
+    assert seeded_window._active_filter_name == ""
     assert "From macro" in seeded_window._filter_lbl.text()
 
 

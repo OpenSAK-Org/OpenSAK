@@ -62,7 +62,9 @@ def test_cli_macro_filters_the_window(qtbot, seeded_window, server, tmp_path):
     """)
     assert (code, out, err) == (0, ["n=2"], "")
     assert seeded_window._cache_table.row_count() == 2
-    assert seeded_window._active_filter_name == "From editor"
+    # #1308: a macro label is the filter's name, not a saved profile.
+    assert seeded_window.filter_name() == "From editor"
+    assert seeded_window._active_filter_name == ""
 
 
 def test_cli_macro_confirm_dialog_in_the_window(qtbot, seeded_window, server, tmp_path):
