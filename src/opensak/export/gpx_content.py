@@ -1,7 +1,9 @@
 """
 src/opensak/export/gpx_content.py — what a GPX/GGZ export writes per cache
 (#775): which child waypoints, how many logs, the user note as a first log,
-and the GPX version; and whether it writes GSAK's own fields (#1169).
+and the GPX version; whether it writes GSAK's own fields (#1169); and the
+templates for waypoint names, descriptions and the extra-info log (#454,
+#950; see special_tags.py).
 
 Qt-free, so the GPX/GGZ writers (gps/garmin.py), the export settings, the
 export dialogs, Lua macros and the GPX importer share one definition. The
@@ -31,6 +33,15 @@ USER_NOTE_LOG_ID = "-2"
 USER_NOTE_LOG_FINDER = "GSAK"
 USER_NOTE_LOG_FINDER_ID = "0"
 USER_NOTE_LOG_TYPE = "Write note"
+
+# #454: the synthetic first log with extra information from a template
+# (GSAK's "Extra information to show as first log", GarminExport's dummy
+# log). Not id -2 or -3, which GSAK uses for its own notes: an id of its
+# own, by "OpenSAK", so a re-import recognises it and doesn't store it.
+EXTRA_INFO_LOG_ID = "-454"
+EXTRA_INFO_LOG_FINDER = "OpenSAK"
+EXTRA_INFO_LOG_FINDER_ID = "0"
+EXTRA_INFO_LOG_TYPE = "Write note"
 
 
 def normalize_note(text: Optional[str]) -> str:
@@ -64,6 +75,15 @@ def is_user_note_log(
     )
 
 
+def is_extra_info_log(log_id: Optional[str], finder: Optional[str]) -> bool:
+    """True if a GPX log is the extra-info log of an OpenSAK export (#454),
+    which an import skips."""
+    return (
+        (log_id or "").strip() == EXTRA_INFO_LOG_ID
+        and (finder or "").strip() == EXTRA_INFO_LOG_FINDER
+    )
+
+
 @dataclass(frozen=True)
 class GpxContent:
     """The per-cache content options of a GPX/GGZ export."""
@@ -79,6 +99,15 @@ class GpxContent:
     # child waypoints' Parent/Child_* and the rest. Off writes only
     # UserFound and UserNote, as before, for files meant for other apps.
     gsak_fields: bool = True
+    # #454/#950: special-tag templates (see special_tags.py). "" keeps the
+    # default: the GC code as the waypoint name, "Name by Owner (D/T)" as
+    # its description, no extra-info log.
+    name_template: str = ""        # the cache's <wpt> <name>
+    name_max_chars: int = 0        # cut <name> to this many characters (0 = no limit)
+    desc_template: str = ""        # the cache's <wpt> <desc>
+    desc_for_cache_name: bool = False  # desc_template also as the cache name
+    remove_chars: str = ""         # characters removed from names and descriptions
+    first_log: str = ""            # the extra-info log's text ("" = no such log)
 
     def __post_init__(self) -> None:
         if self.children not in CHILDREN_CHOICES:
@@ -88,6 +117,13 @@ class GpxContent:
         if isinstance(self.max_logs, bool) or not isinstance(self.max_logs, int) \
                 or self.max_logs < 0:
             raise ValueError(f"max_logs must be a whole number >= 0, got {self.max_logs!r}")
+        if isinstance(self.name_max_chars, bool) or not isinstance(self.name_max_chars, int) \
+                or self.name_max_chars < 0:
+            raise ValueError(
+                f"name_max_chars must be a whole number >= 0, got {self.name_max_chars!r}")
+        for key in ("name_template", "desc_template", "remove_chars", "first_log"):
+            if not isinstance(getattr(self, key), str):
+                raise ValueError(f"{key} must be text, got {getattr(self, key)!r}")
 
     def for_format(self, fmt: str) -> "GpxContent":
         """The options as they apply to *fmt*. A GGZ always has the caches

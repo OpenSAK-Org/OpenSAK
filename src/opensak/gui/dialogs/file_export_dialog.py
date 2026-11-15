@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QButtonGroup, QGroupBox, QProgressBar,
     QTextEdit, QComboBox, QInputDialog, QSizePolicy,
     QCheckBox, QSpinBox, QFormLayout, QLineEdit,
-    QToolButton, QStyle,
+    QToolButton, QStyle, QPlainTextEdit,
 )
 
 from opensak.lang import tr
@@ -38,6 +38,9 @@ from opensak.export.file_export import (
     active_database_name, select_for_export, wpt_counts, write_export_file,
 )
 from opensak.export.gpx_content import DEFAULT_CONTENT, GpxContent
+from opensak.export.special_tags import (
+    DEFAULT_DESCRIPTION, LISTED_TAGS, SUGGESTED_FIRST_LOG,
+)
 
 
 class _ElidedLabel(QLabel):
@@ -355,6 +358,9 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
 
         # #775: what a GPX/GGZ file contains per cache.
         layout.addWidget(self._build_content_group())
+        # #454/#950: names, descriptions and the extra-info log from
+        # special-tag templates.
+        layout.addWidget(self._build_texts_group())
 
         self._edit_folder.textChanged.connect(self._update_file_name_preview)
         self._edit_file_name.textChanged.connect(self._update_file_name_preview)
@@ -437,12 +443,75 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._content_group = group
         return group
 
+    def _build_texts_group(self) -> QGroupBox:
+        """#454/#950: special-tag templates for the waypoint name and
+        description, characters to remove, and the extra-info first log."""
+        group = QGroupBox(tr("file_export_texts_group"))
+        form = QFormLayout(group)
+
+        name_row = QHBoxLayout()
+        self._edit_name_template = QLineEdit()
+        self._edit_name_template.setPlaceholderText("%code")  # i18n: ignore — special tag
+        self._edit_name_template.setToolTip(tr("file_export_name_template_tip"))
+        name_row.addWidget(self._edit_name_template, 1)
+        name_row.addWidget(QLabel(tr("file_export_name_max_chars")))
+        self._spin_name_max = QSpinBox()
+        self._spin_name_max.setRange(0, 255)
+        self._spin_name_max.setSpecialValueText(tr("file_export_name_max_chars_none"))
+        self._spin_name_max.setToolTip(tr("file_export_name_max_chars_tip"))
+        name_row.addWidget(self._spin_name_max)
+        btn_tags = QToolButton()
+        btn_tags.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
+        )
+        btn_tags.setAutoRaise(True)
+        btn_tags.setToolTip(tr("file_export_tags_help_title"))
+        btn_tags.clicked.connect(self._show_tags_help)
+        name_row.addWidget(btn_tags)
+        form.addRow(tr("file_export_name_template"), name_row)
+
+        self._edit_desc_template = QLineEdit()
+        self._edit_desc_template.setPlaceholderText(DEFAULT_DESCRIPTION)
+        self._edit_desc_template.setToolTip(tr("file_export_desc_template_tip"))
+        form.addRow(tr("poi_export_description"), self._edit_desc_template)
+        self._chk_desc_for_name = QCheckBox(tr("file_export_desc_for_cache_name"))
+        self._chk_desc_for_name.setToolTip(tr("file_export_desc_for_cache_name_tip"))
+        form.addRow(self._chk_desc_for_name)
+
+        self._edit_remove_chars = QLineEdit()
+        self._edit_remove_chars.setToolTip(tr("file_export_remove_chars_tip"))
+        form.addRow(tr("file_export_remove_chars"), self._edit_remove_chars)
+
+        self._edit_first_log = QPlainTextEdit()
+        self._edit_first_log.setToolTip(tr("file_export_first_log_tip"))
+        self._edit_first_log.setPlaceholderText(SUGGESTED_FIRST_LOG)
+        line = self._edit_first_log.fontMetrics().lineSpacing()
+        self._edit_first_log.setFixedHeight(line * 4 + 12)
+        first_log_row = QHBoxLayout()
+        first_log_row.addWidget(self._edit_first_log, 1)
+        btn_suggest = QPushButton(tr("file_export_first_log_suggested"))
+        btn_suggest.setAutoDefault(False)
+        btn_suggest.setToolTip(tr("file_export_first_log_suggested_tip"))
+        btn_suggest.clicked.connect(
+            lambda: self._edit_first_log.setPlainText(SUGGESTED_FIRST_LOG))
+        first_log_row.addWidget(btn_suggest, 0, Qt.AlignmentFlag.AlignTop)
+        form.addRow(tr("file_export_first_log"), first_log_row)
+        self._texts_group = group
+        return group
+
+    def _show_tags_help(self) -> None:
+        QMessageBox.information(
+            self, tr("file_export_tags_help_title"),
+            tr("file_export_tags_help", tags="  ".join(LISTED_TAGS)),
+        )
+
     def _update_content_state(self, *_args) -> None:
         """Enable the content options that apply to the format: none for
         LOC; for GGZ everything but "children only" (its index needs the
         caches)."""
         fmt = self._current_fmt()
         self._content_group.setEnabled(fmt != "loc")
+        self._texts_group.setEnabled(fmt != "loc")
         has_children = self._combo_children.currentData() != "none"
         self._chk_children_only.setEnabled(fmt == "gpx" and has_children)
         self._chk_my_logs.setEnabled(self._spin_max_logs.value() > 0)
@@ -457,6 +526,18 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             user_note_log=self._chk_user_note_log.isChecked(),
             version=self._combo_gpx_version.currentData(),
             gsak_fields=self._chk_gsak_fields.isChecked(),
+            **self._template_options(),
+        )
+
+    def _template_options(self) -> dict:
+        """The #454/#950 template options as set in the dialog."""
+        return dict(
+            name_template=self._edit_name_template.text().strip(),
+            name_max_chars=self._spin_name_max.value(),
+            desc_template=self._edit_desc_template.text().strip(),
+            desc_for_cache_name=self._chk_desc_for_name.isChecked(),
+            remove_chars=self._edit_remove_chars.text(),
+            first_log=self._edit_first_log.toPlainText().strip(),
         )
 
     def _select(self) -> list:
@@ -495,6 +576,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             user_note_log=self._chk_user_note_log.isChecked(),
             gpx_version=self._combo_gpx_version.currentData(),
             gsak_fields=self._chk_gsak_fields.isChecked(),
+            **self._template_options(),
         )
 
     def _apply_settings(self, settings: FileExportSettings) -> None:
@@ -522,6 +604,12 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._chk_my_logs.setChecked(settings.my_logs_always)
         self._chk_user_note_log.setChecked(settings.user_note_log)
         self._chk_gsak_fields.setChecked(settings.gsak_fields)
+        self._edit_name_template.setText(settings.name_template)
+        self._spin_name_max.setValue(settings.name_max_chars)
+        self._edit_desc_template.setText(settings.desc_template)
+        self._chk_desc_for_name.setChecked(settings.desc_for_cache_name)
+        self._edit_remove_chars.setText(settings.remove_chars)
+        self._edit_first_log.setPlainText(settings.first_log)
         self._update_content_state()
         self._update_file_name_preview()
 

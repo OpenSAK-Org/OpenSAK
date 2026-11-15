@@ -1429,6 +1429,36 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
     <p>All exports use the caches currently visible in the list (respecting the active filter). You can limit the export to the first <em>N</em> caches, and choose whether caches with corrected coordinates are exported with those or with their original coordinates.</p>
     <p>Set the <strong>Folder</strong> and <strong>File name</strong> once and later exports go straight there, without a save dialog. The file name can be fixed text or use variables, for example <code>{database}_{date}</code>: <code>{database}</code>, <code>{filter}</code>, <code>{center}</code>, <code>{date}</code>, <code>{time}</code>, <code>{datetime}</code>, <code>{format}</code> and <code>{count}</code>, among others — the info button next to the field lists them all, and a preview shows the exact file that will be written. <strong>If the file exists</strong> decides whether OpenSAK asks, overwrites or skips.</p>
     <p>Save the dialog's settings under a name with <strong>Export settings</strong> and load them again later; OpenSAK also remembers the settings you used last.</p>
+
+    <h3>Names and texts (GPX / GGZ)</h3>
+    <p>OpenSAK can build the texts a GPS shows from <strong>special tags</strong>, which are replaced with each cache's values. Send to GPS uses them too, through the export setting it is set to.</p>
+    <ul>
+      <li><strong>Waypoint name</strong> — empty writes the GC code. <code>%drop2%con1</code> turns GC1A2B3 (a micro) into 1A2B3M. <strong>Max. characters</strong> cuts names for devices that need short ones; names that come out the same end in a number, so each stays unique.</li>
+      <li><strong>Description</strong> — empty writes <code>%name by %by (%dif/%ter)</code>. Tick <strong>Also use as the cache name</strong> to show it in the device's list too.</li>
+      <li><strong>Characters to remove</strong> — removed from names and descriptions, e.g. characters a device can't show.</li>
+      <li><strong>Extra info as first log</strong> — written as the first log of every cache, for GPS devices that show logs but no hint. <strong>Suggested</strong> fills in hint, last log, last found and favourite points. A line whose tags all come out empty is left out, so a cache without a hint gets no "Hint:" line. The log doesn't count for <em>Max. logs per cache</em>, and OpenSAK skips it when the file is imported again.</li>
+    </ul>
+    <p>Tags are not case sensitive, and text that is not a tag stays as typed. Most of them have the same names as in GSAK, so a template from GSAK works too. The info button next to <em>Waypoint name</em> lists them all:</p>
+    <table>
+      <thead><tr><th>Tag</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td><code>%code</code>, <code>%drop2</code>, <code>%gcid</code></td><td>GC code, the code without "GC", the geocaching.com cache number</td></tr>
+        <tr><td><code>%name</code>, <code>%by</code>, <code>%ownerName</code>, <code>%ownerID</code></td><td>Cache name, placed by, owner</td></tr>
+        <tr><td><code>%typ</code>, <code>%typ1</code>, <code>%con</code>, <code>%con1</code></td><td>Cache type and container, in full or as one letter</td></tr>
+        <tr><td><code>%dif</code>, <code>%ter</code>, <code>%dif1</code>, <code>%dif1a</code>, …</td><td>Difficulty and terrain, in full or as one character</td></tr>
+        <tr><td><code>%hint</code>, <code>%crypt</code></td><td>The hint, decoded or encoded</td></tr>
+        <tr><td><code>%state</code>, <code>%county</code>, <code>%country</code>, <code>%status</code></td><td>Location and Available / Unavailable / Archived</td></tr>
+        <tr><td><code>%found</code>, <code>%dnf</code>, <code>%flag</code>, <code>%correct</code>, <code>%bug</code></td><td>Y or N; <code>%found=*!</code> writes * or ! instead</td></tr>
+        <tr><td><code>%datepl</code>, <code>%datelf</code>, <code>%foundbyme</code>, <code>%LastLog</code>, <code>%LastFound</code></td><td>Placed, last found, found by me and last log dates (YYYY-MM-DD)</td></tr>
+        <tr><td><code>%FavPoints</code>, <code>%last4</code></td><td>Favourite points; the last four found (F) / not found (N) logs</td></tr>
+        <tr><td><code>%user</code> … <code>%user4</code>, <code>%UserNote</code>, <code>%UserSort</code></td><td>Your user data, user note and user sort</td></tr>
+        <tr><td><code>%lat</code>, <code>%lon</code></td><td>Coordinates; <code>=M</code> or <code>=S</code> for minutes or seconds</td></tr>
+        <tr><td><code>%dist</code>, <code>%database</code>, <code>%centre</code></td><td>Distance from the centre point, the database, the centre point</td></tr>
+        <tr><td><code>%caches_<em>field</em></code></td><td>Any other cache field (<code>%caches_FavPoints</code>) or a custom field, by its name; <code>={Yes|No}</code> for a true/false value</td></tr>
+        <tr><td><code>%notGC</code></td><td>Text before it applies to GC codes, text after it to all others</td></tr>
+      </tbody>
+    </table>
+    <p><code>%tag=nn</code> keeps the first <em>nn</em> characters of a text tag, e.g. <code>%typ=3</code>. Tags for smart names, macros, SQL, UTM coordinates and child waypoints (<code>%smart</code>, <code>%macro</code>, <code>%sqlite</code>, <code>%c_Name</code>, …) are not supported; a macro can pass a function to <code>opensak.export_gpx{}</code> instead.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->

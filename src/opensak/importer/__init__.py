@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
-from opensak.export.gpx_content import is_user_note_log, normalize_note
+from opensak.export.gpx_content import is_extra_info_log, is_user_note_log, normalize_note
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
@@ -441,6 +441,17 @@ def _parse_wpt(wpt_el, creator: Optional[str] = None) -> Optional[dict]:
     # <groundspeak:cache> block, so previously they slipped past this check,
     # were treated as caches, and crashed downstream when gs_cache was None.
     # They should fall through to _parse_extra_wpt() as ordinary waypoints.
+    # #454: with a waypoint name template an export writes its own <name>
+    # (e.g. "%drop2%con1"); gsak:Code still holds the cache's code, so a
+    # geocache is identified by it when the file has one.
+    if type_raw.startswith("Geocache"):
+        for gsak_uri in _GSAK_NAMESPACES:
+            gsak_code = (wpt_el.findtext(f".//{{{gsak_uri}}}wptExtension/{{{gsak_uri}}}Code")
+                         or "").strip()
+            if gsak_code:
+                gc_code = gsak_code
+                break
+
     if not gc_code.startswith("GC"):
         if not type_raw.startswith("Geocache"):
             return None
@@ -550,7 +561,9 @@ def _parse_wpt(wpt_el, creator: Optional[str] = None) -> Optional[dict]:
             log_text = text_el.text.strip() if text_el is not None and text_el.text else None
             encoded  = (text_el.get("encoded", "False").lower() == "true") if text_el is not None else False
 
-            if log_type:
+            # #454: the extra-info log of an OpenSAK export is not a log —
+            # left out here, so it never counts for found or log dates.
+            if log_type and not is_extra_info_log(log_id, finder):
                 logs.append({
                     "log_id":       log_id,
                     "log_type":     log_type,
