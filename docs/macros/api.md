@@ -2155,7 +2155,7 @@ if path then print(n .. " caches → " .. path) end
 opensak.export_gpx(spec)
 ```
 
-Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No).
+Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No). The content keys `children`, `children_only`, `max_logs`, `my_logs_always`, `user_note_log`, `version` and `max_counts` are the options of the export dialog (GPX/GGZ).
 
 Parameters:
 
@@ -2171,7 +2171,8 @@ Example:
 local path, n = opensak.export_gpx{
   path = opensak.temp_dir() .. "/{database}_{filter}.gpx",
   rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
-  pois = { child_waypoints = false },
+  children = "flagged", max_logs = 2, user_note_log = true,
+  max = 7000, max_counts = "waypoints",
 }
 if path then print(n .. " caches → " .. path) end
 ```
