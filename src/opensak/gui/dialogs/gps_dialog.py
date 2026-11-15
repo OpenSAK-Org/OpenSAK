@@ -90,12 +90,14 @@ class ExportWorker(QThread):
     def run(self) -> None:
         try:
             from opensak.db.database import iter_caches_full
-            from opensak.gps.garmin import is_mtp_device
+            from opensak.gps.garmin import gpx_bounds, is_mtp_device
             selected = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
             # #1075: reloaded and written a chunk at a time, so a large
             # export never holds every fully loaded cache in memory.
             caches = iter_caches_full(selected)
             total = len(selected)
+            # #700: the GPX <bounds>, needed before the first cache is written.
+            bounds = gpx_bounds(selected)
             cb = make_progress_cb(self.progress.emit, self.cancel)
 
             is_device = (
@@ -110,25 +112,25 @@ class ExportWorker(QThread):
                 from opensak.gps.garmin import export_ggz_to_device, export_ggz_to_file
                 if is_device:
                     result = export_ggz_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total, bounds=bounds,
                     )
                 else:
                     result = export_ggz_to_file(
                         caches,
                         self.device_path / f"{self.filename}.ggz",
-                        progress_cb=cb, total=total,
+                        progress_cb=cb, total=total, bounds=bounds,
                     )
             else:
                 from opensak.gps.garmin import export_to_device, export_to_file
                 if is_device:
                     result = export_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total, bounds=bounds,
                     )
                 else:
                     result = export_to_file(
                         caches,
                         self.device_path / f"{self.filename}.gpx",
-                        progress_cb=cb, total=total,
+                        progress_cb=cb, total=total, bounds=bounds,
                     )
 
             self.finished.emit(result)

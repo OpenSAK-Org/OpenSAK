@@ -11,10 +11,11 @@ def _build_caches(tmp_path):
     """
     Return a list of Cache ORM objects from the SAMPLE_GPX fixture.
 
-    user_note, logs, attributes, and waypoints are eagerly loaded so
-    objects remain usable after the session closes — generate_gpx()
-    accesses all four on detached instances (attributes since issue #656's
-    fix; waypoints since issue #753's child-waypoint export fix).
+    user_note, logs, attributes, waypoints and trackables are eagerly
+    loaded so objects remain usable after the session closes —
+    generate_gpx() accesses all five on detached instances (attributes
+    since issue #656's fix; waypoints since issue #753's child-waypoint
+    export fix; trackables since #700's travelbugs).
     """
     from opensak.db.database import init_db, get_session
     from opensak.importer import import_gpx
@@ -39,6 +40,7 @@ def _build_caches(tmp_path):
                 joinedload(Cache.logs),
                 selectinload(Cache.attributes),
                 selectinload(Cache.waypoints),
+                selectinload(Cache.trackables),
             )
             .all()
         )

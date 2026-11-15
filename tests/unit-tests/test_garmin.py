@@ -36,6 +36,7 @@ from opensak.gps.garmin import (
     generate_gpx,
     generate_loc,
     get_garmin_ggz_path,
+    gpx_bounds,
     get_garmin_gpx_path,
     is_mtp_device,
     write_ggz,
@@ -352,7 +353,7 @@ class TestGenerateGpx:
         gpx_tag_end = result.index(">")
         assert "groundspeak" not in result[:gpx_tag_end]
 
-    def test_custom_filename_in_metadata(self):
+    def test_custom_filename_in_header(self):
         result = generate_gpx([_cache()], filename="my_export")
         assert "my_export" in result
 
@@ -511,9 +512,10 @@ class TestGenerateGpx:
         )])
         assert 'groundspeak:short_description html="True"' in result
 
-    def test_short_description_absent_when_not_set(self):
+    def test_short_description_written_empty_when_not_set(self):
+        # #700: GSAK always writes it, as a single space when empty.
         result = generate_gpx([_cache(short_description=None)])
-        assert "groundspeak:short_description" not in result
+        assert '<groundspeak:short_description html="False"> </groundspeak:short_description>' in result
 
     def test_long_description_present_when_set(self):
         # Regression test for #656: long_description was not exported at all,
@@ -529,9 +531,10 @@ class TestGenerateGpx:
         )])
         assert 'groundspeak:long_description html="True"' in result
 
-    def test_long_description_absent_when_not_set(self):
-        result = generate_gpx([_cache(long_description=None)])
-        assert "groundspeak:long_description" not in result
+    def test_long_description_written_empty_when_not_set(self):
+        # #700: GSAK always writes it, as a single space when empty.
+        result = generate_gpx([_cache(long_description=None, long_desc_html=True)])
+        assert '<groundspeak:long_description html="False"> </groundspeak:long_description>' in result
 
     def test_attributes_present_when_set(self):
         # Regression test for #656: attributes were not exported at all.
@@ -555,8 +558,13 @@ class TestGenerateGpx:
         assert "Bicycles" in result
         assert "No dogs" in result
 
-    def test_attributes_absent_when_empty(self):
+    def test_attributes_written_empty_when_none(self):
+        # #700: GSAK always writes the element.
         result = generate_gpx([_cache(attributes=[])])
+        assert "<groundspeak:attributes></groundspeak:attributes>" in result
+
+    def test_attributes_option_off_leaves_element_out(self):
+        result = generate_gpx([_cache(attributes=[_attribute()])], attributes=False)
         assert "groundspeak:attributes" not in result
 
     def test_groundspeak_element_order_matches_cache_xsd(self):
@@ -639,12 +647,14 @@ class TestGenerateGpx:
         assert '60.000000' in result
         assert '20.000000' in result
 
-    def test_corrected_coords_store_original_in_comment(self):
+    def test_corrected_coords_write_no_cache_comment(self):
+        # #700: GSAK writes no <cmt> for a cache; the original coordinates
+        # belong in gsak:LatBeforeCorrect/LonBeforeCorrect (#1169).
         note = _note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0)
         c = _cache(latitude=55.0, longitude=12.0, user_note=note)
         result = generate_gpx([c])
-        assert "Original" in result
-        assert "55.000000" in result
+        assert "<cmt>" not in result
+        assert "Corrected coordinates used" not in result
 
     def test_use_corrected_false_exports_original_coords(self):
         note = _note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0)
@@ -777,11 +787,10 @@ class TestChildWaypointExport:
         ])])
         assert "<url>https://www.geocaching.com/seek/wpt.aspx?WID=abc123</url>" in result
 
-    def test_child_waypoint_url_omitted_when_absent(self):
-        # GPX-sourced waypoints don't carry a URL (only GSAK-imported ones
-        # might) — must not emit an empty <url/> element.
+    def test_child_waypoint_url_written_empty_when_absent(self):
+        # #700: GSAK always writes <url> on a child, empty when unknown.
         result = generate_gpx([_cache(waypoints=[_child_wpt(url=None)])])
-        assert "<url></url>" not in result
+        assert "<url></url>" in result
         assert "<url />" not in result
 
     def test_child_waypoint_urlname_falls_back_to_reconstructed_name(self):
@@ -1297,7 +1306,8 @@ class TestStreamingWriters:
     def test_write_gpx_matches_generate_gpx_from_a_generator(self):
         caches = self._caches()
         buf = io.StringIO()
-        count = write_gpx(buf, (c for c in caches), total=len(caches))
+        count = write_gpx(buf, (c for c in caches), total=len(caches),
+                          bounds=gpx_bounds(caches))
         assert count == 2
         assert _no_time(buf.getvalue()) == _no_time(generate_gpx(caches))
         ET.fromstring(buf.getvalue().split("\n", 1)[1])  # well-formed

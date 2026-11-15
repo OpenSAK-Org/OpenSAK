@@ -66,7 +66,7 @@ def write_export_file(
     replaces it only once complete, so a failed export never leaves a
     truncated file behind.
     """
-    from opensak.gps.garmin import write_gpx, write_loc, write_ggz
+    from opensak.gps.garmin import gpx_bounds, write_gpx, write_loc, write_ggz
     from opensak.db.database import iter_caches_full
 
     if fmt not in EXPORT_FORMATS:
@@ -84,18 +84,21 @@ def write_export_file(
         return len([c for c in caches if c.latitude is not None])
 
     def _write(out) -> int:
+        if fmt == "loc":
+            return write_loc(out, full, progress_cb=progress_cb,
+                             use_corrected=use_corrected, text=text, total=len(caches))
+        # #700: <bounds> comes before the first cache, so it is computed
+        # from the selection up front, not from the streamed caches.
+        bounds = gpx_bounds(caches, use_corrected, child_waypoints)
         if fmt == "gpx":
             return write_gpx(out, full, output_path.stem, progress_cb=progress_cb,
                              use_corrected=use_corrected, text=text,
                              attributes=attributes, child_waypoints=child_waypoints,
-                             total=len(caches))
-        if fmt == "loc":
-            return write_loc(out, full, progress_cb=progress_cb,
-                             use_corrected=use_corrected, text=text, total=len(caches))
+                             total=len(caches), bounds=bounds)
         return write_ggz(out, full, output_path.stem, progress_cb=progress_cb,
                          use_corrected=use_corrected, text=text,
                          attributes=attributes, child_waypoints=child_waypoints,
-                         total=len(caches))
+                         total=len(caches), bounds=bounds)
 
     return save(output_path, _write, fmt == "ggz")
 

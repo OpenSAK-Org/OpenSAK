@@ -1709,6 +1709,8 @@ def iter_caches_full(caches: list) -> Iterator:
                         selectinload(Cache.logs),
                         selectinload(Cache.waypoints),
                         selectinload(Cache.attributes),
+                        # #700: GPX/GGZ write groundspeak:travelbugs.
+                        selectinload(Cache.trackables),
                         joinedload(Cache.user_note),
                         undefer(Cache.short_description),
                         undefer(Cache.long_description),
@@ -1720,6 +1722,92 @@ def iter_caches_full(caches: list) -> Iterator:
                 by_id.update((c.id, c) for c in rows)
         for c in chunk:
             yield by_id.get(c.id, c) if isinstance(c, reloadable) else c
+
+
+def is_db_cache(cache) -> bool:
+    """True if *cache* is a row of the active database (a Cache or a
+    LightweightCache with an id), as opposed to a stand-in object."""
+    from opensak.db.models import Cache
+    from opensak.filters.engine import LightweightCache
+
+    return isinstance(cache, (Cache, LightweightCache)) and cache.id is not None
+
+
+def export_bounds(
+    cache_ids: list[int], use_corrected: bool = True, child_waypoints: bool = True,
+) -> tuple[float, float, float, float] | None:
+    """(minlat, minlon, maxlat, maxlon) over the caches with *cache_ids*
+    that have coordinates, each at its export position (the corrected
+    coordinates when *use_corrected* and set, as gps.garmin's
+    _effective_coords()), plus, with *child_waypoints*, their child
+    waypoints that have coordinates. None if there is nothing. Points at
+    exactly 0/0 (GSAK's "no coordinates" placeholder) are left out, as in
+    gps.garmin's gpx_bounds().
+
+    #700: the GPX <bounds> must be written before the first <wpt>, while
+    the caches are only loaded in full as they are written (#1075), so the
+    bounds come from the database up front. Chunked like iter_caches_full()
+    (#1041).
+    """
+    from typing import Any
+    from sqlalchemy import and_, case, func, or_
+    from opensak.db.models import Cache, UserNote, Waypoint
+
+    box: tuple[float, float, float, float] | None = None
+    lat: Any = Cache.latitude
+    lon: Any = Cache.longitude
+    if use_corrected:
+        corrected = and_(
+            UserNote.is_corrected.is_(True),
+            UserNote.corrected_lat.isnot(None),
+            UserNote.corrected_lon.isnot(None),
+        )
+        lat = case((corrected, UserNote.corrected_lat), else_=Cache.latitude)
+        lon = case((corrected, UserNote.corrected_lon), else_=Cache.longitude)
+
+    with get_session() as session:
+        for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
+            chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
+            rows = [
+                session.query(func.min(lat), func.min(lon), func.max(lat), func.max(lon))
+                .select_from(Cache)
+                .outerjoin(UserNote, UserNote.cache_id == Cache.id)
+                .filter(
+                    Cache.id.in_(chunk),
+                    Cache.latitude.isnot(None),
+                    Cache.longitude.isnot(None),
+                    or_(lat != 0, lon != 0),
+                )
+                .one()
+            ]
+            if child_waypoints:
+                rows.append(
+                    session.query(
+                        func.min(Waypoint.latitude), func.min(Waypoint.longitude),
+                        func.max(Waypoint.latitude), func.max(Waypoint.longitude),
+                    )
+                    .join(Cache, Cache.id == Waypoint.cache_id)
+                    .filter(
+                        Waypoint.cache_id.in_(chunk),
+                        Waypoint.latitude.isnot(None),
+                        Waypoint.longitude.isnot(None),
+                        or_(Waypoint.latitude != 0, Waypoint.longitude != 0),
+                        # A cache without coordinates isn't exported, nor
+                        # are its children.
+                        Cache.latitude.isnot(None),
+                        Cache.longitude.isnot(None),
+                    )
+                    .one()
+                )
+            for row in rows:
+                if row[0] is None:
+                    continue
+                if box is None:
+                    box = (row[0], row[1], row[2], row[3])
+                else:
+                    box = (min(box[0], row[0]), min(box[1], row[1]),
+                           max(box[2], row[2]), max(box[3], row[3]))
+    return box
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────

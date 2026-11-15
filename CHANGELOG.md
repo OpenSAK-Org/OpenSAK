@@ -4,6 +4,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.5] — Unreleased
+
+### Changed
+
+- **GPX/GGZ export follows GSAK's file structure (#700)** — the header
+  is GPX 1.0's own (`desc`, `author`, `time`, `keywords`, `bounds`)
+  instead of a 1.1 `<metadata>` element that made the file invalid GPX
+  1.0. Caches get `<ele>`, `<desc>` "Name by Owner (D/T)" and
+  `<urlname>`, in GSAK's element order; hints, descriptions, attributes,
+  logs and travel bugs (now exported) are always written, empty where
+  there is nothing. Child waypoints keep their original code as
+  `<name>`. The GPX import now keeps a travel bug's `id`, so travel bugs
+  survive an export and re-import. Contributed by nagisml.
+
+---
+
 ## [1.23.0-beta.4] — 2026-11-13
 
 > Headline: **Cancel for long jobs.** Imports, exports, Send to GPS and
