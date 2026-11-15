@@ -35,8 +35,9 @@ from opensak.export.file_export_settings import (
     expand_file_name,
 )
 from opensak.export.file_export import (
-    active_database_name, select_for_export, write_export_file,
+    active_database_name, select_for_export, wpt_counts, write_export_file,
 )
+from opensak.export.gpx_content import DEFAULT_CONTENT, GpxContent
 
 
 class _ElidedLabel(QLabel):
@@ -214,13 +215,15 @@ class _ExportWorker(QThread):
     cancelled = Signal()           # stopped by cancel; no file was written
 
     def __init__(self, caches: list, output_path: Path, fmt: str,
-                 use_corrected: bool = True):
+                 use_corrected: bool = True,
+                 content: GpxContent = DEFAULT_CONTENT):
         super().__init__()
         self._caches        = caches
         self._output_path   = output_path
         self._fmt           = fmt          # "gpx" | "loc" | "ggz"
         self._use_corrected = use_corrected
         self.cancel         = CancelFlag()
+        self._content       = content      # #775 GPX/GGZ content options
 
     def run(self) -> None:
         try:
@@ -228,6 +231,7 @@ class _ExportWorker(QThread):
                 self._caches, self._output_path, self._fmt,
                 use_corrected=self._use_corrected,
                 progress_cb=make_progress_cb(self.progress.emit, self.cancel),
+                content=self._content,
             )
             self.finished.emit(
                 tr("file_export_done_msg").format(
@@ -257,6 +261,10 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._center_name = center_name   # active centre point ("" = none)
         self._worker: _ExportWorker | None = None
         self._output_path = ""
+        # #775: <wpt> counts per cache for the "waypoints" record limit,
+        # by (format, children, children_only) — counting queries the
+        # database, and the file name preview asks on every change.
+        self._wpt_counts: dict[tuple, list[int]] = {}
         self._setup_ui()
         self._apply_settings(FileExportProfile.load_last_used())
 
@@ -334,12 +342,30 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._spin_max.setRange(0, 1_000_000)
         self._spin_max.setSpecialValueText(tr("file_export_max_records_all"))
         self._spin_max.setToolTip(tr("file_export_max_records_tip"))
-        opt_layout.addRow(tr("file_export_max_records"), self._spin_max)
+        max_row = QHBoxLayout()
+        max_row.addWidget(self._spin_max)
+        # #775: what the limit counts — caches, or every <wpt> (GSAK).
+        self._combo_max_counts = QComboBox()
+        self._combo_max_counts.addItem(tr("file_export_max_counts_caches"), "caches")
+        self._combo_max_counts.addItem(tr("file_export_max_counts_waypoints"), "waypoints")
+        self._combo_max_counts.setToolTip(tr("file_export_max_counts_tip"))
+        max_row.addWidget(self._combo_max_counts, 1)
+        opt_layout.addRow(tr("file_export_max_records"), max_row)
+        layout.addWidget(opt_group)
+
+        # #775: what a GPX/GGZ file contains per cache.
+        layout.addWidget(self._build_content_group())
+
         self._edit_folder.textChanged.connect(self._update_file_name_preview)
         self._edit_file_name.textChanged.connect(self._update_file_name_preview)
         self._fmt_grp.buttonToggled.connect(self._update_file_name_preview)
+        self._fmt_grp.buttonToggled.connect(self._update_content_state)
         self._spin_max.valueChanged.connect(self._update_file_name_preview)
-        layout.addWidget(opt_group)
+        self._combo_max_counts.currentIndexChanged.connect(self._update_file_name_preview)
+        self._combo_children.currentIndexChanged.connect(self._update_file_name_preview)
+        self._combo_children.currentIndexChanged.connect(self._update_content_state)
+        self._chk_children_only.toggled.connect(self._update_file_name_preview)
+        self._spin_max_logs.valueChanged.connect(self._update_content_state)
 
         # Saved settings
         layout.addWidget(self._build_settings_group())
@@ -371,6 +397,79 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         btn_row.addWidget(self._btn_close)
         layout.addLayout(btn_row)
 
+    def _build_content_group(self) -> QGroupBox:
+        """#775: child waypoints, logs, user note log and GPX version."""
+        group = QGroupBox(tr("file_export_content_group"))
+        form = QFormLayout(group)
+        self._combo_children = QComboBox()
+        for value, key in (
+            ("all", "file_export_max_records_all"),
+            ("flagged", "file_export_children_flagged"),
+            ("unflagged", "file_export_children_unflagged"),
+            ("none", "file_export_children_none"),
+        ):
+            self._combo_children.addItem(tr(key), value)
+        form.addRow(tr("file_export_children"), self._combo_children)
+        self._chk_children_only = QCheckBox(tr("file_export_children_only"))
+        self._chk_children_only.setToolTip(tr("file_export_children_only_tip"))
+        form.addRow(self._chk_children_only)
+        self._spin_max_logs = QSpinBox()
+        self._spin_max_logs.setRange(0, 10_000)
+        self._spin_max_logs.setSpecialValueText(tr("file_export_max_records_all"))
+        self._spin_max_logs.setToolTip(tr("file_export_max_logs_tip"))
+        form.addRow(tr("file_export_max_logs"), self._spin_max_logs)
+        self._chk_my_logs = QCheckBox(tr("file_export_my_logs_always"))
+        self._chk_my_logs.setToolTip(tr("file_export_my_logs_always_tip"))
+        form.addRow(self._chk_my_logs)
+        self._chk_user_note_log = QCheckBox(tr("file_export_user_note_log"))
+        self._chk_user_note_log.setToolTip(tr("file_export_user_note_log_tip"))
+        form.addRow(self._chk_user_note_log)
+        self._combo_gpx_version = QComboBox()
+        self._combo_gpx_version.addItem("GPX 1.0", "1.0")  # i18n: ignore — format name
+        self._combo_gpx_version.addItem("GPX 1.1", "1.1")  # i18n: ignore — format name
+        self._combo_gpx_version.setToolTip(tr("file_export_gpx_version_tip"))
+        form.addRow(tr("file_export_gpx_version"), self._combo_gpx_version)
+        self._content_group = group
+        return group
+
+    def _update_content_state(self, *_args) -> None:
+        """Enable the content options that apply to the format: none for
+        LOC; for GGZ everything but "children only" (its index needs the
+        caches)."""
+        fmt = self._current_fmt()
+        self._content_group.setEnabled(fmt != "loc")
+        has_children = self._combo_children.currentData() != "none"
+        self._chk_children_only.setEnabled(fmt == "gpx" and has_children)
+        self._chk_my_logs.setEnabled(self._spin_max_logs.value() > 0)
+
+    def _content(self) -> GpxContent:
+        """The content options as set in the dialog."""
+        return GpxContent(
+            children=self._combo_children.currentData(),
+            children_only=self._chk_children_only.isChecked(),
+            max_logs=self._spin_max_logs.value(),
+            my_logs_always=self._chk_my_logs.isChecked(),
+            user_note_log=self._chk_user_note_log.isChecked(),
+            version=self._combo_gpx_version.currentData(),
+        )
+
+    def _select(self) -> list:
+        """The caches the export writes with the current options."""
+        fmt = self._current_fmt()
+        max_counts = self._combo_max_counts.currentData()
+        content = self._content()
+        counts = None
+        if max_counts == "waypoints" and self._spin_max.value():
+            effective = content.for_format(fmt)
+            key = (fmt, effective.children, effective.children_only)
+            if key not in self._wpt_counts:
+                with_coords = [c for c in self._caches if c.latitude is not None]
+                self._wpt_counts[key] = wpt_counts(with_coords, fmt, content)
+            counts = self._wpt_counts[key]
+        return select_for_export(
+            self._caches, self._spin_max.value(), max_counts, fmt, content, counts,
+        )
+
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def _collect_settings(self) -> FileExportSettings:
@@ -382,6 +481,13 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             file_name=self._edit_file_name.text().strip(),
             folder=self._edit_folder.text().strip(),
             if_exists=self._combo_if_exists.currentData(),
+            max_counts=self._combo_max_counts.currentData(),
+            children=self._combo_children.currentData(),
+            children_only=self._chk_children_only.isChecked(),
+            max_logs=self._spin_max_logs.value(),
+            my_logs_always=self._chk_my_logs.isChecked(),
+            user_note_log=self._chk_user_note_log.isChecked(),
+            gpx_version=self._combo_gpx_version.currentData(),
         )
 
     def _apply_settings(self, settings: FileExportSettings) -> None:
@@ -398,6 +504,17 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
             max(0, self._combo_if_exists.findData(settings.if_exists))
         )
         self._edit_file_name.setText(settings.file_name)
+        for combo, value in (
+            (self._combo_max_counts, settings.max_counts),
+            (self._combo_children, settings.children),
+            (self._combo_gpx_version, settings.gpx_version),
+        ):
+            combo.setCurrentIndex(max(0, combo.findData(value)))
+        self._chk_children_only.setChecked(settings.children_only)
+        self._spin_max_logs.setValue(settings.max_logs)
+        self._chk_my_logs.setChecked(settings.my_logs_always)
+        self._chk_user_note_log.setChecked(settings.user_note_log)
+        self._update_content_state()
         self._update_file_name_preview()
 
     # ── File name ─────────────────────────────────────────────────────────────
@@ -409,7 +526,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
 
     def _export_count(self) -> int:
         """Number of caches the export will write (with the record limit)."""
-        return len(select_for_export(self._caches, self._spin_max.value()))
+        return len(self._select())
 
     def _expanded_file_name(self) -> str:
         """File name (with extension) the template currently stands for."""
@@ -501,11 +618,12 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._set_running(True)
 
         # Only caches with coordinates are exported, so the limit counts those.
-        caches = select_for_export(self._caches, self._spin_max.value())
+        caches = self._select()
 
         self._worker = _ExportWorker(
             caches, output_path, fmt,
             use_corrected=self._chk_corrected.isChecked(),
+            content=self._content(),
         )
         self._worker.finished.connect(self._on_success)
         self._worker.error.connect(self._on_error)

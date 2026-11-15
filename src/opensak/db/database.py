@@ -1733,8 +1733,22 @@ def is_db_cache(cache) -> bool:
     return isinstance(cache, (Cache, LightweightCache)) and cache.id is not None
 
 
+def _child_filter(children: str) -> list:
+    """SQL conditions selecting the child waypoints an export writes for
+    the #775 children choice ("all", "flagged", "unflagged"; see
+    export.gpx_content.GpxContent.wants_child())."""
+    from opensak.db.models import Waypoint
+
+    if children == "flagged":
+        return [Waypoint.wp_flag.is_(True)]
+    if children == "unflagged":
+        return [Waypoint.wp_flag.isnot(True)]
+    return []
+
+
 def export_bounds(
     cache_ids: list[int], use_corrected: bool = True, child_waypoints: bool = True,
+    children: str = "all", caches: bool = True,
 ) -> tuple[float, float, float, float] | None:
     """(minlat, minlon, maxlat, maxlon) over the caches with *cache_ids*
     that have coordinates, each at its export position (the corrected
@@ -1742,7 +1756,10 @@ def export_bounds(
     _effective_coords()), plus, with *child_waypoints*, their child
     waypoints that have coordinates. None if there is nothing. Points at
     exactly 0/0 (GSAK's "no coordinates" placeholder) are left out, as in
-    gps.garmin's gpx_bounds().
+    gps.garmin's gpx_bounds(). #775: *children* limits the child waypoints
+    to the flagged or unflagged ones ("none" leaves them out), and
+    *caches*=False leaves the caches' own points out (an export of the
+    child waypoints only).
 
     #700: the GPX <bounds> must be written before the first <wpt>, while
     the caches are only loaded in full as they are written (#1075), so the
@@ -1765,21 +1782,25 @@ def export_bounds(
         lat = case((corrected, UserNote.corrected_lat), else_=Cache.latitude)
         lon = case((corrected, UserNote.corrected_lon), else_=Cache.longitude)
 
+    if children == "none":
+        child_waypoints = False
     with get_session() as session:
         for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
             chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
-            rows = [
-                session.query(func.min(lat), func.min(lon), func.max(lat), func.max(lon))
-                .select_from(Cache)
-                .outerjoin(UserNote, UserNote.cache_id == Cache.id)
-                .filter(
-                    Cache.id.in_(chunk),
-                    Cache.latitude.isnot(None),
-                    Cache.longitude.isnot(None),
-                    or_(lat != 0, lon != 0),
+            rows = []
+            if caches:
+                rows.append(
+                    session.query(func.min(lat), func.min(lon), func.max(lat), func.max(lon))
+                    .select_from(Cache)
+                    .outerjoin(UserNote, UserNote.cache_id == Cache.id)
+                    .filter(
+                        Cache.id.in_(chunk),
+                        Cache.latitude.isnot(None),
+                        Cache.longitude.isnot(None),
+                        or_(lat != 0, lon != 0),
+                    )
+                    .one()
                 )
-                .one()
-            ]
             if child_waypoints:
                 rows.append(
                     session.query(
@@ -1796,6 +1817,7 @@ def export_bounds(
                         # are its children.
                         Cache.latitude.isnot(None),
                         Cache.longitude.isnot(None),
+                        *_child_filter(children),
                     )
                     .one()
                 )
@@ -1808,6 +1830,38 @@ def export_bounds(
                     box = (min(box[0], row[0]), min(box[1], row[1]),
                            max(box[2], row[2]), max(box[3], row[3]))
     return box
+
+
+def export_child_counts(cache_ids: list[int], children: str = "all") -> dict[int, int]:
+    """cache id → the number of child waypoints an export writes for it:
+    those with coordinates that pass the #775 *children* choice. Caches
+    without such children are left out. Chunked like export_bounds().
+
+    #775: an export limit that counts waypoints (GSAK's "max waypoints")
+    needs each cache's number of children before the export starts.
+    """
+    from sqlalchemy import func
+    from opensak.db.models import Waypoint
+
+    counts: dict[int, int] = {}
+    if children == "none":
+        return counts
+    with get_session() as session:
+        for start in range(0, len(cache_ids), RELOAD_CHUNK_SIZE):
+            chunk = cache_ids[start:start + RELOAD_CHUNK_SIZE]
+            rows = (
+                session.query(Waypoint.cache_id, func.count(Waypoint.id))
+                .filter(
+                    Waypoint.cache_id.in_(chunk),
+                    Waypoint.latitude.isnot(None),
+                    Waypoint.longitude.isnot(None),
+                    *_child_filter(children),
+                )
+                .group_by(Waypoint.cache_id)
+                .all()
+            )
+            counts.update({cache_id: n for cache_id, n in rows})
+    return counts
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────

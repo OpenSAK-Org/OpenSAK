@@ -23,6 +23,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from opensak.export.gpx_content import (
+    CHILDREN_CHOICES, GPX_VERSIONS, MAX_COUNTS_CHOICES, GpxContent,
+)
+
 EXPORT_FORMATS = ("gpx", "loc", "ggz")
 
 # What the export does when the target file already exists.
@@ -63,6 +67,27 @@ class FileExportSettings:
     file_name: str = ""
     folder: str = ""          # folder the export is written to ("" = ask)
     if_exists: str = "ask"    # "overwrite" | "ask" | "skip"
+    # #775: what max_records counts — "caches", or "waypoints" (each cache
+    # plus its children, as GSAK's "max waypoints").
+    max_counts: str = "caches"
+    # #775: GPX/GGZ content, see opensak.export.gpx_content.GpxContent.
+    children: str = "all"        # "all" | "flagged" | "unflagged" | "none"
+    children_only: bool = False  # child waypoints without their caches (GPX)
+    max_logs: int = 0            # logs per cache, newest first (0 = all)
+    my_logs_always: bool = False # own logs on top of max_logs
+    user_note_log: bool = False  # user note as a synthetic first log
+    gpx_version: str = "1.0"     # "1.0" | "1.1" (GPX and the GPX inside a GGZ)
+
+    def content(self) -> GpxContent:
+        """The GPX/GGZ content options of these settings."""
+        return GpxContent(
+            children=self.children,
+            children_only=self.children_only,
+            max_logs=self.max_logs,
+            my_logs_always=self.my_logs_always,
+            user_note_log=self.user_note_log,
+            version=self.gpx_version,
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +98,13 @@ class FileExportSettings:
             "file_name": self.file_name,
             "folder": self.folder,
             "if_exists": self.if_exists,
+            "max_counts": self.max_counts,
+            "children": self.children,
+            "children_only": self.children_only,
+            "max_logs": self.max_logs,
+            "my_logs_always": self.my_logs_always,
+            "user_note_log": self.user_note_log,
+            "gpx_version": self.gpx_version,
         }
 
     @classmethod
@@ -103,6 +135,19 @@ class FileExportSettings:
         if_exists = data.get("if_exists", defaults.if_exists)
         if if_exists not in IF_EXISTS_CHOICES:
             if_exists = defaults.if_exists
+
+        def _choice(key: str, choices: tuple) -> Any:
+            value = data.get(key, getattr(defaults, key))
+            return value if value in choices else getattr(defaults, key)
+
+        def _flag(key: str) -> bool:
+            value = data.get(key, getattr(defaults, key))
+            return value if isinstance(value, bool) else getattr(defaults, key)
+
+        max_logs = data.get("max_logs", defaults.max_logs)
+        if (not isinstance(max_logs, int) or isinstance(max_logs, bool)
+                or max_logs < 0):
+            max_logs = defaults.max_logs
         return cls(
             fmt=fmt,
             output_path=output_path,
@@ -111,6 +156,13 @@ class FileExportSettings:
             file_name=file_name,
             folder=folder,
             if_exists=if_exists,
+            max_counts=_choice("max_counts", MAX_COUNTS_CHOICES),
+            children=_choice("children", CHILDREN_CHOICES),
+            children_only=_flag("children_only"),
+            max_logs=max_logs,
+            my_logs_always=_flag("my_logs_always"),
+            user_note_log=_flag("user_note_log"),
+            gpx_version=_choice("gpx_version", GPX_VERSIONS),
         )
 
 

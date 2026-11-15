@@ -24,6 +24,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional, Sized, cast
 
 from opensak.export.cache_text import NO_TEXT, ExportText
+from opensak.export.gpx_content import (
+    DEFAULT_CONTENT, USER_NOTE_LOG_FINDER, USER_NOTE_LOG_FINDER_ID, USER_NOTE_LOG_ID,
+    USER_NOTE_LOG_TYPE, GpxContent, my_log_matcher, normalize_note, user_note_log_date,
+)
 from opensak.lang import tr
 from opensak.utils.constants import CUSTOM_WP_TYPES
 
@@ -604,14 +608,15 @@ _GPX_SCHEMA_LOCATION = (
 
 def gpx_bounds(
     caches: Iterable, use_corrected: bool = True, child_waypoints: bool = True,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> Optional[Bounds]:
     """The GPX <bounds> of an export of *caches*: (minlat, minlon, maxlat,
     maxlon) over every <wpt> _gpx_chunks() writes for them, i.e. each cache
-    at its export position and, with *child_waypoints*, its child
-    waypoints. None when no <wpt> would be written. A point at exactly
-    0/0 — GSAK's placeholder for a child waypoint without coordinates — is
-    written but left out, as GSAK does, so it doesn't stretch the box to
-    the equator.
+    at its export position (unless *content* writes children only) and,
+    with *child_waypoints*, the child waypoints *content* writes. None when
+    no <wpt> would be written. A point at exactly 0/0 — GSAK's placeholder
+    for a child waypoint without coordinates — is written but left out, as
+    GSAK does, so it doesn't stretch the box to the equator.
 
     #700: GSAK writes <bounds> before the first <wpt>, but the export is
     streamed (#1075), so the bounds are computed up front without loading
@@ -621,6 +626,8 @@ def gpx_bounds(
     """
     from opensak.db.database import export_bounds, is_db_cache
 
+    with_children = child_waypoints and content.writes_children()
+    with_caches = not content.children_only
     box: Optional[Bounds] = None
 
     def _add(lat: float, lon: float) -> None:
@@ -640,14 +647,15 @@ def gpx_bounds(
             continue
         if cache.latitude is None or cache.longitude is None:
             continue
-        _add(*_effective_coords(cache, use_corrected))
-        if not child_waypoints:
+        if with_caches:
+            _add(*_effective_coords(cache, use_corrected))
+        if not with_children:
             continue
-        for wp in getattr(cache, "waypoints", None) or []:
-            if wp.latitude is not None and wp.longitude is not None:
-                _add(wp.latitude, wp.longitude)
+        for wp in content.child_waypoints(cache):
+            _add(wp.latitude, wp.longitude)
     if db_ids:
-        db_box = export_bounds(db_ids, use_corrected, child_waypoints)
+        db_box = export_bounds(db_ids, use_corrected, with_children,
+                               children=content.children, caches=with_caches)
         if db_box is not None:
             _add(db_box[0], db_box[1])
             _add(db_box[2], db_box[3])
@@ -660,6 +668,7 @@ def generate_gpx(
     text: ExportText = NO_TEXT,
     attributes: bool = True,
     child_waypoints: bool = True,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> str:
     """
     Generer GPX indhold fra en liste af Cache objekter.
@@ -672,7 +681,8 @@ def generate_gpx(
     buf = io.StringIO()
     write_gpx(buf, caches, filename, progress_cb=progress_cb,
               use_corrected=use_corrected, text=text,
-              attributes=attributes, child_waypoints=child_waypoints)
+              attributes=attributes, child_waypoints=child_waypoints,
+              content=content)
     return buf.getvalue()
 
 
@@ -684,6 +694,7 @@ def write_gpx(
     child_waypoints: bool = True,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> int:
     """Write the GPX for *caches* to the text stream *out*, one cache at a
     time (#1075: building the whole document as one string ran out of memory
@@ -693,14 +704,15 @@ def write_gpx(
     count passed to progress_cb and defaults to len(caches). *bounds* is
     the GPX <bounds> (see gpx_bounds()): computed here when *caches* is a
     list, so a caller that streams an iterator passes it, or the file has
-    no <bounds>. Returns the number of caches written.
+    no <bounds>. *content* holds the #775 options (children, logs, user
+    note log, GPX version). Returns the number of caches written.
     """
     if bounds is None and isinstance(caches, Sized):
-        bounds = gpx_bounds(caches, use_corrected, child_waypoints)
+        bounds = gpx_bounds(caches, use_corrected, child_waypoints, content)
     count = 0
     for chunk, cache in _gpx_chunks(
         caches, filename, progress_cb, use_corrected, text,
-        attributes, child_waypoints, total, bounds,
+        attributes, child_waypoints, total, bounds, content,
     ):
         out.write(chunk)
         if cache is not None:
@@ -747,11 +759,20 @@ def _gpx_chunks(
     caches: Iterable, filename: str, progress_cb, use_corrected: bool,
     text: ExportText, attributes: bool, child_waypoints: bool,
     total: Optional[int], bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> Iterator[tuple[str, Any]]:
     """
     Yield the GPX document as (text, cache) pieces. *cache* is set only on
     the piece holding that cache's own <wpt> element (GGZ needs its byte
-    offset); every other piece has None.
+    offset) — or, when *content* writes children only, on the first child
+    of each cache that has one, so the caller can count them; every other
+    piece has None.
+
+    *content* (#775) chooses the child waypoints (all, flagged, unflagged,
+    none; or only the children, without their caches), cuts the logs to
+    max_logs per cache (newest first; the user's own logs kept on top with
+    my_logs_always), adds the user note as a synthetic first log, and
+    writes GPX 1.1 instead of 1.0 (see _to_gpx_1_1()).
 
     The file follows GSAK's own GPX 1.0 export (#700): the header elements
     (desc, author, time, keywords, bounds) sit directly under <gpx> — the
@@ -777,40 +798,61 @@ def _gpx_chunks(
     from xml.etree.ElementTree import Element, SubElement
     from datetime import datetime, timezone
 
-    # Root element — GPX 1.0, matching GSAK's own export format. The
+    gpx_1_1 = content.version == "1.1"
+    with_children = child_waypoints and content.writes_children()
+    with_caches = not content.children_only
+    # #775: the user's own logs, kept on top of the log limit.
+    is_mine = (
+        my_log_matcher() if content.my_logs_always and content.max_logs else None
+    )
+
+    # Root element. GPX 1.0 matches GSAK's own export format. The
     # groundspeak namespace is deliberately NOT declared here; it's declared
     # locally on each <groundspeak:cache> element instead (see below),
     # mirroring GSAK's exact convention.
+    gpx_ns = _GPX_1_1_NS if gpx_1_1 else "http://www.topografix.com/GPX/1/0"
     yield (
         '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<gpx version="1.0" creator="OpenSAK"'
-        ' xmlns="http://www.topografix.com/GPX/1/0"'
+        f'<gpx version="{content.version}" creator="OpenSAK"'
+        f' xmlns="{gpx_ns}"'
         ' xmlns:gsak="http://www.gsak.net/xmlv1/6"'
         ' xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
         ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
-        f' xsi:schemaLocation="{_GPX_SCHEMA_LOCATION}">'
+        f' xsi:schemaLocation="{_GPX_1_1_SCHEMA_LOCATION if gpx_1_1 else _GPX_SCHEMA_LOCATION}">'
     ), None
 
-    # Header, in GPX 1.0 order. GSAK has no <name>; it is kept for the file
-    # name, which GPX 1.0 allows first. "(HasChildren)" is how GSAK marks a
-    # file written with child waypoints.
+    # Header. GSAK has no <name>; it is kept for the file name, which GPX
+    # allows first. "(HasChildren)" is how GSAK marks a file written with
+    # child waypoints. GPX 1.0 has these directly under <gpx>; GPX 1.1 in
+    # <metadata>, with the author as <author><name>.
     header = [
         ("name", filename),
         ("desc", "Geocache file generated by OpenSAK"
-                 + (" (HasChildren)" if child_waypoints else "")),
+                 + (" (HasChildren)" if with_children else "")),
         ("author", "OpenSAK"),
         ("time", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
         ("keywords", "cache, geocache, groundspeak"),
     ]
+    header_els = []
     for tag, value in header:
         el = Element(tag)
-        el.text = value
-        yield "\n  " + _xml_chunk(el, 1), None
+        if gpx_1_1 and tag == "author":
+            SubElement(el, "name").text = value
+        else:
+            el.text = value
+        header_els.append(el)
     if bounds is not None:
         bounds_el = Element("bounds")
         for key, coord in zip(("minlat", "minlon", "maxlat", "maxlon"), bounds):
             bounds_el.set(key, f"{coord:.6f}")
-        yield "\n  " + _xml_chunk(bounds_el, 1), None
+        header_els.append(bounds_el)
+    if gpx_1_1:
+        metadata = Element("metadata")
+        metadata.extend(header_els)
+        yield "\n  " + _xml_chunk(metadata, 1), None
+    else:
+        for el in header_els:
+            yield "\n  " + _xml_chunk(el, 1), None
 
     if total is None:
         total = len(cast(Sized, caches))
@@ -996,16 +1038,29 @@ def _gpx_chunks(
 
             # Logs (issue #656 follow-up — previously hardcoded to only the
             # last 5, unlike GC.com/GSAK which include the full history.
-            # Export all logs; sorted newest-first to match GC.com/GSAK
-            # ordering.) #700: always written, empty without logs, like GSAK.
+            # All logs by default, sorted newest-first to match GC.com/GSAK
+            # ordering; #775: cut to max_logs, the user's own kept with
+            # my_logs_always.) #700: always written, empty without logs,
+            # like GSAK.
             gs_logs = SubElement(gs_cache, "groundspeak:logs")
+            # #775: the user note as a synthetic first log, as GSAK writes
+            # it ("Include user notes"). Not counted against max_logs; the
+            # importer recognises it and doesn't store it as a log.
+            note_log_text = normalize_note(note_text) if content.user_note_log else ""
+            if note_log_text:
+                gs_log = SubElement(gs_logs, "groundspeak:log")
+                gs_log.set("id", USER_NOTE_LOG_ID)
+                SubElement(gs_log, "groundspeak:date").text = user_note_log_date(
+                    getattr(note, "updated_at", None))
+                SubElement(gs_log, "groundspeak:type").text = USER_NOTE_LOG_TYPE
+                gs_finder = SubElement(gs_log, "groundspeak:finder")
+                gs_finder.set("id", USER_NOTE_LOG_FINDER_ID)
+                gs_finder.text = USER_NOTE_LOG_FINDER
+                gs_text = SubElement(gs_log, "groundspeak:text")
+                gs_text.set("encoded", "False")
+                gs_text.text = note_log_text
             if cache.logs:
-                _min_dt = datetime.min.replace(tzinfo=timezone.utc)
-                for log in sorted(
-                    cache.logs,
-                    key=lambda l: l.log_date or _min_dt,
-                    reverse=True,
-                ):
+                for log in content.select_logs(cache.logs, is_mine):
                     gs_log = SubElement(gs_logs, "groundspeak:log")
                     gs_log.set("id", log.log_id or "0")
                     gs_date = SubElement(gs_log, "groundspeak:date")
@@ -1040,8 +1095,11 @@ def _gpx_chunks(
                 gs_tb.set("ref", tb.ref or "")
                 SubElement(gs_tb, "groundspeak:name").text = tb.name or ""
 
-        yield "\n  ", None
-        yield _xml_chunk(wpt, 1, short_empty=False), cache
+        if with_caches:
+            if gpx_1_1:
+                _to_gpx_1_1(wpt)
+            yield "\n  ", None
+            yield _xml_chunk(wpt, 1, short_empty=False), cache
 
         # Issue #753: child waypoints (parking areas, trailheads, stages,
         # final locations, etc.) were never exported at all — the loop
@@ -1051,11 +1109,11 @@ def _gpx_chunks(
         # groundspeak:cache block, sym/type set from the waypoint's own
         # type). #700: like GSAK, <name> is the waypoint's own code (see
         # _child_code), <desc> and <urlname> its name, and <cmt> and <url>
-        # are always written.
-        for child_wp in (getattr(cache, "waypoints", None) or []) if child_waypoints else []:
-            if child_wp.latitude is None or child_wp.longitude is None:
-                continue
-
+        # are always written. #775: only the children the content options
+        # choose; with children_only the first one carries the cache, so
+        # the caller still counts the caches written.
+        children = content.child_waypoints(cache) if with_children else []
+        for child_index, child_wp in enumerate(children):
             cwpt = Element("wpt")
             cwpt.set("lat", f"{child_wp.latitude:.6f}")
             cwpt.set("lon", f"{child_wp.longitude:.6f}")
@@ -1078,9 +1136,54 @@ def _gpx_chunks(
             cwpt_type = SubElement(cwpt, "type")
             cwpt_type.text = f"Waypoint|{child_wp.wp_type or 'Waypoint'}"
 
-            yield "\n  " + _xml_chunk(cwpt, 1, short_empty=False), None
+            if gpx_1_1:
+                _to_gpx_1_1(cwpt)
+            marker = cache if not with_caches and child_index == 0 else None
+            yield "\n  " + _xml_chunk(cwpt, 1, short_empty=False), marker
 
     yield "\n</gpx>\n", None
+
+
+_GPX_1_1_NS = "http://www.topografix.com/GPX/1/1"
+_GPX_1_1_SCHEMA_LOCATION = (
+    "http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd"
+    " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd"
+    " http://www.gsak.net/xmlv1/6 http://www.gsak.net/xmlv1/6/gsak.xsd"
+)
+
+
+def _to_gpx_1_1(wpt) -> None:
+    """Turn a <wpt> built in GPX 1.0 layout into GPX 1.1 (#775), in place.
+
+    GPX 1.1 has no <url>/<urlname>: they become one <link href><text>. As
+    in GSAK's own GPX 1.1 export, the link is written also without a URL
+    (href="", a valid anyURI), so a child waypoint keeps its name as the
+    link text. The GSAK and Groundspeak elements go into <extensions>,
+    which GPX 1.1 requires to be the last child. Every other element keeps
+    its place, since the 1.0 and 1.1 orders agree on them (ele, time, name,
+    cmt, desc, link, sym, type).
+    """
+    from xml.etree.ElementTree import Element, SubElement
+
+    url_el = wpt.find("url")
+    urlname_el = wpt.find("urlname")
+    if url_el is not None:
+        index = list(wpt).index(url_el)
+        wpt.remove(url_el)
+        link = Element("link")
+        link.set("href", url_el.text or "")
+        if urlname_el is not None and urlname_el.text:
+            SubElement(link, "text").text = urlname_el.text
+        wpt.insert(index, link)
+    if urlname_el is not None:
+        wpt.remove(urlname_el)
+
+    foreign = [el for el in wpt if el.tag.startswith(("gsak:", "groundspeak:"))]
+    if foreign:
+        extensions = SubElement(wpt, "extensions")
+        for el in foreign:
+            wpt.remove(el)
+            extensions.append(el)
 
 
 def _cache_symbol(cache_type: str, found: bool = False) -> str:
@@ -1271,6 +1374,7 @@ def generate_ggz(
     text: ExportText = NO_TEXT,
     attributes: bool = True,
     child_waypoints: bool = True,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> bytes:
     """
     Generate a GGZ file (ZIP archive) from a list of Cache objects.
@@ -1290,7 +1394,8 @@ def generate_ggz(
     buf = io.BytesIO()
     write_ggz(buf, caches, filename, progress_cb=progress_cb,
               use_corrected=use_corrected, text=text,
-              attributes=attributes, child_waypoints=child_waypoints)
+              attributes=attributes, child_waypoints=child_waypoints,
+              content=content)
     return buf.getvalue()
 
 
@@ -1302,10 +1407,12 @@ def write_ggz(
     child_waypoints: bool = True,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
 ) -> int:
     """Write a GGZ (see generate_ggz) to the seekable binary stream *out*,
-    one cache at a time (#1075). *caches*, *total*, *bounds* and the return
-    value are as for write_gpx().
+    one cache at a time (#1075). *caches*, *total*, *bounds*, *content* and
+    the return value are as for write_gpx(), except that a GGZ always has
+    the caches in it (see GpxContent.for_format()).
 
     The GPX and the index are streamed into temporary files first: the
     index needs the GPX's CRC and each cache's byte offset in it, and
@@ -1404,8 +1511,9 @@ def write_ggz(
         with zf.open(zi, "w") as dst:
             shutil.copyfileobj(src, dst)
 
+    content = content.for_format("ggz")
     if bounds is None and isinstance(caches, Sized):
-        bounds = gpx_bounds(caches, use_corrected, child_waypoints)
+        bounds = gpx_bounds(caches, use_corrected, child_waypoints, content)
     count = 0
     with tempfile.TemporaryFile() as gpx_tmp, tempfile.TemporaryFile() as index_tmp:
         # ── GPX, collecting the index entries as each <wpt> is written ────────
@@ -1418,7 +1526,7 @@ def write_ggz(
         offsets_by_gc_code: dict = {}
         for chunk, cache in _gpx_chunks(
             caches, filename, progress_cb, use_corrected, text,
-            attributes, child_waypoints, total, bounds,
+            attributes, child_waypoints, total, bounds, content,
         ):
             data = chunk.encode("utf-8")
             if cache is not None:
@@ -1497,20 +1605,23 @@ def export_ggz_to_device(
     progress_cb=None,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
+    use_corrected: bool = True,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil direkte til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
 
     *caches* may be any iterable (e.g. iter_caches_full()), streamed to the
-    file one by one (#1075); *total* and *bounds* are as for write_gpx().
+    file one by one (#1075); *total*, *bounds*, *content* and
+    *use_corrected* are as for write_ggz().
     """
     result = ExportResult()
     result.device = device_root
 
     def _write(f) -> int:
         return write_ggz(f, caches, filename, progress_cb=progress_cb, total=total,
-                         bounds=bounds)
+                         bounds=bounds, content=content, use_corrected=use_corrected)
 
     try:
         if is_mtp_device(device_root):
@@ -1552,11 +1663,14 @@ def export_ggz_to_file(
     progress_cb=None,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
+    use_corrected: bool = True,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil til en valgfri placering.
     Bruges når GPS ikke er tilsluttet direkte.
-    *caches*, *total* and *bounds* are as for export_ggz_to_device().
+    *caches*, *total*, *bounds*, *content* and *use_corrected* are as for
+    export_ggz_to_device().
     """
     result = ExportResult()
 
@@ -1565,7 +1679,8 @@ def export_ggz_to_file(
         result.cache_count = write_export(
             output_path,
             lambda f: write_ggz(f, caches, output_path.stem, progress_cb=progress_cb,
-                                total=total, bounds=bounds),
+                                total=total, bounds=bounds, content=content,
+                                use_corrected=use_corrected),
             binary=True,
         )
         result.file_path   = output_path
@@ -1698,18 +1813,21 @@ def export_to_device(
     progress_cb=None,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
+    use_corrected: bool = True,
 ) -> ExportResult:
     """
     Eksportér caches til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
-    *caches*, *total* and *bounds* are as for export_ggz_to_device().
+    *caches*, *total*, *bounds*, *content* and *use_corrected* are as for
+    export_ggz_to_device().
     """
     result = ExportResult()
     result.device = device_root
 
     def _write(f) -> int:
         return write_gpx(f, caches, filename, progress_cb=progress_cb, total=total,
-                         bounds=bounds)
+                         bounds=bounds, content=content, use_corrected=use_corrected)
 
     try:
         if is_mtp_device(device_root):
@@ -1748,11 +1866,14 @@ def export_to_file(
     progress_cb=None,
     total: Optional[int] = None,
     bounds: Optional[Bounds] = None,
+    content: GpxContent = DEFAULT_CONTENT,
+    use_corrected: bool = True,
 ) -> ExportResult:
     """
     Eksportér caches til en GPX fil (valgfri placering).
     Bruges når GPS ikke er tilsluttet.
-    *caches*, *total* and *bounds* are as for export_ggz_to_device().
+    *caches*, *total*, *bounds*, *content* and *use_corrected* are as for
+    export_ggz_to_device().
     """
     result = ExportResult()
 
@@ -1761,7 +1882,8 @@ def export_to_file(
         result.cache_count = write_export(
             output_path,
             lambda f: write_gpx(f, caches, output_path.stem, progress_cb=progress_cb,
-                                total=total, bounds=bounds),
+                                total=total, bounds=bounds, content=content,
+                                use_corrected=use_corrected),
         )
         result.file_path   = output_path
     except Exception as e:
