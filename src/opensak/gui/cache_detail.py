@@ -571,6 +571,11 @@ class CacheDetailPanel(QWidget):
 
         self._title.update()
 
+    @property
+    def current_gc_code(self) -> str | None:
+        """GC code of the cache shown in the panel, or None when it is empty."""
+        return getattr(self, "_current_gc_code", None)
+
     def refresh_sizes(self) -> None:
         self._apply_ui_sizes()
 

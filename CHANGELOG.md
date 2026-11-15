@@ -73,6 +73,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `<name>`. The GPX import now keeps a travel bug's `id`, so travel bugs
   survive an export and re-import. Contributed by nagisml.
 
+### Fixed
+
+- **The detail panel no longer shows a cache the filter hides (#1313)** —
+  after setting a filter that leaves out the cache shown in the detail
+  panel, the panel kept showing it, as if it still matched. The panel is
+  now emptied, as when a database is opened. A cache that is still in the
+  list stays shown.
+
 ---
 
 ## [1.23.0-beta.4] — 2026-11-13

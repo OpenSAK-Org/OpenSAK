@@ -1777,6 +1777,7 @@ class MainWindow(QMainWindow):
         if self._macro_pending_select:
             code, self._macro_pending_select = self._macro_pending_select, None
             self._cache_table.select_by_gc_code(code)
+        self._clear_detail_if_filtered_out()
         logger.info(
             "mainwindow: cache_table.load_caches done (+%.2fs)",
             time.monotonic() - _t0,
@@ -1798,6 +1799,25 @@ class MainWindow(QMainWindow):
             "mainwindow: _refresh_cache_list done (+%.2fs total)",
             time.monotonic() - _t0,
         )
+
+    def _clear_detail_if_filtered_out(self) -> None:
+        """#1313: empty the detail panel when the cache it shows is no longer
+        in the list, e.g. after a filter that hides it.
+
+        load_caches() always drops the table's selection, but the detail
+        panel kept showing the old cache, so it looked as if it still matched
+        the filter. The panel is emptied the same way as when a database is
+        opened, and the waypoint actions that act on it are disabled. A cache
+        that is still in the list stays shown.
+        """
+        gc_code = self._detail_panel.current_gc_code
+        if gc_code is None:
+            return
+        if any(c.gc_code == gc_code for c in self._cache_table.get_all_caches()):
+            return
+        self._detail_panel.clear()
+        self._act_wp_edit.setEnabled(False)
+        self._act_wp_delete.setEnabled(False)
 
     def _on_refresh_error(self, generation: int, message: str) -> None:
         """A RefreshWorker's query raised — surface it without crashing the
@@ -3238,6 +3258,7 @@ class MainWindow(QMainWindow):
         self._quick_filter.blockSignals(False)
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
+        self._clear_detail_if_filtered_out()
         if get_settings().map_enabled:
             self._update_map_filter_shape()
             self._map_widget.load_caches(
