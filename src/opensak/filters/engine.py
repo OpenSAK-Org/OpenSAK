@@ -863,6 +863,11 @@ class DistanceFilter(BaseFilter):
         None, i.e. pure Python) for unbounded conditions ("more than", "at
         least", "not between"), max_dist<=0 or near the poles / antimeridian,
         where a simple box could wrap and wrongly drop matches.
+
+        #1307: matches() measures to the corrected coordinates when set, so
+        the box admits a cache whose listed OR corrected position lies in
+        it, as LineFilter's does — a solved mystery next to the centre
+        whose listing is far away must still come through.
         """
         max_dist = _distance_op_upper_bound(
             self.op, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
@@ -876,16 +881,34 @@ class DistanceFilter(BaseFilter):
         dlon = max_dist / (111.0 * coslat)
         if dlon >= 180.0 or self.lon - dlon < -180.0 or self.lon + dlon > 180.0:
             return None  # box would wrap the antimeridian — let Python handle it
-        from sqlalchemy import and_
-        return query.filter(and_(
-            Cache.latitude.between(self.lat - dlat, self.lat + dlat),
-            Cache.longitude.between(self.lon - dlon, self.lon + dlon),
+        from sqlalchemy import and_, exists, or_
+        lat_lo, lat_hi = self.lat - dlat, self.lat + dlat
+        lon_lo, lon_hi = self.lon - dlon, self.lon + dlon
+        # .correlate(Cache) — see HasCorrectedFilter.apply_to_query().
+        corrected_in_box = (
+            exists()
+            .where(
+                UserNote.cache_id == Cache.id,
+                UserNote.is_corrected == True,  # noqa: E712
+                UserNote.corrected_lat.between(lat_lo, lat_hi),
+                UserNote.corrected_lon.between(lon_lo, lon_hi),
+            )
+            .correlate(Cache)
+        )
+        return query.filter(or_(
+            and_(
+                Cache.latitude.between(lat_lo, lat_hi),
+                Cache.longitude.between(lon_lo, lon_hi),
+            ),
+            corrected_in_box,
         ))
 
     def matches(self, cache: Cache) -> bool:
-        if cache.latitude is None or cache.longitude is None:
+        # #1307: to the corrected coordinates when set, like Cache.distance.
+        lat, lon = effective_coords(cache)
+        if lat is None or lon is None:
             return False
-        dist = _haversine_km(self.lat, self.lon, cache.latitude, cache.longitude)
+        dist = _haversine_km(self.lat, self.lon, lat, lon)
         return _distance_op_ok(
             self.op, dist, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
         )
@@ -1038,9 +1061,11 @@ class DirectionFilter(BaseFilter):
     def _cache_bearing(self, cache: Cache) -> Optional[float]:
         if self.lat is None or self.lon is None:
             return cache.bearing
-        if cache.latitude is None or cache.longitude is None:
+        # #1307: to the corrected coordinates when set, like Cache.bearing.
+        lat, lon = effective_coords(cache)
+        if lat is None or lon is None:
             return None
-        return _bearing_deg(self.lat, self.lon, cache.latitude, cache.longitude)
+        return _bearing_deg(self.lat, self.lon, lat, lon)
 
     def matches(self, cache: Cache) -> bool:
         bearing = self._cache_bearing(cache)

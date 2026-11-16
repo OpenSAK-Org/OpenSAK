@@ -9,7 +9,7 @@ højreklik-menu), så UserNote-rækken altid opdateres ens.
 from __future__ import annotations
 from typing import Optional
 
-from opensak.db.database import get_session
+from opensak.db.database import get_session, refresh_cache_distances
 from opensak.db.models import Cache, UserNote
 from opensak.utils.types import GcCode
 
@@ -37,4 +37,7 @@ def set_corrected_coords(
         note.corrected_lon = lon
         note.is_corrected = lat is not None and lon is not None
         note.corrected_source = source if note.is_corrected else None
+        # #1307: distance and bearing follow the corrected coordinates.
+        session.flush()
+        refresh_cache_distances(session, [cache_row.id])
     return True

@@ -355,7 +355,9 @@ def update_cache(session, code: str, values: dict[str, Any], refresh: bool = Tru
         return False
     _apply(session, cache, values)
     session.flush()
-    kinds = {kind for key, kind in (("lat", "coords"), ("lon", "coords"), ("owner", "owner"))
+    # #1307: "corrected" moves the position distance is measured to.
+    kinds = {kind for key, kind in (("lat", "coords"), ("lon", "coords"),
+                                    ("corrected", "coords"), ("owner", "owner"))
              if key in values}
     if refresh and kinds:
         refresh_derived(_session_executor(session), {cache.id: kinds})
@@ -504,21 +506,20 @@ def normalize_inserted(execute: Executor, ids: set[int]) -> None:
 
 def _refresh_distances(execute: Executor, ids: set[int]) -> None:
     """Distance and bearing from the active centre point, as
-    recalculate_distances() does for all caches."""
+    recalculate_distances() does for all caches: to the corrected
+    coordinates when set (#1307)."""
     if not ids:
         return
     from opensak import geodesy
+    from opensak.db.database import EFFECTIVE_POSITIONS_SQL
     from opensak.filters.engine import distance_km_batch
     from opensak.gui.settings import get_settings
 
     settings = get_settings()
     lat0, lon0 = settings.home_lat, settings.home_lon
     for marks, params in _chunks(ids):
-        rows = execute(
-            f"SELECT id, latitude, longitude FROM caches WHERE id IN ({marks}) "
-            "AND latitude IS NOT NULL AND longitude IS NOT NULL",
-            params,
-        )
+        # #1307: measured to the corrected coordinates when set.
+        rows = execute(f"{EFFECTIVE_POSITIONS_SQL} AND c.id IN ({marks})", params)
         if not rows:
             continue
         if lat0 is None or lon0 is None:

@@ -1014,6 +1014,11 @@ def full_cache(seed):
         s.flush()
         s.add(UserNote(cache_id=cache.id, note="my note"))
     set_corrected_coords("GCACC1", 47.2, 8.3)
+    # #1307: set_corrected_coords() measures the distance to the correction
+    # again; put back the fixed values the snapshot test expects.
+    with get_session() as s:
+        s.query(Cache).filter_by(gc_code="GCACC1").update(
+            {Cache.distance: 12.5, Cache.bearing: 90.0})
 
 
 def test_cache_returns_snapshot_with_api_field_names(full_cache):
@@ -1612,7 +1617,8 @@ def test_new_keys_select_caches_in_db(full_cache):
         print(opensak.filter{ codes = {} })
         print(opensak.filter{ user_flag = true }, opensak.filter{ premium = true })
         print(opensak.filter{ mode = "OR", codes = {"GCMAC1"}, name = "All fields" })
-        print(opensak.filter{ near = { lat = 47.1, lon = 8.2, km = 1 } })
+        -- near tests the corrected coordinates (47.2, 8.3) too (#1307)
+        print(opensak.filter{ near = { lat = 47.2, lon = 8.3, km = 1 } })
         -- polygon tests the corrected coordinates (47.2, 8.3), as on the map
         print(opensak.filter{ polygon = {{47.15, 8.25}, {47.25, 8.25}, {47.25, 8.35}, {47.15, 8.35}} })
         print(opensak.filter{ hidden = {"2020-05-17", "2020-05-17"} })

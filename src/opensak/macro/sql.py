@@ -1044,6 +1044,18 @@ class WritableDatabase:
             "AFTER UPDATE OF latitude, longitude ON main.caches "
             f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'coords'); END"
         )
+        # #1307: distance is measured to the corrected coordinates when set,
+        # so writing (or removing) them moves it as well.
+        for name, when, row in (
+            ("notes_coords_update",
+             "AFTER UPDATE OF corrected_lat, corrected_lon, is_corrected", "NEW"),
+            ("notes_coords_insert", "AFTER INSERT", "NEW"),
+            ("notes_coords_delete", "AFTER DELETE", "OLD"),
+        ):
+            conn.execute(
+                f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{name} {when} ON main.user_notes "
+                f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES ({row}.cache_id, 'coords'); END"
+            )
         conn.execute(
             f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_owner "
             "AFTER UPDATE OF owner_id, owner_name ON main.caches "

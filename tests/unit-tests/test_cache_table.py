@@ -62,6 +62,8 @@ def fake_settings(monkeypatch, qapp):
         home_lat=55.0, home_lon=12.0, use_miles=False,
         coord_format=CoordFormat.DMM, date_format=DateFormat.DMY,
         gc_username="", gc_finder_id="", map_provider="google", text_size=TextSize.MEDIUM,
+        # #1307: saving corrected coordinates recalculates the distance.
+        distance_method="haversine",
     )
     s.get_maps_url = lambda lat, lon: f"https://maps?{lat},{lon}"
     monkeypatch.setattr(ct, "get_settings", lambda: s)

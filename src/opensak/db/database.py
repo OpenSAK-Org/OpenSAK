@@ -1931,8 +1931,72 @@ def export_child_counts(
 
 # ── Distance recalculation ────────────────────────────────────────────────────
 
+# #1307: distance and bearing are measured to a cache's *effective* position —
+# its corrected coordinates when set, as GSAK does and as the map plots it
+# (filters.engine.effective_coords()) — so a solved mystery next to the centre
+# sorts first, matches "less than 10 km" and survives an export's "nearest N"
+# cut. user_notes.cache_id is unique, so the LEFT JOIN gives one row per cache.
+_CORRECTED_SQL = (
+    "n.is_corrected AND n.corrected_lat IS NOT NULL AND n.corrected_lon IS NOT NULL"
+)
+EFFECTIVE_LAT_SQL = f"CASE WHEN {_CORRECTED_SQL} THEN n.corrected_lat ELSE c.latitude END"
+EFFECTIVE_LON_SQL = f"CASE WHEN {_CORRECTED_SQL} THEN n.corrected_lon ELSE c.longitude END"
+# "SELECT id, lat, lon" of the caches with coordinates, at their effective
+# position; add "AND ..." conditions on c / n after it.
+EFFECTIVE_POSITIONS_SQL = (
+    f"SELECT c.id, {EFFECTIVE_LAT_SQL}, {EFFECTIVE_LON_SQL} "
+    "FROM caches c LEFT JOIN user_notes n ON n.cache_id = c.id "
+    "WHERE c.latitude IS NOT NULL AND c.longitude IS NOT NULL"
+)
+
+
+def refresh_cache_distances(session, cache_ids: list[int]) -> None:
+    """#1307: recalculate distance and bearing of *cache_ids* from the active
+    centre point, at their effective position — after their corrected
+    coordinates were set or cleared, so the Distance column, sorting and
+    distance filters follow at once without a full recalculate_distances().
+    Without a centre point the values are cleared, as for a new cache.
+
+    Runs in the caller's *session*, so it commits with the change."""
+    if not cache_ids:
+        return
+    from opensak import geodesy
+    from opensak.filters.engine import distance_km_batch
+    from opensak.gui.settings import get_settings
+
+    s = get_settings()
+    lat0, lon0 = s.home_lat, s.home_lon
+    ids = sorted(set(cache_ids))
+    for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
+        chunk = ids[start:start + RELOAD_CHUNK_SIZE]
+        params = {f"i{n}": cid for n, cid in enumerate(chunk)}
+        marks = ", ".join(f":{name}" for name in params)
+        rows = session.execute(
+            text(f"{EFFECTIVE_POSITIONS_SQL} AND c.id IN ({marks})"), params,
+        ).fetchall()
+        if not rows:
+            continue
+        if not lat0 or not lon0:
+            session.execute(
+                text("UPDATE caches SET distance = NULL, bearing = NULL WHERE id = :id"),
+                [{"id": r[0]} for r in rows],
+            )
+            continue
+        dists = distance_km_batch(lat0, lon0, [r[1] for r in rows], [r[2] for r in rows])
+        session.execute(
+            text("UPDATE caches SET distance = :d, bearing = :b WHERE id = :id"),
+            [
+                {"d": float(d), "b": geodesy.bearing(lat0, lon0, r[1], r[2]), "id": r[0]}
+                for r, d in zip(rows, dists)
+            ],
+        )
+
+
 def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -> int:
     """Recompute distance and bearing for every cache and persist to the DB.
+
+    Measured to each cache's effective position: its corrected coordinates
+    when set (#1307), see EFFECTIVE_POSITIONS_SQL.
 
     Called once whenever the active centre point changes (not on every table
     refresh). Uses distance_km_batch() which dispatches to Haversine or
@@ -1976,9 +2040,7 @@ def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -
             return [_scalar(la, lo) for la, lo in zip(lats, lons)]
 
     with session_on(db_path) as session:
-        rows = session.execute(
-            text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
-        ).fetchall()
+        rows = session.execute(text(EFFECTIVE_POSITIONS_SQL)).fetchall()
 
         if not rows:
             logger.info("recalculate_distances: no rows with coordinates, skipping")
@@ -2055,6 +2117,10 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     3. No cache with coordinates is missing its distance — e.g. caches a
        merge import added after the last recalculation, which the single
        spot-check row can't see.
+    4. #1307: the same spot-check on the first cache with corrected
+       coordinates, measured to them. Distances calculated before #1307
+       used the listed position, so this makes the first start after the
+       update recalculate once.
 
     *db_path*: as for recalculate_distances().
 
@@ -2070,9 +2136,19 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     with session_on(db_path) as session:
         row = session.execute(
             text(
-                "SELECT latitude, longitude, distance FROM caches "
-                "WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
-                "ORDER BY id LIMIT 1"
+                f"SELECT {EFFECTIVE_LAT_SQL}, {EFFECTIVE_LON_SQL}, c.distance "
+                "FROM caches c LEFT JOIN user_notes n ON n.cache_id = c.id "
+                "WHERE c.latitude IS NOT NULL AND c.longitude IS NOT NULL "
+                "ORDER BY c.id LIMIT 1"
+            )
+        ).fetchone()
+        corrected_row = session.execute(
+            text(
+                "SELECT n.corrected_lat, n.corrected_lon, c.distance "
+                "FROM user_notes n JOIN caches c ON c.id = n.cache_id "
+                f"WHERE {_CORRECTED_SQL} "
+                "AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL "
+                "ORDER BY n.cache_id LIMIT 1"
             )
         ).fetchone()
 
@@ -2107,12 +2183,15 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     if abs(calc_lat - lat) > _COORD_EPSILON or abs(calc_lon - lon) > _COORD_EPSILON:
         return False
 
-    row_lat, row_lon, stored_distance = row
-    if stored_distance is None:
-        return False
-    fresh_distance = distance_km(lat, lon, row_lat, row_lon)
-    if abs(fresh_distance - stored_distance) > _DISTANCE_EPSILON_KM:
-        return False
+    for spot in (row, corrected_row):
+        if spot is None:
+            continue
+        row_lat, row_lon, stored_distance = spot
+        if stored_distance is None:
+            return False
+        fresh_distance = distance_km(lat, lon, row_lat, row_lon)
+        if abs(fresh_distance - stored_distance) > _DISTANCE_EPSILON_KM:
+            return False
 
     # Served by the partial index ix_caches_distance_missing (migration 25),
     # so this stays cheap on large databases.

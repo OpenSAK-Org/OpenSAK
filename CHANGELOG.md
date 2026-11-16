@@ -101,6 +101,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `{filter}` in export file names. **Reset all tabs** also sets the
   dialog's profile back to "None". Reported by nagisml.
 
+- **Distance and bearing use corrected coordinates (#1307)** — for a cache
+  with corrected coordinates, distance and bearing were measured to its
+  listed position, so a solved mystery next to the centre looked as far away
+  as its listing. They are now measured to the corrected coordinates, as
+  GSAK does: the Distance and Bearing columns, sorting by distance (also
+  `opensak.sort("distance")`), the distance and direction filters (also
+  `opensak.filter{ distance = ... }`), and an export or Send to GPS of the
+  nearest caches. Setting or clearing corrected coordinates updates the
+  cache's distance at once, also from a macro. Existing databases are
+  recalculated once on the first start. The distance between the listed and
+  the corrected coordinates in the corrected-coordinates dialog is
+  unchanged. Reported by nagisml.
+
 ---
 
 ## [1.23.0-beta.4] — 2026-11-13

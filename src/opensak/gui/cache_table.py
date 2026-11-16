@@ -865,6 +865,15 @@ class CacheTableModel(QAbstractTableModel):
             if c.bearing is not None:
                 self._bearings[c.id] = float(c.bearing)
 
+    def update_distance(self, cache) -> None:
+        """Take *cache*'s distance and bearing again (#1307), after one row
+        was reloaded from the database."""
+        for values, value in ((self._distances, cache.distance), (self._bearings, cache.bearing)):
+            if value is None:
+                values.pop(cache.id, None)
+            else:
+                values[cache.id] = float(value)
+
     def cache_at(self, row: int) -> Optional[Cache]:
         if 0 <= row < len(self._caches):
             return self._caches[row]
@@ -2338,6 +2347,9 @@ class CacheTableView(QTableView):
                 break
         else:
             return  # cachen er ikke i den aktuelle visning — intet at opdatere
+        # #1307: setting or clearing corrected coordinates moves the cache's
+        # distance and bearing, so the Distance/Bearing cells follow at once.
+        self._model.update_distance(fresh)
 
         if self._model.custom_names():
             self._model.reload_custom([gc_code])
