@@ -4,7 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.5] — Unreleased
+## [1.23.0-beta.5] — 2026-11-16
+
+> Headline: **GPX/GGZ export like GSAK's.** Exported files now follow
+> GSAK's file structure and can carry GSAK's own fields — user flag, lock,
+> user data and custom fields — so they survive a round trip through GSAK
+> and back. New options choose child waypoints, logs, the user note, GSAK's
+> special tags and a Final Location waypoint for solved caches, also for
+> Send to GPS. Distance, sorting and distance filters now use corrected
+> coordinates, so a solved mystery next to you is no longer "far away".
+> Also fixes for the filter dropdown, the detail panel and an empty list
+> after clearing flags.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
 
 ### Added
 
