@@ -174,6 +174,17 @@ SHORT_HEADER_KEYS: dict[str, str] = {
 }
 
 # Room for the sort indicator next to a header's text, in pixels.
+# Issue #733: the only built-in columns that are left-aligned — names and
+# codes read from the first letter, and long free text. Every other column
+# (numbers, dates, icons and short values such as Placed by, Owner name,
+# Country or Source) is centered, as asked in #431 and #603. Custom fields
+# follow their type (CUSTOM_CENTERED_TYPES).
+_LEFT_ALIGNED_COLUMNS = frozenset({
+    "name", "gc_code",
+    "hints", "notes", "gc_note", "url", "guid",
+    "user_data_1", "user_data_2", "user_data_3", "user_data_4",
+})
+
 _SORT_INDICATOR_ROOM = 16
 
 # Upper bound for an auto-fitted column, so one long cache name or note
@@ -988,32 +999,10 @@ class CacheTableModel(QAbstractTableModel):
                 if custom_field is not None and custom_field.type in CUSTOM_CENTERED_TYPES:
                     return Qt.AlignmentFlag.AlignCenter
                 return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            if col in ("cache_type", "difficulty", "terrain", "container",
-                       "distance", "found", "dnf", "premium_only", "archived",
-                       "log_count", "corrected", "first_to_find", "user_flag",
-                       "locked", "bearing", "user_sort", "favorite_points",
-                       "trackables",
-                       "latitude", "longitude",
-                       "hidden_date", "last_log", "found_date", "dnf_date",
-                       "placed_by",
-                       # Issue #658: additional GSAK-compatible columns —
-                       # dates/numbers/short IDs centered, matching the
-                       # existing hidden_date/found_date/log_count pattern.
-                       # gc_note/guid/hints/notes/owner_name/source/url are
-                       # left as free text (default left-align, same as
-                       # placed_by's *free-text sibling* user_data_1..4).
-                       "gc_cache_id", "changed_date", "creation_date",
-                       "elevation", "find_count", "owner_id", "watch",
-                       # Issue #716
-                       "last_found_date", "last_gpx_update", "last_four_logs",
-                       # Issue #1141
-                       "last_user_update",
-                       # Issue #603: Country/Region(state)/County were missed
-                       # by #431's sweep of "similar short-value columns" —
-                       # left-aligned while Placed By (same kind of short
-                       # free-text value) was already centered. Centered here
-                       # for the same consistency #431 was going for.
-                       "country", "state", "county"):
+            # Issue #733: short values are centered and long free text is
+            # left-aligned (#431, #603). Listing the left-aligned columns
+            # rather than the centered ones keeps new columns consistent.
+            if col not in _LEFT_ALIGNED_COLUMNS:
                 return Qt.AlignmentFlag.AlignCenter
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 

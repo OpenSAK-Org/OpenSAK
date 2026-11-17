@@ -377,17 +377,44 @@ class TestDataRoles:
         idx = model.index(0, 0)
         assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "GCABC"
 
-    def test_alignment_role(self, model):
-        model.load([_cache()])
+    # Issue #733: names, codes and long free text are left-aligned; every
+    # other column — numbers, dates, icons and short values — is centered
+    # (#431, #603).
+    _LEFT = {"name", "gc_code", "hints", "notes", "gc_note", "url", "guid",
+             "user_data_1", "user_data_2", "user_data_3", "user_data_4"}
+
+    @pytest.fixture
+    def every_column(self, monkeypatch):
+        from opensak.gui.dialogs.column_dialog import _ALL_COLUMNS_DEF
+        cols = [c[0] for c in _ALL_COLUMNS_DEF]
+        monkeypatch.setattr(ct, "_get_active_columns", lambda: list(cols))
+        m = CacheTableModel()
+        m.load([_cache()])
+        return m, cols
+
+    @staticmethod
+    def _align(m, cols, col):
+        return m.data(m.index(0, cols.index(col)), Qt.ItemDataRole.TextAlignmentRole)
+
+    def test_alignment_role(self, every_column):
+        m, cols = every_column
         for col in ("cache_type", "difficulty", "terrain", "distance", "found",
                     "container", "hidden_date", "last_log",
                     "found_date", "dnf_date", "placed_by",
-                    "country", "state", "county"):
-            idx = model.index(0, ALL_COLUMNS.index(col))
-            assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) == Qt.AlignmentFlag.AlignCenter, col
-        for col in ("name", "gc_code"):
-            idx = model.index(0, ALL_COLUMNS.index(col))
-            assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) != Qt.AlignmentFlag.AlignCenter, col
+                    "country", "state", "county",
+                    # Issue #733: short values that were left-aligned.
+                    "owner_name", "source", "symbol"):
+            assert self._align(m, cols, col) == Qt.AlignmentFlag.AlignCenter, col
+        for col in self._LEFT:
+            assert self._align(m, cols, col) == (
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), col
+
+    def test_every_column_is_centered_unless_free_text(self, every_column):
+        m, cols = every_column
+        assert self._LEFT <= set(cols)
+        for col in cols:
+            centered = self._align(m, cols, col) == Qt.AlignmentFlag.AlignCenter
+            assert centered == (col not in self._LEFT), col
 
     def test_font_role_italic_when_found(self, model):
         model.load([_cache(found=True)])
