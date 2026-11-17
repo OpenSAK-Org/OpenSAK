@@ -359,6 +359,7 @@ map.addLayer(clusterGroup);
 // Regroup the markers already on the map — no reload, the view stays.
 function setClustering(on) {
     clusteringOn = !!on;
+    restoreLiftedMarker();   // issue #1324
     var layers = Object.keys(markers).map(function(code) { return markers[code]; });
     clusterGroup.clearLayers();
     map.removeLayer(clusterGroup);
@@ -814,6 +815,7 @@ function loadCaches(caches) {
     // leftover nearby-selection circle/label from loadNearbyCaches() below,
     // so it never lingers over an unrelated marker set.
     clearNearbyOverlay();
+    restoreLiftedMarker();   // issue #1324: the old pin leaves the map too
 
     // Recreate the cluster group to avoid stale internal state from clearLayers()
     map.removeLayer(clusterGroup);
@@ -901,17 +903,42 @@ function setHomeLocation(lat, lon, label) {
     homeMarker.bindPopup('<b>' + escapeHtml(label) + '</b>');
 }
 
-// Issue #744: a cache hidden in a cluster of at most this many caches is
-// shown by fanning the cluster out (spiderfy) instead of zooming in, so the
-// map keeps the zoom level the user chose. Larger clusters still zoom in,
-// since a fan of more pins than this is unreadable.
-var SPIDERFY_MAX = 25;
+// Issue #1324: a cache hidden in a cluster at the current zoom is lifted out
+// of the cluster group and shown on its own, at its real position, while the
+// rest of the cluster stays clustered. The map keeps the zoom the user chose
+// (issue #744). Fanning the cluster out (spiderfy), as #744 first did, put
+// every pin of a dense cluster on the map at a position that is not its own.
+// Only one pin is lifted at a time; it goes back into the cluster group when
+// another cache is selected, the clustering is toggled or the caches are
+// reloaded.
+var liftedMarker = null;
+
+function liftOutOfCluster(marker) {
+    if (liftedMarker === marker) return;
+    restoreLiftedMarker();
+    clusterGroup.removeLayer(marker);
+    marker.setZIndexOffset(1000);
+    marker.addTo(map);
+    liftedMarker = marker;
+}
+
+// Put the lifted pin back into the cluster group. A pin that has been
+// replaced in markers (updateCacheMarker) or dropped with the whole set
+// (loadCaches) is only taken off the map.
+function restoreLiftedMarker() {
+    var marker = liftedMarker;
+    if (!marker) return;
+    liftedMarker = null;
+    map.removeLayer(marker);
+    marker.setZIndexOffset(0);
+    var code = Object.keys(markers).find(function(k) { return markers[k] === marker; });
+    if (code !== undefined) clusterGroup.addLayer(marker);
+}
 
 function panToCache(gcCode) {
     var marker = markers[gcCode];
     if (!marker) return;
     selectMarker(gcCode);
-    var latlng = marker.getLatLng();
 
     // Issue #718 (Mike, Mac ARM, beta.7): selecting a new cache in the grid
     // updates the detail text but the map sometimes doesn't pan/pop up,
@@ -939,17 +966,20 @@ function panToCache(gcCode) {
             if (marker._icon) {
                 marker.openPopup();
             }
-            // getLatLng() now, not when selected: in a fanned-out cluster
-            // the pin sits at the end of its leg, away from its real spot.
+            // getLatLng() now, not when selected: a pin the user fanned out
+            // by clicking a cluster sits at the end of its leg.
             map.panTo(marker.getLatLng());
         } catch (e) {
             // marker may have been invalidated during animation
         }
     };
     try {
-        var cluster = clusterAtCurrentZoom(marker);
-        if (cluster && cluster.getChildCount() <= SPIDERFY_MAX) {
-            spiderfyToShow(cluster, latlng, mySeq, doPan);
+        if (liftedMarker && liftedMarker !== marker) restoreLiftedMarker();
+        if (liftedMarker === marker) {
+            doPan();   // already shown on its own, outside the cluster group
+        } else if (clusterAtCurrentZoom(marker)) {
+            liftOutOfCluster(marker);
+            doPan();
         } else {
             clusterGroup.zoomToShowLayer(marker, doPan);
         }
@@ -971,23 +1001,6 @@ function clusterAtCurrentZoom(marker) {
         c = c.__parent;
     }
     return c;
-}
-
-// Issue #744: centre the cluster without changing the zoom, then fan it out
-// so the selected pin can be seen and its popup opened. moveend also fires
-// when the map is already centred there, and markercluster has added the
-// clusters for the new view by then.
-function spiderfyToShow(cluster, latlng, mySeq, done) {
-    map.once('moveend', function() {
-        if (mySeq !== panRequestSeq) return;
-        if (map.hasLayer(cluster)) {
-            clusterGroup.once('spiderfied', done);
-            cluster.spiderfy();
-        } else {
-            done();
-        }
-    });
-    map.panTo(latlng);
 }
 
 function selectMarker(gcCode) {
@@ -1124,6 +1137,7 @@ function showWaypointMarkers(wps) {
 }
 
 function updateCacheMarker(c) {
+    if (liftedMarker && liftedMarker === markers[c.gc_code]) restoreLiftedMarker();   // issue #1324
     if (markers[c.gc_code]) {
         clusterGroup.removeLayer(markers[c.gc_code]);
         delete markers[c.gc_code];

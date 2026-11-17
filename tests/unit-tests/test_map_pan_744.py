@@ -6,6 +6,9 @@
 #      auto-pan stops a running pan, so the map only moved a few pixels;
 #   2. a cache hidden in a cluster was revealed with zoomToShowLayer(),
 #      which zooms in until the cluster breaks up — even for 2–3 caches.
+#      (Issue #1324 replaced the fix for this, a fanned-out cluster, by
+#      lifting only the selected pin out of the cluster — see
+#      test_map_cluster_lift_1324.py.)
 #
 # The map page is JavaScript, and unit tests run without QtWebEngine, so these
 # tests check the page source. The behaviour was checked in a real
@@ -31,19 +34,16 @@ class TestPanToCache:
         assert do_pan.index("marker.openPopup()") < do_pan.index("map.panTo(")
 
     def test_pans_to_where_the_pin_is_shown(self):
-        # In a fanned-out cluster the pin is at the end of its leg.
+        # In a cluster the user fanned out the pin is at the end of its leg.
         body = _function_body("panToCache")
         assert "map.panTo(marker.getLatLng())" in body
 
-    def test_small_cluster_is_fanned_out_large_cluster_zooms(self):
+    def test_cluster_hidden_cache_keeps_the_zoom(self):
         body = _function_body("panToCache")
-        assert "cluster.getChildCount() <= SPIDERFY_MAX" in body
-        assert "spiderfyToShow(" in body
+        assert "liftOutOfCluster(marker)" in body
+        assert "setZoom" not in body and "zoomToBounds" not in body
+        # Pins outside the view, but not in a cluster, are still revealed.
         assert "clusterGroup.zoomToShowLayer(marker, doPan)" in body
-
-    def test_spiderfy_limit_is_set(self):
-        m = re.search(r"var SPIDERFY_MAX = (\d+);", mw_mod.MAP_HTML)
-        assert m and 2 <= int(m.group(1)) <= 50
 
     def test_rapid_selection_guard_is_kept(self):
         # Issue #718: only the latest selection may move the map.
@@ -53,16 +53,7 @@ class TestPanToCache:
         assert "setTimeout(doPan, 400)" in body
 
 
-class TestSpiderfyToShow:
-    def test_keeps_zoom_and_spiderfies_after_the_move(self):
-        body = _function_body("spiderfyToShow")
-        assert "map.once('moveend'" in body
-        assert "cluster.spiderfy()" in body
-        assert "map.panTo(latlng)" in body
-        assert "setZoom" not in body and "zoomToBounds" not in body
-        # A later selection makes this one a no-op.
-        assert "if (mySeq !== panRequestSeq) return;" in body
-
+class TestClusterLookup:
     def test_cluster_lookup_ignores_pins_shown_on_their_own(self):
         body = _function_body("clusterAtCurrentZoom")
         assert "if (marker._icon) return null;" in body
