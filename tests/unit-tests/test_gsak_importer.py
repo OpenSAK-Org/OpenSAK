@@ -835,6 +835,36 @@ def test_parse_gsak_trackables_skips_unmatched_lines_without_crashing():
     assert [p["ref"] for p in parsed] == ["TBAB12CD", "TB999X"]
 
 
+# ── Issue #1331: GSAK's leading <BR> on every TravelBugs line ────────────────
+
+
+def test_parse_gsak_trackables_strips_leading_br_1331():
+    # Real GSAK format: every line starts with "<BR>" and ends with CRLF.
+    raw = (
+        "<BR>And we're back in the car (id = 5836847, ref = TB6QPGA)\r\n"
+        "<BR>Hedgie 1 (id = 6874668, ref = TB7WHED)\r\n"
+    )
+    assert _parse_gsak_trackables(raw) == [
+        {"name": "And we're back in the car", "ref": "TB6QPGA", "tracking_code": "5836847"},
+        {"name": "Hedgie 1", "ref": "TB7WHED", "tracking_code": "6874668"},
+    ]
+
+
+@pytest.mark.parametrize("prefix", ["<br>", "<Br/>", "<br />", "<BR><BR> "])
+def test_parse_gsak_trackables_strips_br_variants_1331(prefix):
+    parsed = _parse_gsak_trackables(f"{prefix}Hedgie 1 (id = 6874668, ref = TB7WHED)")
+    assert parsed[0]["name"] == "Hedgie 1"
+
+
+def test_parse_gsak_trackables_keeps_rest_of_name_1331():
+    # Only the leading tag is GSAK formatting; the rest of the name is kept
+    # as GSAK stores it, including GSAK's own "(null)".
+    parsed = _parse_gsak_trackables(
+        "<BR>Block Party Nano (null) (id = 9806985, ref = TBB1ZR9)\r\n"
+    )
+    assert parsed[0]["name"] == "Block Party Nano (null)"
+
+
 def test_trackable_mapping_via_import(db_session, tmp_path):
     db = _make_gsak_db(
         tmp_path / "gsak.db3",
