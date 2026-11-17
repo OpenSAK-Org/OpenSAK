@@ -120,11 +120,11 @@ def test_gsak_user_found_used_when_own_log_missing(tmp_path, account):
     assert cache.found_date.date() == datetime(2026, 6, 4).date()
 
 
-def test_own_log_on_same_day_keeps_its_time(tmp_path, account):
+def test_own_log_on_same_day_gives_the_same_date(tmp_path, account):
+    # Issue #875: found_date is a calendar date now, like GSAK's FoundByMe;
+    # the log row keeps the time.
     cache = _import(tmp_path, "withlog", _gsak_export(own_log=True))
-    assert cache.found_date is not None
-    assert (cache.found_date.year, cache.found_date.month, cache.found_date.day,
-            cache.found_date.hour, cache.found_date.minute) == (2026, 6, 4, 13, 39)
+    assert cache.found_date == datetime(2026, 6, 4)
 
 
 def test_user_found_wins_over_own_log_on_another_day(tmp_path, account):

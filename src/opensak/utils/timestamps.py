@@ -10,7 +10,9 @@ on another machine. They are converted to local time only when shown or
 compared with a date the user typed.
 
 Listing-side dates (placed date, the listing's "changed" date, found date,
-log dates) are calendar dates, not timestamps, and are never converted.
+log dates) are calendar dates, not timestamps, and are never converted here.
+The calendar date a log was written for is worked out from its UTC timestamp
+in opensak.utils.log_dates (issue #875).
 """
 
 from __future__ import annotations

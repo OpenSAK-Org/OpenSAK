@@ -11,6 +11,7 @@ import sqlite3
 import webbrowser
 from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
+from opensak.utils.log_dates import is_own_log, log_calendar_date
 from PySide6.QtCore import Qt, QUrl, Signal, QEvent, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -837,10 +838,19 @@ class CacheDetailPanel(QWidget):
             return
 
         colours = LOG_COLOURS
+        settings = get_settings()
         parts = []
         for log in logs:
             colour = colours.get(log.log_type, "#555555")
-            date_str = _format_date(log.log_date) if log.log_date else "?"
+            # Issue #875: the date the log was most likely written for, read
+            # in local time for the user's own logs — the same date the
+            # found/DNF date columns show. The stored timestamp is unchanged.
+            log_day = log_calendar_date(
+                log.log_date,
+                own=is_own_log(log.finder_id, log.finder,
+                               settings.gc_finder_id, settings.gc_username),
+            )
+            date_str = format_date(log_day, settings.date_format) if log_day else "?"
             # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
             # Logtekst er tredjeparts-indhold: escape først, så kun de
             # markdown-links vi selv genkender bliver til <a> tags

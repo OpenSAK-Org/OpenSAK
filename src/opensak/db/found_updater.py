@@ -21,6 +21,7 @@ from opensak.db.database import get_session
 from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.utils.constants import FOUND_LOG_TYPES
+from opensak.utils.log_dates import log_calendar_midnight
 from opensak.utils.types import GcCode
 
 
@@ -107,8 +108,11 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
                         try:
                             raw = str(log_date_raw).strip().removesuffix("Z").replace("T", " ")
                             # Fjern overskydende mikrosekunder hvis nødvendigt
-                            found_dates[gc] = datetime.fromisoformat(raw).replace(
-                                tzinfo=timezone.utc
+                            # Issue #875: the calendar date the user's
+                            # own found log was written for, not its UTC date.
+                            found_dates[gc] = log_calendar_midnight(
+                                datetime.fromisoformat(raw).replace(tzinfo=timezone.utc),
+                                own=True,
                             )
                         except ValueError:
                             pass

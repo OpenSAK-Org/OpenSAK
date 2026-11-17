@@ -275,7 +275,9 @@ class TestChunkedBulkUpdate:
         with get_session() as s:
             c1 = s.query(Cache).filter_by(gc_code="GC00001").one()
             c2 = s.query(Cache).filter_by(gc_code="GC00002").one()
-            assert c1.found_date == datetime(2018, 3, 4, 12, 0)   # overwritten
+            # Issue #875: stored as the calendar date (12:00 UTC is a fixed
+            # time, so its UTC date).
+            assert c1.found_date == datetime(2018, 3, 4)          # overwritten
             assert c2.found_date == datetime(2021, 6, 7)          # kept
 
     def test_not_yet_found_with_null_ref_date_is_marked_found_without_date(
@@ -297,7 +299,9 @@ class TestChunkedBulkUpdate:
 
     def test_found_date_stored_in_sqlalchemy_datetime_format(self, tmp_path, make_cache):
         # The bulk UPDATE must store dates exactly as the ORM does — no
-        # "T" separator and no "+00:00" from the tz-aware ref dates.
+        # "T" separator and no "+00:00". Issue #875: the found date is the
+        # calendar date of the user's own log (19:05:06 UTC is a real time,
+        # read in local time — the same day in any zone from UTC-19 to +4).
         from sqlalchemy import text as sa_text
         ref_path = tmp_path / "ref.db"
         active_path = tmp_path / "active.db"
@@ -310,7 +314,7 @@ class TestChunkedBulkUpdate:
         with get_session() as s:
             raw = s.execute(sa_text(
                 "SELECT found_date FROM caches WHERE gc_code = 'GC00001'")).scalar()
-        assert raw == "2018-03-04 19:05:06.000000"
+        assert raw == "2018-03-04 00:00:00.000000"
 
     def test_counts_and_updates_span_chunk_boundaries(self, tmp_path, make_cache, monkeypatch):
         import opensak.db.found_updater as fu

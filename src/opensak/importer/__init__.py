@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
+from opensak.utils.log_dates import is_own_log, log_calendar_midnight
 from opensak.export.gpx_content import (
     is_corrected_final_wp, is_extra_info_log, is_user_note_log, normalize_note,
 )
@@ -1569,16 +1570,20 @@ def _upsert_cache(
             if found_logs:
                 found_log = min(found_logs, key=lambda lg: lg["log_date"])
 
+        # Issue #875: the log carries a UTC timestamp, not the date the
+        # user picked; log_calendar_midnight() works that date back out
+        # (fixed website times, real app times in local time) and stores it
+        # as a calendar date, as GSAK does. The log row keeps the original.
         # Issue #1145: GSAK's <gsak:UserFound> (also written by OpenSAK's own
         # export) is the found date as the user set it, so it wins over the
-        # log-based guess. The user's own found log is still used when it
-        # is from the same day, since it also carries the time.
+        # log-based guess.
         user_found = data.get("gsak_user_found")
-        log_date = found_log.get("log_date") if found_log else None
-        if user_found and not (log_date and log_date.date() == user_found.date()):
+        log_day = log_calendar_midnight(
+            found_log.get("log_date") if found_log else None, own=True)
+        if user_found and not (log_day and log_day.date() == user_found.date()):
             cache.found_date = user_found
-        elif log_date:
-            cache.found_date = log_date
+        elif log_day:
+            cache.found_date = log_day
 
     # ── Derive dnf_date, first_to_find from logs (issue #33, #58, #114) ────────
     # These are only set/updated when a fresh import brings logs in.
@@ -1590,12 +1595,23 @@ def _upsert_cache(
         # not just this file's logs_data — otherwise a re-import that simply
         # doesn't happen to include a DNF log would reset dnf_date to None
         # even though the DNF log itself is still sitting in the database.
-        dnf_dates = [
-            _as_aware_utc(lg.log_date)
-            for lg in existing_logs_by_id.values()
+        # Issue #875: stored as the calendar date the latest DNF was most
+        # likely written for — read in local time when it is the user's own.
+        dnf_logs = [
+            lg for lg in existing_logs_by_id.values()
             if lg.log_type == "Didn't find it" and lg.log_date
         ]
-        cache.dnf_date = max(dnf_dates) if dnf_dates else None
+        if dnf_logs:
+            from opensak.gui.settings import get_settings
+            _dnf_sett = get_settings()
+            latest_dnf = max(dnf_logs, key=lambda lg: _as_aware_utc(lg.log_date))
+            cache.dnf_date = log_calendar_midnight(
+                latest_dnf.log_date,
+                own=is_own_log(latest_dnf.finder_id, latest_dnf.finder,
+                               _dnf_sett.gc_finder_id, _dnf_sett.gc_username),
+            )
+        else:
+            cache.dnf_date = None
 
         # ── FTF detection (fixes #114, implements #58) ────────────────────────
         # Priority order:

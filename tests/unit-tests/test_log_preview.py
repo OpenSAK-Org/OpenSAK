@@ -23,6 +23,7 @@ def _log(text: str, log_type="Found it", finder="Tester", date=None) -> SimpleNa
         text=text,
         log_type=log_type,
         finder=finder,
+        finder_id=None,
         log_date=date or datetime(2026, 1, 15, 10, 30),
     )
 
