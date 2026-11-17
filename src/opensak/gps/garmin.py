@@ -725,16 +725,31 @@ def write_gpx(
     return count
 
 
+# #1329: characters XML 1.0 doesn't allow (C0 controls except tab, LF and
+# CR; U+FFFE, U+FFFF; lone surrogates). ElementTree writes them as they
+# are, and a single one makes the whole file invalid XML.
+_XML_INVALID_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿\ud800-\udfff]")
+
+
 def _xml_chunk(elem, level: int, short_empty: bool = True) -> str:
     """*elem* serialized exactly as it appears *level* deep in an _indent()ed
     document, without its tail — the caller writes the whitespace between
     elements, so a document can be streamed element by element.
-    *short_empty*=False writes empty elements as <x></x> instead of <x />."""
+    *short_empty*=False writes empty elements as <x></x> instead of <x />.
+
+    #1329: characters XML 1.0 doesn't allow are left out, and line breaks
+    in the text are written as LF. Text from GSAK and geocaching.com has
+    CR LF; a text-mode file on Windows turns its LF into CR LF again, which
+    gave CR CR LF, and parsers read that as two line breaks. A parser reads
+    CR LF and a lone CR as LF anyway, so the text means the same. (CR in an
+    attribute is escaped as &#13; by ElementTree and stays as it is.)"""
     import xml.etree.ElementTree as ET
 
     _indent(elem, level)
     elem.tail = None
-    return ET.tostring(elem, encoding="unicode", short_empty_elements=short_empty)
+    xml = ET.tostring(elem, encoding="unicode", short_empty_elements=short_empty)
+    xml = _XML_INVALID_CHARS.sub("", xml)
+    return xml.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _rating(value) -> str:
@@ -1822,7 +1837,9 @@ def write_export(path: Path, write, binary: bool = False):
 
     #1075: exports stream into the file as they go, so a failure halfway
     must neither truncate the previous file nor leave a partial one behind.
-    Text is written with the platform's newlines, as Path.write_text() did.
+    Text is written with the platform's newlines, as Path.write_text() did
+    (the GPX writer writes LF only, so a line break is one CR LF on Windows,
+    #1329).
     """
     part = path.with_name(path.name + ".part")
     try:
