@@ -1772,6 +1772,18 @@ class MainWindow(QMainWindow):
         self._active_refresh_workers.append(worker)
         worker.start()
 
+    def _discard_pending_refreshes(self) -> None:
+        """Make the result of every RefreshWorker still running stale.
+
+        For code that fills the table itself instead of through
+        _refresh_cache_list(). #1325: a macro calling opensak.clear_filter()
+        and then opensak.filter{} got its filtered list shown at once, but
+        the full list the clear had started loading in the background
+        arrived afterwards and replaced it, with the filter still active.
+        """
+        self._refresh_generation += 1
+        self._offer_clear_filter_generation = None
+
     def _on_refresh_result(
         self, generation: int, table_caches: list, map_caches: list,
         custom_values: object = None,
@@ -2432,6 +2444,7 @@ class MainWindow(QMainWindow):
                 session, fs, self._current_sort,
                 columns=self._visible_table_columns(),
             )
+        self._discard_pending_refreshes()
         self._cache_table.load_caches(caches)
         count = self._cache_table.row_count()
         if count == 1:
@@ -3312,6 +3325,7 @@ class MainWindow(QMainWindow):
         self._quick_filter.setCurrentIndex(0)
         self._quick_filter.blockSignals(False)
         self._populate_filter_profile_combo(select_name=profile_name)
+        self._discard_pending_refreshes()
         self._cache_table.load_caches(caches)
         self._clear_detail_if_filtered_out()
         if get_settings().map_enabled:
