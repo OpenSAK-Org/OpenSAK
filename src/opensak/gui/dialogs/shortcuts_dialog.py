@@ -30,6 +30,11 @@ _DEFAULTS: dict[str, str] = {
     "coord_converter":   "Ctrl+K",
     "projection":        "Ctrl+P",
     "autofit_columns":   "Ctrl+Alt+W",
+    # Issue #1314: GSAK's keys for the user flags.
+    "show_flagged":      "F8",
+    "flag_filtered":     "Shift+F6",
+    "unflag_filtered":   "Shift+F7",
+    "clear_flags":       "F7",
 }
 
 

@@ -76,6 +76,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Alle caches in filter markeren…",
     "action_unflag_filtered":       "Markering wissen van alle caches in filter…",
     "action_clear_flags":           "Alle markeringen in de database wissen…",
+    "action_show_flagged_only":     "Alleen gemarkeerde caches tonen",
 
     # View menu
     "action_refresh":               "&Lijst vernieuwen",
@@ -361,6 +362,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Kaart maximaliseren",
     "shortcut_popout_map":          "Kaart loskoppelen",
     "shortcut_autofit_columns":     "Kolombreedte aanpassen",
+    "shortcut_show_flagged":        "Alleen gemarkeerde caches tonen",
+    "shortcut_flag_filtered":       "Caches in filter markeren",
+    "shortcut_unflag_filtered":     "Markering wissen van caches in filter",
+    "shortcut_clear_flags":         "Alle markeringen in de database wissen",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Extra's",
@@ -1837,6 +1842,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Gevonden",
     "infobar_filter_owned":               "Mijn caches",
     "infobar_filter_inactive":            "Inactief",
+    "filter_label_flagged":               "Gemarkeerd",
     "infobar_owned_no_username":          "Stel je Geocaching.com gebruikersnaam in via Instellingen om op eigen caches te filteren",
 
     # ── Appearance / theme ──────────────────────────────────────────────

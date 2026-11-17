@@ -73,6 +73,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Set flag on all caches in filter…",
     "action_unflag_filtered":       "Clear flag on all caches in filter…",
     "action_clear_flags":           "Clear all flags in database…",
+    "action_show_flagged_only":     "Show flagged caches only",
 
     # View menu
     "action_refresh":               "&Refresh list",
@@ -358,6 +359,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Maximize Map",
     "shortcut_popout_map":          "Pop Out Map",
     "shortcut_autofit_columns":     "Auto-fit Column Widths",
+    "shortcut_show_flagged":        "Show Flagged Caches Only",
+    "shortcut_flag_filtered":       "Set Flag on Caches in Filter",
+    "shortcut_unflag_filtered":     "Clear Flag on Caches in Filter",
+    "shortcut_clear_flags":         "Clear All Flags in Database",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Tools",
@@ -1838,6 +1843,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Found",
     "infobar_filter_owned":               "My caches",
     "infobar_filter_inactive":            "Inactive",
+    "filter_label_flagged":               "Flagged",
     "infobar_owned_no_username":          "Set your Geocaching.com username in Settings to filter by your own caches",
 
     # ── Appearance / theme ──────────────────────────────────────────────

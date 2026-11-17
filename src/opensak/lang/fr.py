@@ -73,6 +73,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Placer un drapeau sur toutes les caches du filtre…",
     "action_unflag_filtered":       "Retirer le drapeau de toutes les caches du filtre…",
     "action_clear_flags":           "Effacer tous les drapeaux de la base…",
+    "action_show_flagged_only":     "Afficher uniquement les caches avec drapeau",
 
     # View menu
     "action_refresh":               "&Rafraîchir la liste",
@@ -358,6 +359,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Agrandir la carte",
     "shortcut_popout_map":          "Détacher la carte",
     "shortcut_autofit_columns":     "Ajuster la largeur des colonnes",
+    "shortcut_show_flagged":        "Afficher uniquement les caches avec drapeau",
+    "shortcut_flag_filtered":       "Placer un drapeau sur les caches du filtre",
+    "shortcut_unflag_filtered":     "Retirer le drapeau des caches du filtre",
+    "shortcut_clear_flags":         "Effacer tous les drapeaux de la base",
 
     # ── Menu Outils de géocaching ─────────────────────────────────────────────
     "menu_gc_tools":                "&Outils géo",
@@ -1840,6 +1845,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Trouvées",
     "infobar_filter_owned":               "Mes caches",
     "infobar_filter_inactive":            "Inactives",
+    "filter_label_flagged":               "Avec drapeau",
     "infobar_owned_no_username":          "Définissez votre nom d'utilisateur Geocaching.com dans les Paramètres pour filtrer vos propres caches",
 
     # ── Appearance / theme ──────────────────────────────────────────────

@@ -1238,8 +1238,9 @@ class TestBulkAndFlags:
         menu = seeded_window._user_flags_menu
         assert menu.title() == tr("menu_user_flags")
         texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-        assert texts == [tr("action_flag_filtered"), tr("action_unflag_filtered"),
-                         tr("action_clear_flags")]
+        # #1314: "Show flagged caches only" first.
+        assert texts == [tr("action_show_flagged_only"), tr("action_flag_filtered"),
+                         tr("action_unflag_filtered"), tr("action_clear_flags")]
 
 
 # ── sort save/load ────────────────────────────────────────────────────────────

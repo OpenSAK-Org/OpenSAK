@@ -73,6 +73,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Flagga alla cachar i filtret…",
     "action_unflag_filtered":       "Ta bort flaggan från alla cachar i filtret…",
     "action_clear_flags":           "Rensa alla flaggor i databasen…",
+    "action_show_flagged_only":     "Visa endast flaggade cachar",
 
     # View menu
     "action_refresh":               "&Uppdatera listan",
@@ -358,6 +359,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Maximera karta",
     "shortcut_popout_map":          "Koppla loss karta",
     "shortcut_autofit_columns":     "Anpassa kolumnbredd",
+    "shortcut_show_flagged":        "Visa endast flaggade cachar",
+    "shortcut_flag_filtered":       "Flagga cachar i filtret",
+    "shortcut_unflag_filtered":     "Ta bort flaggan från cachar i filtret",
+    "shortcut_clear_flags":         "Rensa alla flaggor i databasen",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Verktyg",
@@ -1839,6 +1844,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Hittade",
     "infobar_filter_owned":               "Mina cacher",
     "infobar_filter_inactive":            "Inaktiva",
+    "filter_label_flagged":               "Flaggade",
     "infobar_owned_no_username":          "Ange ditt Geocaching.com-användarnamn i Inställningar för att filtrera på egna cacher",
 
     # ── Appearance / theme ──────────────────────────────────────────────

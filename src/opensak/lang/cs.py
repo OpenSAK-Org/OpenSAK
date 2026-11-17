@@ -73,6 +73,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Nastavit příznak u všech kešů ve filtru…",
     "action_unflag_filtered":       "Odebrat příznak u všech kešů ve filtru…",
     "action_clear_flags":           "Odebrat všechny příznaky v databázi…",
+    "action_show_flagged_only":     "Zobrazit jen keše s příznakem",
 
     # View menu
     "action_refresh":               "&Obnovit seznam",
@@ -358,6 +359,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Maximalizovat mapu",
     "shortcut_popout_map":          "Odpojit mapu",
     "shortcut_autofit_columns":     "Přizpůsobit šířku sloupců",
+    "shortcut_show_flagged":        "Zobrazit jen keše s příznakem",
+    "shortcut_flag_filtered":       "Nastavit příznak u kešů ve filtru",
+    "shortcut_unflag_filtered":     "Odebrat příznak u kešů ve filtru",
+    "shortcut_clear_flags":         "Odebrat všechny příznaky v databázi",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Nástroje",
@@ -1835,6 +1840,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Nalezené",
     "infobar_filter_owned":               "Moje keše",
     "infobar_filter_inactive":            "Neaktivní",
+    "filter_label_flagged":               "S příznakem",
     "infobar_owned_no_username":          "Nastavte své uživatelské jméno Geocaching.com v Nastavení pro filtrování vlastních keší",
 
     # ── Appearance / theme ──────────────────────────────────────────────

@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self._apply_saved_shortcuts()
         self._macro_shortcut_actions: list[QAction] = []
         self._apply_macro_shortcuts()
+        self._apply_user_flag_shortcut_defaults()
         self._setup_search_bar()
         self._setup_macro_toolbar()
         self._setup_statusbar()
@@ -497,19 +498,28 @@ class MainWindow(QMainWindow):
         # filter, or (the original action) every cache in the database.
         self._user_flags_menu = wp_menu.addMenu(tr("menu_user_flags"))
 
-        act_flag_filtered = QAction(tr("action_flag_filtered"), self)
-        act_flag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(True))
-        self._user_flags_menu.addAction(act_flag_filtered)
-
-        act_unflag_filtered = QAction(tr("action_unflag_filtered"), self)
-        act_unflag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(False))
-        self._user_flags_menu.addAction(act_unflag_filtered)
+        # Issue #1314: one key to show only the flagged caches (GSAK's F8).
+        # The default shortcuts of these actions are set by
+        # _apply_user_flag_shortcut_defaults(), after the macro shortcuts.
+        self._act_show_flagged = QAction(tr("action_show_flagged_only"), self)
+        self._act_show_flagged.triggered.connect(self._show_flagged_only)
+        self._user_flags_menu.addAction(self._act_show_flagged)
 
         self._user_flags_menu.addSeparator()
 
-        act_clear_flags = QAction(tr("action_clear_flags"), self)
-        act_clear_flags.triggered.connect(self._clear_all_flags)
-        self._user_flags_menu.addAction(act_clear_flags)
+        self._act_flag_filtered = QAction(tr("action_flag_filtered"), self)
+        self._act_flag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(True))
+        self._user_flags_menu.addAction(self._act_flag_filtered)
+
+        self._act_unflag_filtered = QAction(tr("action_unflag_filtered"), self)
+        self._act_unflag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(False))
+        self._user_flags_menu.addAction(self._act_unflag_filtered)
+
+        self._user_flags_menu.addSeparator()
+
+        self._act_clear_flags = QAction(tr("action_clear_flags"), self)
+        self._act_clear_flags.triggered.connect(self._clear_all_flags)
+        self._user_flags_menu.addAction(self._act_clear_flags)
 
         wp_menu.addSeparator()
 
@@ -2568,7 +2578,38 @@ class MainWindow(QMainWindow):
             ("maximize_map",      "shortcut_maximize_map",      [self._act_maximize_map]),
             ("popout_map",        "shortcut_popout_map",        [self._act_popout_map]),
             ("autofit_columns",   "shortcut_autofit_columns",   [self._act_autofit_columns]),
+            # Issue #1314: GSAK-style keys for the user flags.
+            ("show_flagged",      "shortcut_show_flagged",      [self._act_show_flagged]),
+            ("flag_filtered",     "shortcut_flag_filtered",     [self._act_flag_filtered]),
+            ("unflag_filtered",   "shortcut_unflag_filtered",   [self._act_unflag_filtered]),
+            ("clear_flags",       "shortcut_clear_flags",       [self._act_clear_flags]),
         ]
+
+    # Issue #1314: settings keys whose default shortcut is set here rather
+    # than when the action is created — see _apply_user_flag_shortcut_defaults().
+    _USER_FLAG_SHORTCUT_KEYS = ("show_flagged", "flag_filtered", "unflag_filtered", "clear_flags")
+
+    def _apply_user_flag_shortcut_defaults(self) -> None:
+        """Issue #1314: give the User Flags actions their GSAK-style default
+        keys (F8, Shift+F6, Shift+F7, F7), unless the user chose their own
+        in Keyboard Shortcuts, or already uses the key for a macro — the
+        issue's own workaround binds a macro to F8. Two actions with the
+        same key would both stop working (issue #678)."""
+        from PySide6.QtCore import QSettings
+        from opensak.gui.dialogs.shortcuts_dialog import _DEFAULTS
+        s = QSettings("OpenSAK Project", "OpenSAK")
+        macro_keys = {
+            seq.toString(QKeySequence.SequenceFormat.PortableText)
+            for act in self._macro_shortcut_actions for seq in act.shortcuts()
+        }
+        for key, _label, actions in self._shortcut_registry:
+            if key not in self._USER_FLAG_SHORTCUT_KEYS or s.value(f"shortcuts/{key}", ""):
+                continue
+            default = QKeySequence(_DEFAULTS[key])
+            if default.toString(QKeySequence.SequenceFormat.PortableText) in macro_keys:
+                continue
+            for act in actions:
+                act.setShortcut(default)
 
     def _apply_saved_shortcuts(self) -> None:
         from PySide6.QtCore import QSettings
@@ -3034,6 +3075,25 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(
             tr("status_flags_set" if flagged else "status_flags_unset", count=changed), 3000
         )
+
+    def _show_flagged_only(self) -> None:
+        """Issue #1314: filter the list to the flagged caches, like F8 in
+        GSAK. Clear filter (Esc) goes back to all caches."""
+        from opensak.db.models import Cache as CacheModel
+        from opensak.filters.engine import UserFlagFilter
+        with get_session() as session:
+            any_flagged = session.query(CacheModel.id).filter(
+                CacheModel.user_flag == True  # noqa: E712
+            ).first() is not None
+        if not any_flagged:
+            # Not the "no results" dialog of Set filter: there is nothing
+            # to adjust, and a hotkey shouldn't open a dialog.
+            self._statusbar.showMessage(tr("filter_lp_no_flagged"), 5000)
+            return
+        fs = FilterSet(mode="AND")
+        fs.add(UserFlagFilter(True))
+        # #1308: a label, not a saved profile.
+        self._on_filter_applied(fs, self._current_sort, "", label=tr("filter_label_flagged"))
 
     def _clear_all_flags(self) -> None:
         """Fjern alle flag (user_flag=False) på alle caches i aktiv database."""

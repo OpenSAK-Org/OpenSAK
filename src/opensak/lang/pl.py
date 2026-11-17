@@ -75,6 +75,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Oznacz wszystkie skrytki w filtrze…",
     "action_unflag_filtered":       "Usuń oznaczenie ze wszystkich skrytek w filtrze…",
     "action_clear_flags":           "Wyczyść wszystkie oznaczenia w bazie danych…",
+    "action_show_flagged_only":     "Pokaż tylko oznaczone skrytki",
 
     # View menu
     "action_refresh":               "&Odśwież listę",
@@ -360,6 +361,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Powiększ mapę",
     "shortcut_popout_map":          "Otwórz mapę w oknie",
     "shortcut_autofit_columns":     "Dopasuj szerokość kolumn",
+    "shortcut_show_flagged":        "Pokaż tylko oznaczone skrytki",
+    "shortcut_flag_filtered":       "Oznacz skrytki w filtrze",
+    "shortcut_unflag_filtered":     "Usuń oznaczenie ze skrytek w filtrze",
+    "shortcut_clear_flags":         "Wyczyść wszystkie oznaczenia w bazie danych",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Narzędzia",
@@ -1840,6 +1845,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Znalezione",
     "infobar_filter_owned":               "Moje skrytki",
     "infobar_filter_inactive":            "Nieaktywne",
+    "filter_label_flagged":               "Oznaczone",
     "infobar_owned_no_username":          "Ustaw swoją nazwę użytkownika Geocaching.com w Ustawieniach, aby filtrować według własnych skrytek",
 
     # ── Appearance / theme ──────────────────────────────────────────────

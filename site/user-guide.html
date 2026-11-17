@@ -1351,12 +1351,14 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
     <h3>Batch Operations on Flagged Caches</h3>
     <ul>
       <li><strong>Waypoint → 🚩 Delete flagged caches…</strong> — delete all flagged caches in the current filter (with confirmation)</li>
-      <li><strong>Waypoint → 🚩 User flags → Set flag on all caches in filter…</strong> — flag every cache currently shown in the list (with confirmation)</li>
-      <li><strong>Waypoint → 🚩 User flags → Clear flag on all caches in filter…</strong> — remove the flag from every cache currently shown in the list (with confirmation)</li>
-      <li><strong>Waypoint → 🚩 User flags → Clear all flags in database…</strong> — remove all flags from the entire active database, regardless of the filter</li>
+      <li><strong>Waypoint → 🚩 User flags → Set flag on all caches in filter…</strong> (<kbd>Shift+F6</kbd>) — flag every cache currently shown in the list (with confirmation)</li>
+      <li><strong>Waypoint → 🚩 User flags → Clear flag on all caches in filter…</strong> (<kbd>Shift+F7</kbd>) — remove the flag from every cache currently shown in the list (with confirmation)</li>
+      <li><strong>Waypoint → 🚩 User flags → Clear all flags in database…</strong> (<kbd>F7</kbd>) — remove all flags from the entire active database, regardless of the filter</li>
     </ul>
 
-    <p>You can also filter for flagged/unflagged caches using the <em>User flag</em> filter in the filter dialog.</p>
+    <h3>Showing Only Flagged Caches</h3>
+    <p>Press <kbd>F8</kbd>, or choose <strong>Waypoint → 🚩 User flags → Show flagged caches only</strong>, to show only the flagged caches, as with F8 in GSAK. Press <kbd>Esc</kbd> (Clear filter) to see all caches again. You can also filter for flagged or unflagged caches with the <em>User flag</em> filter in the filter dialog.</p>
+    <p>The keys are the same as in GSAK and can be changed in <strong>Help → Keyboard Shortcuts…</strong>. If you already gave a macro one of these keys, the macro keeps it.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1894,6 +1896,17 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
       <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
       <tbody>
         <tr><td><kbd>Ctrl+F</kbd></td><td>Open filter dialog</td></tr>
+      </tbody>
+    </table>
+
+    <h3>User Flags</h3>
+    <table>
+      <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>F8</kbd></td><td>Show flagged caches only</td></tr>
+        <tr><td><kbd>Shift+F6</kbd></td><td>Set flag on all caches in filter</td></tr>
+        <tr><td><kbd>Shift+F7</kbd></td><td>Clear flag on all caches in filter</td></tr>
+        <tr><td><kbd>F7</kbd></td><td>Clear all flags in database</td></tr>
       </tbody>
     </table>
 

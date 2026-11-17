@@ -73,6 +73,7 @@ STRINGS: dict[str, str] = {
     "action_flag_filtered":         "Sæt flag på alle caches i filter…",
     "action_unflag_filtered":       "Fjern flag fra alle caches i filter…",
     "action_clear_flags":           "Fjern alle flag i databasen…",
+    "action_show_flagged_only":     "Vis kun caches med flag",
 
     # Vis-menu
     "action_refresh":               "&Opdater liste",
@@ -358,6 +359,10 @@ STRINGS: dict[str, str] = {
     "shortcut_maximize_map":        "Maksimér kort",
     "shortcut_popout_map":          "Pop kort ud",
     "shortcut_autofit_columns":     "Tilpas kolonnebredder",
+    "shortcut_show_flagged":        "Vis kun caches med flag",
+    "shortcut_flag_filtered":       "Sæt flag på caches i filter",
+    "shortcut_unflag_filtered":     "Fjern flag fra caches i filter",
+    "shortcut_clear_flags":         "Fjern alle flag i databasen",
 
     # ── Geocaching Værktøjer-menu ─────────────────────────────────────────────
     "menu_gc_tools":                "&Værktøjer",
@@ -1839,6 +1844,7 @@ STRINGS: dict[str, str] = {
     "infobar_filter_found":               "Fundne",
     "infobar_filter_owned":               "Egne caches",
     "infobar_filter_inactive":            "Inaktive",
+    "filter_label_flagged":               "Med flag",
     "infobar_owned_no_username":          "Angiv dit Geocaching.com brugernavn under Indstillinger for at filtrere på egne caches",
 
     # ── Appearance / theme ──────────────────────────────────────────────
