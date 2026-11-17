@@ -182,6 +182,10 @@ from opensak.gui.icon_provider import get_cache_type_icon
 from opensak.gui.settings import get_settings
 
 
+# Columns of the attribute table (issue #796: the boxes first, then the name).
+_ATTR_COL_YES, _ATTR_COL_NO, _ATTR_COL_ANY, _ATTR_COL_NAME = range(4)
+
+
 # ── Attribute search helpers ──────────────────────────────────────────────────
 
 def _fold(text: str) -> str:
@@ -1667,24 +1671,33 @@ class FilterDialog(QDialog):
         # English names are searchable too, whatever the UI language
         from opensak.lang.en import STRINGS as en_strings
 
+        # Issue #796: the Yes/No/Any boxes come first and the name right after
+        # them. With the name first and stretching with the dialog, the boxes
+        # ended up far from their names on a wide dialog. Alternating row
+        # colours help follow a row across.
         table = QTableWidget(len(unique_attrs), 4)
         self._attr_table = table
         table.setHorizontalHeaderLabels([
-            tr("filter_attr_col_name"), tr("yes"), tr("no"), tr("filter_none_short"),
+            tr("yes"), tr("no"), tr("filter_none_short"), tr("filter_attr_col_name"),
         ])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header = table.horizontalHeader()
+        for col in (_ATTR_COL_YES, _ATTR_COL_NO, _ATTR_COL_ANY):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_ATTR_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_header = QTableWidgetItem(tr("filter_attr_col_name"))
+        name_header.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        table.setHorizontalHeaderItem(_ATTR_COL_NAME, name_header)
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
 
         for i, (attr_id, attr_key) in enumerate(unique_attrs):
             name_item = QTableWidgetItem(tr(attr_key))
             name_item.setToolTip(tr("filter_attr_id_tip", id=attr_id))
-            table.setItem(i, 0, name_item)
+            table.setItem(i, _ATTR_COL_NAME, name_item)
 
             ja_cb    = QCheckBox()
             nej_cb   = QCheckBox()
@@ -1710,7 +1723,8 @@ class FilterDialog(QDialog):
 
             make_exclusive(ja_cb, nej_cb, ingen_cb)
 
-            for col, cb in enumerate([ja_cb, nej_cb, ingen_cb], start=1):
+            for col, cb in zip((_ATTR_COL_YES, _ATTR_COL_NO, _ATTR_COL_ANY),
+                               (ja_cb, nej_cb, ingen_cb)):
                 cell = QWidget()
                 cell_layout = QHBoxLayout(cell)
                 cell_layout.addWidget(cb)
