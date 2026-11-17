@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from functools import cmp_to_key
 from typing import Any, Optional
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCollator, QLocale, Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QPushButton,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 from opensak.filters.engine import CUSTOM_SORT_PREFIX
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from opensak.lang import tr
+from opensak.lang import current_language, tr
 from opensak.settings_store import get_store
 from opensak.gui.icon_provider import get_corrected_coords_icon
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
@@ -100,6 +101,34 @@ def get_all_columns():
         (fid, tr("column_custom_label", name=name), w, False)
         for fid, name, w in custom_columns()
     ]
+
+
+# Issue #1321: OpenSAK language codes that aren't the Qt locale of the
+# language ("se" is Northern Sami to Qt; OpenSAK's se.py is Swedish).
+_COLLATION_LOCALES = {"se": "sv"}
+
+
+def _name_for_sorting(name: str) -> str:
+    """*name* without a leading icon such as the 🚩 of User Flag."""
+    for i, ch in enumerate(name):
+        if ch.isalnum():
+            return name[i:]
+    return name
+
+
+def sorted_by_name(columns: list) -> list:
+    """*columns* (as from get_all_columns()) in alphabetical order of their
+    shown names, by the rules of the UI language — case-insensitive, and
+    with æ/ø/å after z in Danish (issue #1321)."""
+    lang = current_language()
+    collator = QCollator(QLocale(_COLLATION_LOCALES.get(lang, lang)))
+    collator.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+
+    def compare(a, b) -> int:
+        result = collator.compare(_name_for_sorting(a[1]), _name_for_sorting(b[1]))
+        return result or (a[1] > b[1]) - (a[1] < b[1])
+
+    return sorted(columns, key=cmp_to_key(compare))
 
 
 # ── Custom fields (#1028 step 4) ──────────────────────────────────────────────
@@ -575,7 +604,9 @@ class ColumnChooserDialog(QDialog):
         self._update_view_buttons()
 
         self._list = QListWidget()
-        for col_id, col_name, _, _ in get_all_columns():
+        # Issue #1321: alphabetical, so a column can be found in the long
+        # list. The order of the columns in the cache list is not affected.
+        for col_id, col_name, _, _ in sorted_by_name(get_all_columns()):
             item = QListWidgetItem(col_name)
             if col_id == "corrected":
                 # Issue #354: same SVG warning-triangle used in the column
