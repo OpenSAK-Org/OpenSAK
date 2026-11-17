@@ -1013,8 +1013,36 @@ def _parse_extra_wpt(wpt_el) -> Optional[dict]:
     }
 
 
-def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 500) -> int:
+def _note_unmatched(unmatched: Optional[list[str]], suffix: str, wps: list) -> None:
+    """Issue #648: add the codes of waypoints with no cache (prefix + suffix,
+    e.g. "PK2345") to *unmatched*, when the caller collects them."""
+    if unmatched is not None:
+        unmatched.extend(f"{wp.get('prefix') or ''}{suffix}" for wp in wps)
+
+
+# Issue #648: how many waypoint codes the warning names as examples.
+_UNMATCHED_EXAMPLES = 5
+
+
+def _report_unmatched_wpts(result: "ImportResult", codes: list[str]) -> None:
+    """Issue #648: warn when waypoints were skipped because their caches are
+    not in the database, e.g. a -wpts.gpx imported without its cache GPX.
+    Before, such an import ended as a silent success with all counts at 0."""
+    if not codes:
+        return
+    unique = sorted(set(codes))
+    examples = ", ".join(unique[:_UNMATCHED_EXAMPLES])
+    if len(unique) > _UNMATCHED_EXAMPLES:
+        examples += ", …"
+    result.warnings.append(tr("import_wpts_without_cache", count=len(codes), codes=examples))
+
+
+def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 500,
+                       unmatched: Optional[list[str]] = None) -> int:
     """Insert/update extra (inline) waypoints.
+
+    Issue #648: waypoints whose cache isn't in the database are skipped; their
+    codes are added to *unmatched* so the import can say so.
 
     Builds one suffix→cache_id lookup in RAM to avoid a LIKE query per waypoint,
     and deletes all stale waypoints for the affected caches in a single batched
@@ -1051,6 +1079,7 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
     for suffix, wps in wpts_by_suffix.items():
         cache_id = suffix_to_cache_id.get(suffix)
         if cache_id is None:
+            _note_unmatched(unmatched, suffix, wps)
             continue
 
         parent_gc = suffix_to_gc_code.get(suffix)
@@ -1863,6 +1892,7 @@ def _flush_cache_batch_isolated(
 def _link_extra_waypoints(
     session: Session,
     extra: dict[str, list[dict]],
+    unmatched: Optional[list[str]] = None,
 ) -> int:
     """
     Match parsed companion (-wpts.gpx) waypoints to caches already in the DB and
@@ -1896,6 +1926,9 @@ def _link_extra_waypoints(
         if pair is not None:
             resolved[suffix] = pair[0]
             resolved_gc[suffix] = pair[1]
+        else:
+            # Issue #648: no cache for these waypoints in the database.
+            _note_unmatched(unmatched, suffix, extra[suffix])
 
     if not resolved:
         return 0
@@ -2232,16 +2265,21 @@ def import_gpx(
                     seen.add(key)
                     unique_wpts.append(wp)
             
-            result.waypoints += _insert_extra_wpts(db_session, unique_wpts)
+            unmatched: list[str] = []
+            result.waypoints += _insert_extra_wpts(db_session, unique_wpts, unmatched=unmatched)
             db_session.commit()
+            _report_unmatched_wpts(result, unmatched)
 
         # Process companion waypoint files (_wpts.gpx) if present
         if wpts_path and wpts_path.exists():
             try:
                 wpts_tree = _parse_xml(wpts_path)
                 extra_data = _parse_extra_waypoints(wpts_tree)
-                result.waypoints += _link_extra_waypoints(db_session, extra_data)
+                companion_unmatched: list[str] = []
+                result.waypoints += _link_extra_waypoints(
+                    db_session, extra_data, unmatched=companion_unmatched)
                 db_session.commit()
+                _report_unmatched_wpts(result, companion_unmatched)
             except Exception as e:
                 result.errors.append(tr("import_err_waypoints", file=wpts_path.name, error=e))
 
@@ -2351,8 +2389,11 @@ def import_zip(
                         if key not in seen:
                             seen.add(key)
                             unique_wpts.append(wp)
-                    overall_result.waypoints += _insert_extra_wpts(db_session, unique_wpts)
+                    zip_unmatched: list[str] = []
+                    overall_result.waypoints += _insert_extra_wpts(
+                        db_session, unique_wpts, unmatched=zip_unmatched)
                     db_session.commit()
+                    _report_unmatched_wpts(overall_result, zip_unmatched)
 
             custom_values.report(overall_result)
 
@@ -2361,8 +2402,11 @@ def import_zip(
                 try:
                     wpts_tree = _parse_xml(companion_path)
                     companion_data = _parse_extra_waypoints(wpts_tree)
-                    overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
+                    zip_companion_unmatched: list[str] = []
+                    overall_result.waypoints += _link_extra_waypoints(
+                        db_session, companion_data, unmatched=zip_companion_unmatched)
                     db_session.commit()
+                    _report_unmatched_wpts(overall_result, zip_companion_unmatched)
                 except Exception as e:
                     overall_result.errors.append(
                         tr("import_err_waypoints", file=companion_path.name, error=e))

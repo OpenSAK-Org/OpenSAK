@@ -2213,6 +2213,7 @@ STRINGS: dict[str, str] = {
     "import_err_bad_zip": "{file} není platný soubor zip",
     "import_err_no_gpx": "V souboru zip nebyl nalezen žádný soubor .gpx",
     "import_loc_warning": "Soubory .loc obsahují pouze souřadnice a název — pro úplné informace o keši importujte soubor GPX",
+    "import_wpts_without_cache": "{count} waypointů nebylo importováno, protože jejich keše nejsou v této databázi (např. {codes}). Nejprve importujte soubor GPX s kešemi a potom waypointy.",
     "gsak_warn_duplicate_log": "{gc_code}: duplicitní ID logu {log_id} přeskočeno",
     "gsak_err_db_not_found": "Databáze GSAK nenalezena: {path}",
     "gsak_err_cannot_open": "Databázi GSAK nelze otevřít: {error}",

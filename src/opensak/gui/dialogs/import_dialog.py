@@ -497,8 +497,11 @@ class ImportDialog(WorkerGuardMixin, SavedSettingsDialog):
         path = self._run_paths[index]
         row = self._run_rows[index]
         # A folder stays marked failed when one of its files failed.
+        # Issue #648: a file that only gave warnings and imported nothing is
+        # not a plain success.
+        nothing = result.created == 0 and result.updated == 0 and result.waypoints == 0
         if row not in self._failed_rows:
-            self._set_row_icon(row, "✅")
+            self._set_row_icon(row, "⚠️" if result.warnings and nothing else "✅")
 
         lines = [
             tr("import_complete", name=path.name),
@@ -507,6 +510,12 @@ class ImportDialog(WorkerGuardMixin, SavedSettingsDialog):
             f"  {tr('import_waypoints'):<20} {result.waypoints}",
             f"  {tr('import_skipped'):<20} {result.skipped}",
         ]
+        # Issue #648: the importer's warnings (waypoints without a cache,
+        # .loc files, unknown custom fields) were never shown here.
+        if result.warnings:
+            lines.append(tr("gsak_import_warnings_header", count=len(result.warnings)))
+            for w in result.warnings:
+                lines.append(f"    ⚠ {w}")
         if result.errors:
             lines.append(tr("import_errors_header", count=len(result.errors)))
             for e in result.errors_shown():

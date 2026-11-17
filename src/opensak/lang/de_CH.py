@@ -2219,6 +2219,7 @@ STRINGS: dict[str, str] = {
     "import_err_bad_zip": "{file} ist keine gültige ZIP-Datei",
     "import_err_no_gpx": "Keine .gpx-Datei in der ZIP-Datei gefunden",
     "import_loc_warning": ".loc-Dateien enthalten nur Koordinaten und Namen — importieren Sie eine GPX-Datei, um vollständige Cache-Informationen zu erhalten",
+    "import_wpts_without_cache": "{count} Wegpunkte wurden nicht importiert, weil ihre Caches nicht in dieser Datenbank sind (z. B. {codes}). Importiere zuerst die GPX-Datei mit den Caches, dann die Wegpunkte.",
     "gsak_warn_duplicate_log": "{gc_code}: doppelte Log-ID {log_id} übersprungen",
     "gsak_err_db_not_found": "GSAK-Datenbank nicht gefunden: {path}",
     "gsak_err_cannot_open": "Die GSAK-Datenbank konnte nicht geöffnet werden: {error}",

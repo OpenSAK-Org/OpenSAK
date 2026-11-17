@@ -2217,6 +2217,7 @@ STRINGS: dict[str, str] = {
     "import_err_bad_zip": "{file} är inte en giltig zip-fil",
     "import_err_no_gpx": "Ingen .gpx-fil hittades i zip-filen",
     "import_loc_warning": ".loc-filer innehåller bara koordinater och namn — importera en GPX-fil för fullständig cacheinformation",
+    "import_wpts_without_cache": "{count} waypoints importerades inte eftersom deras cachar inte finns i den här databasen (t.ex. {codes}). Importera först GPX-filen med cacharna och sedan waypoints.",
     "gsak_warn_duplicate_log": "{gc_code}: dubblett av logg-ID {log_id} hoppades över",
     "gsak_err_db_not_found": "GSAK-databasen hittades inte: {path}",
     "gsak_err_cannot_open": "Kunde inte öppna GSAK-databasen: {error}",

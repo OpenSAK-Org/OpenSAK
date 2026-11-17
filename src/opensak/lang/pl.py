@@ -2218,6 +2218,7 @@ STRINGS: dict[str, str] = {
     "import_err_bad_zip": "{file} nie jest prawidłowym plikiem zip",
     "import_err_no_gpx": "Nie znaleziono pliku .gpx w archiwum zip",
     "import_loc_warning": "Pliki .loc zawierają tylko współrzędne i nazwę — zaimportuj plik GPX, aby uzyskać pełne informacje o skrytce",
+    "import_wpts_without_cache": "{count} punktów nie zaimportowano, ponieważ ich skrytek nie ma w tej bazie danych (np. {codes}). Najpierw zaimportuj plik GPX ze skrytkami, a potem punkty.",
     "gsak_warn_duplicate_log": "{gc_code}: pominięto zduplikowany identyfikator logu {log_id}",
     "gsak_err_db_not_found": "Nie znaleziono bazy danych GSAK: {path}",
     "gsak_err_cannot_open": "Nie można otworzyć bazy danych GSAK: {error}",
