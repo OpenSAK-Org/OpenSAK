@@ -120,6 +120,8 @@ class TestDefaultsDict:
             "manage_databases", "import", "quit", "add_cache", "edit_cache",
             "delete_cache", "refresh", "filter", "settings", "gps_export",
             "trip_planner", "coord_converter", "projection", "autofit_columns",
+            # Reset all left these three without a key.
+            "clear_filter", "maximize_map", "popout_map",
             # Issue #1314: the User Flags actions.
             "show_flagged", "flag_filtered", "unflag_filtered", "clear_flags",
         }
