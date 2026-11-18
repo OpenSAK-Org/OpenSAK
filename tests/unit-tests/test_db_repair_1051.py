@@ -19,6 +19,7 @@ pytest.importorskip("pytestqt")
 from opensak.db import companion, maintenance, repair
 from opensak.db.database import dispose_engine, get_session, init_db
 from opensak.db.models import Cache, Log, UserNote, Waypoint
+from opensak.db.repair_dates import Detail
 from opensak.gui.dialogs import database_maintenance_dialog as dmd
 from opensak.gui.dialogs import database_repair_dialog as drd
 from opensak.lang import load_language, tr
@@ -111,11 +112,18 @@ class TestScan:
             repair.COORDS: 1, repair.RATINGS: 1, repair.IDENTITY: 1,
         }
         by_key = {f.key: f for f in result.findings}
-        assert by_key[repair.PARENT_LINK].examples == ("CW2",)
-        assert by_key[repair.WAYPOINT_PARENT].examples == ("GC1",)
-        assert by_key[repair.CORRECTED_FLAG].examples == ("GC2",)
-        assert by_key[repair.RATINGS].examples == ("GC3",)
-        assert by_key[repair.IDENTITY].examples == ("GC4",)
+        # Each affected row with the field and its stored value (#1051 feedback).
+        assert by_key[repair.PARENT_LINK].details == (Detail("CW2", "parent_gc_code", "gc404"),)
+        assert by_key[repair.WAYPOINT_PARENT].details == (
+            Detail("GC1", "waypoints.parent_gc_code", "GC2"),)
+        assert by_key[repair.CORRECTED_FLAG].details == (Detail("GC2", "corrected", "NULL, 8.1"),)
+        assert by_key[repair.RATINGS].details == (
+            Detail("GC3", "difficulty / terrain", "1.3 / 6.0"),)
+        assert by_key[repair.IDENTITY].details == (
+            Detail("GC4", "gc_code / name", "'GC4' / '  '"),)
+        assert by_key[repair.COORDS].details == (
+            Detail("GC3", "latitude, longitude", "95.0, 8.0"),)
+        assert by_key[repair.RATINGS].examples == ("GC3 difficulty / terrain 1.3 / 6.0",)
         assert not by_key[repair.COORDS].fixable
         # The parent may be in another database or be imported later.
         assert not by_key[repair.PARENT_LINK].fixable
@@ -148,9 +156,12 @@ class TestScan:
                 conn.execute("INSERT INTO caches (gc_code, name, cache_type, latitude, longitude, "
                              f"difficulty) VALUES ('GCX{n}', 'x', 'T', 1, 1, 7)")
         conn.close()
-        finding = next(f for f in repair.scan(db).findings if f.check == repair.RATINGS)
+        with patch.object(repair, "MAX_DETAILS", repair.MAX_EXAMPLES + 1):
+            finding = next(f for f in repair.scan(db).findings if f.check == repair.RATINGS)
         assert finding.count == repair.MAX_EXAMPLES + 3
         assert len(finding.examples) == repair.MAX_EXAMPLES
+        assert len(finding.details) == repair.MAX_EXAMPLES + 1
+        assert [d.gc_code for d in finding.details] == sorted(d.gc_code for d in finding.details)
 
     def test_damaged_file_skips_the_data_checks(self, tmp_path):
         db = _healthy(tmp_path / "Ok.db")
@@ -356,3 +367,45 @@ class TestDialog:
             dlg._btn_repair.click()
         run.assert_called_once()
         qtbot.waitUntil(lambda: not dlg.is_running(), timeout=10000)
+
+
+# ── Copy list (#1051 feedback: fix report-only problems by hand) ──────────────
+
+class TestCopy:
+    def test_copy_text(self):
+        findings = [
+            repair.Finding(repair.RATINGS, 3, False, (
+                Detail("GC3", "difficulty / terrain", "1.3 / 6.0"),
+                Detail("GC5", "difficulty / terrain", "7.0 / 1.0"))),
+            repair.Finding(repair.ORPHANS, 4, True, table="logs"),
+        ]
+        lines = drd.copy_text(findings).splitlines()
+        assert lines[0].split("\t") == [tr("repair_col_check"), tr("col_gc_code"),
+                                        tr("repair_col_field"), tr("repair_col_value")]
+        ratings = tr("repair_chk_ratings")
+        assert lines[1].split("\t") == [ratings, "GC3", "difficulty / terrain", "1.3 / 6.0"]
+        assert lines[2].split("\t") == [ratings, "GC5", "difficulty / terrain", "7.0 / 1.0"]
+        assert lines[3].split("\t") == [ratings, "", "", tr("repair_copy_more", count="1")]
+        assert lines[4].split("\t") == [tr("repair_chk_orphans", table="logs"), "", "",
+                                        tr("repair_copy_no_code", count="4")]
+
+    def test_copies_all_rows_or_the_selected_ones(self, qtbot, tmp_path):
+        dlg = _dialog(qtbot, _broken(tmp_path / "Broken.db"))
+        clipboard = drd.QGuiApplication.clipboard()
+        assert clipboard is not None and dlg._btn_copy.isEnabled()
+        dlg._btn_copy.click()
+        text = clipboard.text()
+        assert "GC3\tlatitude, longitude\t95.0, 8.0" in text
+        assert "CW2\tparent_gc_code\tgc404" in text
+        assert tr("repair_copied", count=f"{len(text.splitlines()) - 1:,}") \
+            in dlg._results.toPlainText()
+
+        _rows(dlg)[repair.RATINGS].setSelected(True)
+        dlg.copy_list()
+        lines = clipboard.text().splitlines()
+        assert len(lines) == 2
+        assert lines[1].startswith(tr("repair_chk_ratings") + "\tGC3\t")
+
+    def test_nothing_to_copy_on_a_healthy_database(self, qtbot, tmp_path):
+        dlg = _dialog(qtbot, _healthy(tmp_path / "Ok.db"))
+        assert not dlg._btn_copy.isEnabled()

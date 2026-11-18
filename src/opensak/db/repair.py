@@ -1,6 +1,6 @@
 """
 src/opensak/db/repair.py — check the data of a database and fix what can be
-fixed safely, like GSAK's Repair/Defrag (#1051, phase 1).
+fixed safely, like GSAK's Repair/Defrag (#1051).
 
 #1048 checks the *file* (quick_check, integrity_check, foreign_key_check);
 this module checks the *data*. ``scan()`` only reads and reports every check
@@ -24,12 +24,18 @@ Checks in this phase:
   real user choice (the final is at the listed coordinates).
 * rows of the companion database (#1034) whose cache is gone. Fix:
   ``companion.cleanup()``.
+* dates (phase 2, details in db/repair_dates.py): values SQLAlchemy can't
+  read, which break loading a cache, or that are in another format, which
+  sorts and filters wrongly. Fix: convert them to the stored format, or
+  clear the ones that can't be read as a date at all. GSAK's "no date",
+  1970-01-01, is a check of its own. Fix: clear it.
 * report only: coordinates out of range, difficulty or terrain outside
-  1–5 or not in 0.5 steps, an empty GC code or name, and a custom
-  waypoint's link to its parent cache (``caches.parent_gc_code``) that
-  points to a cache that is not in the database. Every database is
-  independent, so the parent may be in another database or be imported
-  later: the link isn't necessarily wrong, and clearing it would lose it.
+  1–5 or not in 0.5 steps, an empty GC code or name, dates before May 2000
+  or in the future, and a custom waypoint's link to its parent cache
+  (``caches.parent_gc_code``) that points to a cache that is not in the
+  database. Every database is independent, so the parent may be in another
+  database or be imported later: the link isn't necessarily wrong, and
+  clearing it would lose it.
 
 No duplicate check: the unique constraints on attributes, ``logs.log_id``
 and waypoints exist in every database (models since v0.2.0, migrations 2 and
@@ -50,12 +56,18 @@ import logging
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
+
+from opensak.db import repair_dates
+from opensak.db.repair_dates import Detail
 
 logger = logging.getLogger(__name__)
 
-# GC codes listed per check.
+# Affected rows shown in the dialog per check …
 MAX_EXAMPLES = 5
+# … and kept for "Copy list", so the user can fix report-only problems by
+# hand. The count is always complete.
+MAX_DETAILS = 1000
 # Rows per DELETE … WHERE rowid IN (…), below SQLite's bound-parameter limit.
 _CHUNK = 500
 
@@ -69,18 +81,28 @@ COORDS = "coords"
 CORRECTED_COORDS = "corrected_coords"
 RATINGS = "ratings"
 IDENTITY = "identity"
+DATE_FORMAT = "date_format"
+DATE_UNREADABLE = "date_unreadable"
+DATE_PLACEHOLDER = "date_placeholder"
+DATE_RANGE = "date_range"
 
 
 @dataclass(frozen=True)
 class Finding:
     """One check's result. *table* is set for the orphan checks (one finding
-    per table). *fixable* False: report only."""
+    per table). *fixable* False: report only. *details*: the first
+    MAX_DETAILS affected rows, ordered by GC code (none for orphans, whose
+    cache is gone)."""
 
     check: str
     count: int
     fixable: bool
-    examples: tuple[str, ...] = ()
+    details: tuple[Detail, ...] = ()
     table: Optional[str] = None
+
+    @property
+    def examples(self) -> tuple[str, ...]:
+        return tuple(d.text for d in self.details[:MAX_EXAMPLES])
 
     @property
     def key(self) -> str:
@@ -136,12 +158,17 @@ _PARENT_LINK_WHERE = (
     "AND upper(trim(parent_gc_code)) NOT IN (SELECT gc_code FROM caches)"
 )
 
-_REPORT_CHECKS: tuple[tuple[str, str], ...] = (
-    (PARENT_LINK, _PARENT_LINK_WHERE),
-    (COORDS, _COORDS_WHERE),
-    (RATINGS, f"{_rating_bad('difficulty')} OR {_rating_bad('terrain')}"),
-    (IDENTITY, "gc_code IS NULL OR trim(gc_code) = '' OR name IS NULL OR trim(name) = ''"),
+# (id, WHERE on caches, field shown, SQL for the value shown)
+_REPORT_CHECKS: tuple[tuple[str, str, str, str], ...] = (
+    (PARENT_LINK, _PARENT_LINK_WHERE, "parent_gc_code", "parent_gc_code"),
+    (COORDS, _COORDS_WHERE, "latitude, longitude",
+     "quote(latitude) || ', ' || quote(longitude)"),
+    (RATINGS, f"{_rating_bad('difficulty')} OR {_rating_bad('terrain')}", "difficulty / terrain",
+     "quote(difficulty) || ' / ' || quote(terrain)"),
+    (IDENTITY, "gc_code IS NULL OR trim(gc_code) = '' OR name IS NULL OR trim(name) = ''",
+     "gc_code / name", "quote(gc_code) || ' / ' || quote(name)"),
 )
+_CORRECTED_VALUE = "quote(n.corrected_lat) || ', ' || quote(n.corrected_lon)"
 
 _CORRECTED_COORDS_WHERE = (
     "n.is_corrected AND n.corrected_lat IS NOT NULL AND n.corrected_lon IS NOT NULL "
@@ -183,47 +210,85 @@ def scan(db_path: Path, with_companion: bool = False,
             findings.append(Finding(ORPHANS, count, True, table=table))
 
         notify(WAYPOINT_PARENT)
-        count = conn.execute(f"SELECT count(*) {_WAYPOINT_PARENT_FROM}").fetchone()[0]
-        examples = _codes(conn, f"SELECT DISTINCT c.gc_code {_WAYPOINT_PARENT_FROM} "
-                                "ORDER BY c.gc_code") if count else ()
-        findings.append(Finding(WAYPOINT_PARENT, count, True, examples))
+        findings.append(_finding(conn, WAYPOINT_PARENT, True, _WAYPOINT_PARENT_FROM, "c.gc_code",
+                                 "waypoints.parent_gc_code", "w.parent_gc_code"))
 
         notify(CORRECTED_FLAG)
         findings.append(_note_finding(conn, CORRECTED_FLAG, _corrected_flag_where("n"), True))
+
+        notify(DATE_FORMAT)
+        findings += _date_findings(conn)
 
         if with_companion:
             notify(COMPANION_ORPHANS)
             findings.append(Finding(COMPANION_ORPHANS,
                                     sum(_companion_orphans(db_path).values()), True))
 
-        for check, where in _REPORT_CHECKS:
+        for check, where, label, value in _REPORT_CHECKS:
             notify(check)
-            findings.append(_cache_finding(conn, check, where, False))
+            findings.append(_cache_finding(conn, check, where, False, label, value))
         notify(CORRECTED_COORDS)
         findings.append(_note_finding(conn, CORRECTED_COORDS, _CORRECTED_COORDS_WHERE, False))
+        notify(DATE_RANGE)
+        count, dates = repair_dates.out_of_range(conn, MAX_DETAILS)
+        findings.append(Finding(DATE_RANGE, count, False, tuple(dates)))
     finally:
         conn.close()
     return ScanResult(db_path, tuple(findings))
 
 
-def _cache_finding(conn: sqlite3.Connection, check: str, where: str, fixable: bool) -> Finding:
-    count = conn.execute(f"SELECT count(*) FROM caches WHERE {where}").fetchone()[0]
-    examples = _codes(conn, f"SELECT gc_code FROM caches WHERE {where} ORDER BY gc_code") \
-        if count else ()
-    return Finding(check, count, fixable, examples)
+_DATE_CHECKS = (DATE_FORMAT, DATE_UNREADABLE, DATE_PLACEHOLDER)
+
+
+def _date_check(bad: repair_dates.BadDate) -> str:
+    if bad.fixed == repair_dates.EPOCH:
+        return DATE_PLACEHOLDER
+    return DATE_FORMAT if bad.fixed is not None else DATE_UNREADABLE
+
+
+def _all_bad_dates(conn: sqlite3.Connection) -> Iterator[repair_dates.BadDate]:
+    yield from repair_dates.bad_dates(conn)
+    yield from repair_dates.placeholder_dates(conn)
+
+
+def _date_findings(conn: sqlite3.Connection) -> list[Finding]:
+    counts = {check: 0 for check in _DATE_CHECKS}
+    details: dict[str, list[Detail]] = {check: [] for check in _DATE_CHECKS}
+    for bad in _all_bad_dates(conn):
+        check = _date_check(bad)
+        counts[check] += 1
+        kept = details[check]
+        kept.append(bad.detail)
+        if len(kept) > 2 * MAX_DETAILS:     # keep memory flat on a huge log table
+            kept.sort()
+            del kept[MAX_DETAILS:]
+    return [Finding(check, counts[check], True, tuple(sorted(details[check])[:MAX_DETAILS]))
+            for check in counts]
+
+
+def _finding(conn: sqlite3.Connection, check: str, fixable: bool, from_where: str,
+             code_sql: str, label: str, value_sql: str) -> Finding:
+    """A finding from "FROM … WHERE …" *from_where*, with the GC code and
+    value of each affected row from *code_sql* and *value_sql*."""
+    count = conn.execute(f"SELECT count(*) {from_where}").fetchone()[0]
+    rows = conn.execute(
+        f"SELECT {code_sql}, {value_sql} {from_where} ORDER BY 1 LIMIT {MAX_DETAILS}"
+    ).fetchall() if count else []
+    return Finding(check, count, fixable,
+                   tuple(Detail(repair_dates.shown(code), label, repair_dates.shown(value))
+                         for code, value in rows))
+
+
+def _cache_finding(conn: sqlite3.Connection, check: str, where: str, fixable: bool,
+                   label: str, value_sql: str) -> Finding:
+    return _finding(conn, check, fixable, f"FROM caches WHERE {where}", "gc_code",
+                    label, value_sql)
 
 
 def _note_finding(conn: sqlite3.Connection, check: str, where: str, fixable: bool) -> Finding:
-    base = f"FROM user_notes n JOIN caches c ON c.id = n.cache_id WHERE {where}"
-    count = conn.execute(f"SELECT count(*) {base}").fetchone()[0]
-    examples = _codes(conn, f"SELECT c.gc_code {base} ORDER BY c.gc_code") if count else ()
-    return Finding(check, count, fixable, examples)
-
-
-def _codes(conn: sqlite3.Connection, sql: str) -> tuple[str, ...]:
-    rows = conn.execute(f"{sql} LIMIT {MAX_EXAMPLES}").fetchall()
-    # An empty GC code is one of the problems; show it as "''".
-    return tuple(str(r[0]) if r[0] not in (None, "") else "''" for r in rows)
+    return _finding(conn, check, fixable,
+                    f"FROM user_notes n JOIN caches c ON c.id = n.cache_id WHERE {where}",
+                    "c.gc_code", "corrected", _CORRECTED_VALUE)
 
 
 def _orphan_rowids_by_table(conn: sqlite3.Connection, count_only: bool = False) -> dict:
@@ -285,6 +350,9 @@ def repair(db_path: Path, keys: set[str],
             if CORRECTED_FLAG in keys:
                 notify(CORRECTED_FLAG)
                 result.fixed[CORRECTED_FLAG] = _clear_corrected_flags(conn)
+            if keys & set(_DATE_CHECKS):
+                notify(DATE_FORMAT)
+                result.fixed.update(_fix_dates(conn, keys))
     finally:
         conn.close()
     if COMPANION_ORPHANS in keys:
@@ -299,9 +367,34 @@ def repair(db_path: Path, keys: set[str],
     return result
 
 
+def _fix_dates(conn: sqlite3.Connection, keys: set[str]) -> dict[str, int]:
+    """Convert (DATE_FORMAT) the dates not in the stored format, or clear
+    the unreadable ones (DATE_UNREADABLE) and GSAK's 1970-01-01 "no date"
+    (DATE_PLACEHOLDER). A NOT NULL column gets now instead of NULL."""
+    fixed = {check: 0 for check in _DATE_CHECKS}
+    now = repair_dates.now_stored()
+    for bad in list(_all_bad_dates(conn)):
+        check = _date_check(bad)
+        if check not in keys:
+            continue
+        if check == DATE_FORMAT:
+            value: Optional[str] = bad.fixed
+        else:
+            value = now if bad.column.not_null else None
+        conn.execute(
+            f"UPDATE {_quote(bad.column.table)} SET {_quote(bad.column.column)} = ? "
+            "WHERE rowid = ?", (value, bad.rowid))
+        fixed[check] += 1
+    return fixed
+
+
+def _quote(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _delete_rowids(conn: sqlite3.Connection, table: str, rowids: list[int]) -> int:
     removed = 0
-    quoted = '"' + table.replace('"', '""') + '"'
+    quoted = _quote(table)
     for start in range(0, len(rowids), _CHUNK):
         chunk = rowids[start:start + _CHUNK]
         marks = ", ".join("?" * len(chunk))
