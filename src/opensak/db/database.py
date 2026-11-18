@@ -127,7 +127,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 # Steps of opening a database that can take a while, for set_progress_callback().
 PROGRESS_MIGRATING = "migrating"
@@ -1180,6 +1180,28 @@ def _run_migrations(engine: Engine) -> None:
         if changed_28:
             logger.info(f"Migration: set caches.is_owner on {changed_28} caches")
         conn.commit()
+
+        # ── Migration 29: GSAK's <br> in trackable names (#1331) ─────────────
+        logger.debug("[migrations] entering migration 29 (+%.2fs)", time.monotonic() - _mig_t0)
+        # The GSAK import kept the "<BR>" GSAK puts in front of every
+        # TravelBugs line as part of the name. Strip it from names imported
+        # before the fix. LIKE is case-insensitive for ASCII, so this finds
+        # <BR>, <br/> etc.; a name without the tag is never touched, which
+        # also makes this safe to run again.
+        from opensak.importer.gsak_importer import strip_leading_br
+        cleaned_29 = [
+            {"id": row_id, "name": strip_leading_br(name)}
+            for row_id, name in conn.execute(text(
+                "SELECT id, name FROM trackables WHERE name LIKE '<br%'"
+            )).fetchall()
+        ]
+        cleaned_29 = [r for r in cleaned_29 if r["name"]]
+        if cleaned_29:
+            conn.execute(
+                text("UPDATE trackables SET name = :name WHERE id = :id"), cleaned_29
+            )
+            conn.commit()
+            logger.info(f"Migration: removed <br> from {len(cleaned_29)} trackable names")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

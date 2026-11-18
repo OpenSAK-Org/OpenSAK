@@ -246,6 +246,17 @@ _TRAVELBUG_LINE_PATTERN = re.compile(
     r"^(?P<name>.*?)\s*\(id\s*=\s*(?P<id>\d+)\s*,\s*ref\s*=\s*(?P<ref>[A-Za-z0-9]+)\)\s*$"
 )
 
+# Issue #1331: GSAK starts every TravelBugs line with an HTML line break
+# (``<BR>Best TB ever (id = ...)``). It is formatting, not part of the name.
+# Strip any number of leading ``<br>`` / ``<br/>`` / ``<br />``, any case.
+_LEADING_BR_PATTERN = re.compile(r"^(?:<br\s*/?>\s*)+", re.IGNORECASE)
+
+
+def strip_leading_br(text: str) -> str:
+    """*text* without GSAK's leading ``<br>`` tags (#1331). Also used by
+    migration 29 to clean trackable names imported before the fix."""
+    return _LEADING_BR_PATTERN.sub("", text)
+
 
 def _parse_gsak_trackables(raw: Optional[str]) -> list[dict]:
     """Parse GSAK's ``CacheMemo.TravelBugs`` free-text field into a list of
@@ -259,7 +270,7 @@ def _parse_gsak_trackables(raw: Optional[str]) -> list[dict]:
         return []
     trackables: list[dict] = []
     for line in raw.splitlines():
-        line = line.strip()
+        line = strip_leading_br(line.strip())
         if not line:
             continue
         m = _TRAVELBUG_LINE_PATTERN.match(line)
