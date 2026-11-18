@@ -2603,7 +2603,9 @@ class MainWindow(QMainWindow):
             for act in self._macro_shortcut_actions for seq in act.shortcuts()
         }
         for key, _label, actions in self._shortcut_registry:
-            if key not in self._USER_FLAG_SHORTCUT_KEYS or s.value(f"shortcuts/{key}", ""):
+            # Issue #1336: a saved value, also an empty one (a key the user
+            # removed), is the user's choice and wins over the default.
+            if key not in self._USER_FLAG_SHORTCUT_KEYS or s.value(f"shortcuts/{key}") is not None:
                 continue
             default = QKeySequence(_DEFAULTS[key])
             if default.toString(QKeySequence.SequenceFormat.PortableText) in macro_keys:
@@ -2615,15 +2617,23 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QSettings
         s = QSettings("OpenSAK Project", "OpenSAK")
         for key, _label, actions in self._shortcut_registry:
-            saved = s.value(f"shortcuts/{key}", "")
-            if saved:
-                seq = QKeySequence(str(saved))
-                for act in actions:
-                    act.setShortcut(seq)
+            saved = s.value(f"shortcuts/{key}")
+            if saved is None:
+                continue  # never changed: the action keeps its default key
+            # Issue #1336: an empty value is a key the user removed in
+            # Keyboard Shortcuts — it must stay removed after a restart.
+            seq = QKeySequence(str(saved)) if saved else QKeySequence()
+            for act in actions:
+                act.setShortcut(seq)
 
     def _open_shortcuts(self) -> None:
         from opensak.gui.dialogs.shortcuts_dialog import ShortcutsDialog
         from PySide6.QtCore import QSettings
+        portable = QKeySequence.SequenceFormat.PortableText
+        before = {
+            key: actions[0].shortcut().toString(portable)
+            for key, _label, actions in self._shortcut_registry
+        }
         dlg = ShortcutsDialog(self._shortcut_registry, self)
         if dlg.exec():
             new_shortcuts = dlg.get_shortcuts()
@@ -2632,8 +2642,14 @@ class MainWindow(QMainWindow):
                 seq_str = new_shortcuts.get(key, "")
                 if seq_str:
                     s.setValue(f"shortcuts/{key}", seq_str)
-                else:
-                    s.remove(f"shortcuts/{key}")
+                elif before[key]:
+                    # Issue #1336: the user removed the key. Save it as an
+                    # empty value — removing the setting meant "use the
+                    # default", so the default key came back at next start.
+                    s.setValue(f"shortcuts/{key}", "")
+                # No key before and none now: leave the setting as it is,
+                # so a user-flag action that gave its default key to a
+                # macro (#1314) still gets it back if the macro goes.
                 seq = QKeySequence(seq_str) if seq_str else QKeySequence()
                 for act in actions:
                     act.setShortcut(seq)
