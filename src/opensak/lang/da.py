@@ -1457,6 +1457,8 @@ STRINGS: dict[str, str] = {
     "col_symbol":            "GPX-symbol",
     "col_last_four_logs":    "Seneste fire logs",
     "col_last_four_logs_short": "L4",
+    "col_row_number":           "Rækkenummer",
+    "col_row_number_short":     "#",
 
     # ── Højreklik kontekstmenu ────────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Åbn på geocaching.com",

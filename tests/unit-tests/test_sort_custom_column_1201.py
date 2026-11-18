@@ -17,7 +17,11 @@ from opensak.gui.mainwindow import MainWindow
 def test_every_grid_column_is_a_sort_field():
     from opensak.gui.dialogs.column_dialog import custom_column_id, get_all_columns
 
-    ids = [c[0] for c in get_all_columns()] + [custom_column_id("LFL")]
+    from opensak.gui.cache_table import ROW_NUMBER_COLUMN
+
+    # #545: Row Number is the position in the list, not a value to sort by.
+    ids = [c[0] for c in get_all_columns() if c[0] != ROW_NUMBER_COLUMN]
+    ids += [custom_column_id("LFL")]
     missing = [col for col in ids if not is_sort_field(col)]
     assert missing == [], f"columns SortSpec would refuse: {missing}"
     for col in ids:
@@ -29,7 +33,7 @@ def test_accepted(field):
     assert SortSpec(field, ascending=False).field == field
 
 
-@pytest.mark.parametrize("field", ["custom:", "nonsense", "Custom:LFL"])
+@pytest.mark.parametrize("field", ["custom:", "nonsense", "Custom:LFL", "row_number"])
 def test_still_refused(field):
     with pytest.raises(ValueError, match="Unknown sort field"):
         SortSpec(field)

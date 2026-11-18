@@ -1458,6 +1458,8 @@ STRINGS: dict[str, str] = {
     "col_symbol":            "Symbole GPX",
     "col_last_four_logs":    "Quatre derniers logs",
     "col_last_four_logs_short": "L4",
+    "col_row_number":           "Numéro de ligne",
+    "col_row_number_short":     "#",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Ouvrir sur geocaching.com",

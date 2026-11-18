@@ -92,7 +92,13 @@ _ALL_COLUMNS_DEF = [
     # ── Issue #1141: columns stored since #1139 ────────────────────────────
     ("last_user_update", "col_last_user_update", 90, False),
     ("symbol",          "col_symbol",        110, False),
+    # ── Issue #545: GSAK's Row Number (position in the list, not stored) ──
+    ("row_number",      "col_row_number",     45, False),
 ]
+
+# Issue #545: columns that are put first, not last, when they are chosen.
+_ADDED_FIRST = frozenset({"row_number"})
+
 
 def get_all_columns():
     """Returner kolonner med oversatte navne."""
@@ -762,8 +768,12 @@ class ColumnChooserDialog(QDialog):
         } | ALWAYS_VISIBLE
         old_set = set(old_order)
         visible = [c for c in old_order if c in checked]
-        visible += [fid for fid, *_ in get_all_columns() if fid in checked and fid not in old_set]
-        return visible
+        added = [fid for fid, *_ in get_all_columns() if fid in checked and fid not in old_set]
+        # Issue #545: a newly chosen Row number goes first, where a row
+        # number belongs (and where GSAK shows it); other new columns go
+        # last. Moved elsewhere afterwards, it stays where it was put.
+        first = [fid for fid in added if fid in _ADDED_FIRST]
+        return first + visible + [fid for fid in added if fid not in _ADDED_FIRST]
 
     def _save_view(self) -> None:
         name, ok = QInputDialog.getText(

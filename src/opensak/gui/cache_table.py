@@ -161,6 +161,8 @@ def get_column_defs() -> dict:
         # ── Issue #1141: columns stored since #1139 ─────────────────────────
         "last_user_update": (tr("col_last_user_update"),  90),
         "symbol":          (tr("col_symbol"),            110),
+        # ── Issue #545: GSAK's Row Number ───────────────────────────────────
+        ROW_NUMBER_COLUMN: (tr("col_row_number"),         45),
         # ── #1028 step 4: one column per custom field, header = its name ──
         **{col_id: (name, width) for col_id, name, width in custom_columns()},
     }
@@ -171,9 +173,13 @@ def get_column_defs() -> dict:
 SHORT_HEADER_KEYS: dict[str, str] = {
     "last_four_logs": "col_last_four_logs_short",
     "last_gpx_update": "col_last_gpx_update_short",   # #1004, GSAK's "Last GPX"
+    "row_number": "col_row_number_short",             # #545, "#"
 }
 
-# Room for the sort indicator next to a header's text, in pixels.
+# Issue #545: GSAK's Row Number — the position of the row in the list as
+# it is filtered and sorted now (1, 2, 3 …). Not stored and not sortable.
+ROW_NUMBER_COLUMN = "row_number"
+
 # Issue #733: the only built-in columns that are left-aligned — names and
 # codes read from the first letter, and long free text. Every other column
 # (numbers, dates, icons and short values such as Placed by, Owner name,
@@ -185,6 +191,7 @@ _LEFT_ALIGNED_COLUMNS = frozenset({
     "user_data_1", "user_data_2", "user_data_3", "user_data_4",
 })
 
+# Room for the sort indicator next to a header's text, in pixels.
 _SORT_INDICATOR_ROOM = 16
 
 # Upper bound for an auto-fitted column, so one long cache name or note
@@ -990,6 +997,11 @@ class CacheTableModel(QAbstractTableModel):
         col = self._columns[index.column()]
 
         if role == Qt.ItemDataRole.DisplayRole:
+            if col == ROW_NUMBER_COLUMN:
+                # Issue #545: the model keeps the caches in the order shown,
+                # so the row is the position — recomputed on every sort and
+                # filter, since both reset the model.
+                return str(index.row() + 1)
             return self._display_value(cache, col)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
@@ -1342,6 +1354,8 @@ class CacheTableModel(QAbstractTableModel):
         if column >= len(self._columns):
             return
         col = self._columns[column]
+        if col == ROW_NUMBER_COLUMN:
+            return   # issue #545: a position, not a value to sort by
         reverse = (order == Qt.SortOrder.DescendingOrder)
         self.beginResetModel()
         if col == "difficulty":
@@ -1658,6 +1672,10 @@ class CacheTableView(QTableView):
         self._applying_widths = False
         self._apply_column_widths()
         self.horizontalHeader().setSortIndicatorShown(True)
+        # Issue #545: a click on Row Number sorts nothing; put the indicator
+        # back on the column the list is sorted by. Connected after
+        # QTableView's own handler, which has already called model.sort().
+        self.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
         self.horizontalHeader().setSectionsMovable(True)
         self.horizontalHeader().sectionResized.connect(self._on_column_resized)
         self.horizontalHeader().sectionMoved.connect(self._on_column_moved)
@@ -1904,6 +1922,23 @@ class CacheTableView(QTableView):
         self._model.reload_columns()
         self._apply_column_widths()
         self._reapply_last_sort()
+
+    def _on_sort_indicator_changed(self, section: int, _order) -> None:
+        """Issue #545: Row Number isn't sortable — restore the indicator."""
+        cols = self._model._columns
+        if section >= len(cols) or cols[section] != ROW_NUMBER_COLUMN:
+            return
+        header = self.horizontalHeader()
+        header.blockSignals(True)
+        if self._last_sort_col_id in cols:
+            header.setSortIndicator(
+                cols.index(self._last_sort_col_id),
+                Qt.SortOrder.AscendingOrder if self._last_sort_asc
+                else Qt.SortOrder.DescendingOrder,
+            )
+        else:
+            header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        header.blockSignals(False)
 
     def _on_model_sort_changed(self, col_id: str, ascending: bool) -> None:
         """Store last sort so we can re-apply after reload."""
