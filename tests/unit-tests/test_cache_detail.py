@@ -950,3 +950,60 @@ def test_open_in_maps_without_coords_does_nothing(monkeypatch, qapp):
     panel._open_in_maps(None)
     panel._open_corrected_in_maps(None)
     assert opened == []
+
+
+# ── Issue #1335: "Add corrected coordinates" prompt per cache type ────────────
+
+@pytest.mark.parametrize("cache_type, prominent", [
+    ("Multi-cache", True),
+    ("Unknown Cache", True),
+    ("Mystery Cache", True),
+    ("Wherigo Cache", True),
+    ("Letterbox Hybrid", True),
+    ("Traditional Cache", False),
+    ("Event Cache", False),
+    ("Earthcache", False),
+    ("Virtual Cache", False),
+    (None, False),
+    ("", False),
+])
+def test_wants_corrected_prompt(cache_type, prominent):
+    assert cd.wants_corrected_prompt(cache_type) is prominent
+
+
+def _panel_without_corrected(monkeypatch, cache_type):
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._current_gc_code = "GC12345"
+    panel._current_cache_type = cache_type
+    panel._corrected_lat = None
+    panel._corrected_lon = None
+    panel._update_corrected_ui()
+    return panel
+
+
+@pytest.mark.parametrize("cache_type", ["Multi-cache", "Unknown Cache"])
+def test_add_corrected_prompt_prominent_for_puzzle_types(monkeypatch, qapp, cache_type):
+    panel = _panel_without_corrected(monkeypatch, cache_type)
+    assert not panel._add_corrected_btn.isHidden()
+    assert cd._ADD_CORRECTED_PROMINENT_COLOR in panel._add_corrected_btn.styleSheet()
+
+
+@pytest.mark.parametrize("cache_type", ["Traditional Cache", "Event Cache"])
+def test_add_corrected_prompt_muted_but_available_for_other_types(
+    monkeypatch, qapp, cache_type
+):
+    # The action must stay available (Allan uses it to mark caches to visit),
+    # only the styling is toned down.
+    panel = _panel_without_corrected(monkeypatch, cache_type)
+    assert not panel._add_corrected_btn.isHidden()
+    assert cd._ADD_CORRECTED_PROMINENT_COLOR not in panel._add_corrected_btn.styleSheet()
+    assert cd._ADD_CORRECTED_MUTED_COLOR in panel._add_corrected_btn.styleSheet()
+
+
+def test_add_corrected_prompt_restyled_when_switching_type(monkeypatch, qapp):
+    panel = _panel_without_corrected(monkeypatch, "Traditional Cache")
+    assert cd._ADD_CORRECTED_PROMINENT_COLOR not in panel._add_corrected_btn.styleSheet()
+    panel._current_cache_type = "Unknown Cache"
+    panel._update_corrected_ui()
+    assert cd._ADD_CORRECTED_PROMINENT_COLOR in panel._add_corrected_btn.styleSheet()

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
     QPushButton, QPlainTextEdit, QCheckBox, QFormLayout, QScrollArea, QMessageBox
 )
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 
@@ -37,6 +37,28 @@ from opensak.gui.theme import hint_style, hint_text_color
 from opensak.gui.icon_provider import get_cache_type_pixmap_composite, get_corrected_coords_icon
 from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.hint_detect import split_hint, render_hint_breaks
+
+# Issue #1335: cache types where corrected coordinates are typically needed
+# (puzzles, multi-stage caches). For these the "Add corrected coordinates"
+# prompt is shown prominently; for all other types it is shown muted.
+CORRECTED_PROMPT_TYPES: frozenset[str] = frozenset({
+    "Multi-cache",
+    "Unknown Cache",
+    "Mystery Cache",
+    "Wherigo Cache",
+    "Letterbox Hybrid",
+})
+
+_ADD_CORRECTED_PROMINENT_COLOR = "#e65100"
+# Neutral mid-grey: readable on both light and dark themes. (The theme's
+# hint colour is green, which would still read as a highlight.)
+_ADD_CORRECTED_MUTED_COLOR = "#888888"
+
+
+def wants_corrected_prompt(cache_type: str | None) -> bool:
+    """Return True if *cache_type* should get the prominent corrected-coords prompt."""
+    return (cache_type or "") in CORRECTED_PROMPT_TYPES
+
 
 logger = logging.getLogger(__name__)
 
@@ -287,8 +309,7 @@ class CacheDetailPanel(QWidget):
         # Tilføj-knap til corrected coords (vises når der IKKE er korrigerede koordinater)
         self._add_corrected_row = QHBoxLayout()
         self._add_corrected_btn = QPushButton(tr("detail_corrected_add_btn"))
-        self._add_corrected_btn.setIcon(get_corrected_coords_icon(14))
-        self._add_corrected_btn.setStyleSheet("color: #e65100; font-size: 10px;")
+        # Icon and colour are set per cache type in _style_add_corrected_btn()
         self._add_corrected_btn.setFlat(True)
         self._add_corrected_btn.setMaximumHeight(22)
         self._add_corrected_btn.clicked.connect(self._edit_corrected_coords)
@@ -524,13 +545,34 @@ class CacheDetailPanel(QWidget):
                 cache_row.user_note = note
             note.note = text
 
+    def _style_add_corrected_btn(self) -> None:
+        """Issue #1335: prominent (orange) "Add corrected coordinates" prompt
+        only for cache types that usually need solving; a muted grey prompt
+        for all other types. The action itself stays available for every
+        type (e.g. marking caches to visit, fixing inaccurate coordinates).
+        """
+        cache_type = getattr(self, "_current_cache_type", None)
+        if wants_corrected_prompt(cache_type):
+            self._add_corrected_btn.setIcon(get_corrected_coords_icon(14))
+            self._add_corrected_btn.setStyleSheet(
+                f"color: {_ADD_CORRECTED_PROMINENT_COLOR}; font-size: 10px;"
+            )
+        else:
+            icon = get_corrected_coords_icon(14)
+            muted = QIcon(icon.pixmap(QSize(14, 14), QIcon.Mode.Disabled))
+            self._add_corrected_btn.setIcon(muted)
+            self._add_corrected_btn.setStyleSheet(
+                f"color: {_ADD_CORRECTED_MUTED_COLOR}; font-size: 10px;"
+            )
+
     def _update_corrected_ui(self) -> None:
         """Opdater visningen af korrigerede koordinater."""
         has_corrected = self._corrected_lat is not None
         self._corrected_frame.setVisible(has_corrected)
-        self._add_corrected_btn.setVisible(
-            not has_corrected and self._current_gc_code is not None
-        )
+        show_add = not has_corrected and self._current_gc_code is not None
+        if show_add:
+            self._style_add_corrected_btn()
+        self._add_corrected_btn.setVisible(show_add)
         if has_corrected:
             self._corrected_lbl.setText(
                 self._format_coords(self._corrected_lat, self._corrected_lon)
