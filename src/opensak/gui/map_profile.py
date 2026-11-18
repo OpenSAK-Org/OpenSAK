@@ -9,6 +9,11 @@ headers of tile.openstreetmap.org (max-age ≈ 1 day, stale-while-revalidate
 was last loaded. Only tiles the user actually viewed are cached — no
 prefetching, as the OSM tile usage policy requires.
 
+#747: the other base maps (map_layers.py) share this cache, each for as long
+as its provider's cache headers allow. Layers whose provider does not allow
+tiles on the device are fetched through opensak://tiles/ (web_assets.py),
+which Chromium never writes to this cache.
+
 Why one shared profile: two profiles with the same storage name in one
 process hang QtWebEngine (both open the same on-disk cache), and the main
 map, the split-screen map, the pop-out and the draw dialog can all be open

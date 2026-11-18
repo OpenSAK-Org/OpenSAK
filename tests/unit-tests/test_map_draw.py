@@ -37,7 +37,9 @@ def fake_settings(monkeypatch):
                         use_miles=False, map_draw_dialog_geometry=None,
                         map_clustering=True, map_cluster_radius=40,
                         map_labels="off",
-                        map_separation_radius_km=0.161, map_separation_circles=False)
+                        map_separation_radius_km=0.161, map_separation_circles=False,
+                        map_base_layers=["osm"], map_base_layer="osm",
+                        map_api_keys={})
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.dialogs.map_draw_dialog.get_settings", lambda: s)
     return s

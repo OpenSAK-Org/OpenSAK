@@ -117,10 +117,12 @@ OpenSAK does not log, cache on any server, or share any data returned from the G
 
 ### 5.1 Map tiles
 
-The in-application map uses OpenStreetMap tiles to display the map background. When you view the map, your device fetches map tile images from OpenStreetMap servers. This is a standard web request and may include your IP address, as with any web browsing. OpenStreetMap's privacy policy is available at:
+The in-application map uses OpenStreetMap tiles to display the map background by default. When you view the map, your device fetches map tile images from OpenStreetMap servers. This is a standard web request and may include your IP address, as with any web browsing. OpenStreetMap's privacy policy is available at:
 https://wiki.osmfoundation.org/wiki/Privacy_Policy
 
-Map tiles you have viewed are kept in a cache on your own computer (in the OpenSAK data folder, up to the size set in **Settings → Map → Map tile cache**), so areas you viewed recently still show without an internet connection. Only tiles you actually viewed are stored; OpenSAK never downloads map areas in advance. The cache stays on your computer and is not sent anywhere.
+Under **Settings → Map → Base maps** you can switch on other base maps. Tiles of a map you switch on and view are fetched in the same way from that map's provider: OpenTopoMap, OpenStreetMap France (CyclOSM, OSM Humanitarian), national mapping agencies (swisstopo, basemap.at, IGN France, PDOK, basemap.de, USGS), or, only if you enter your own API key for them, Esri, MapTiler or Thunderforest. Requests to a provider that needs a key include your key. Each provider's own privacy policy applies. API keys you enter are stored only in the OpenSAK settings file on your computer.
+
+Map tiles you have viewed are kept in a cache on your own computer (in the OpenSAK data folder, up to the size set in **Settings → Map → Map tile cache**), so areas you viewed recently still show without an internet connection. Only tiles you actually viewed are stored, and only for as long as each provider allows; tiles of providers that do not allow storing them (Esri) are never written to disk. OpenSAK never downloads map areas in advance. The cache stays on your computer and is not sent anywhere.
 
 You can optionally configure OpenSAK to open cache locations in Google Maps or OpenStreetMap in your browser. This is triggered only by your explicit action and is subject to those services' own privacy policies.
 

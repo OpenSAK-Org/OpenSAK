@@ -570,6 +570,7 @@ class SettingsDialog(QDialog):
         group_layout.addWidget(tile_cache_note)
 
         layout.addWidget(group)
+        layout.addWidget(self._build_map_layers_group())
         layout.addStretch()
 
         # Same fix as General/Advanced (see #811 comment on __init__ for
@@ -582,6 +583,91 @@ class SettingsDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         return scroll
+
+    def _build_map_layers_group(self) -> QGroupBox:
+        """#747: switch each base map on or off, and enter API keys for the
+        providers that need one (gui/map_layers.py)."""
+        from opensak.gui.map_layers import KEY_PROVIDERS, LAYERS
+
+        group = QGroupBox(tr("settings_group_map_layers"))
+        group_layout = QVBoxLayout(group)
+
+        note = QLabel(tr("settings_map_layers_note"))
+        note.setWordWrap(True)
+        note.setStyleSheet(hint_style())
+        group_layout.addWidget(note)
+
+        self._map_layers_list = QListWidget()
+        # Long entries wrap instead of disappearing behind a sideways scroll
+        self._map_layers_list.setWordWrap(True)
+        self._map_layers_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        for layer in LAYERS:
+            text = layer.label
+            hints = []
+            if layer.key_provider:
+                # One key per provider, which may unlock several maps
+                hints.append(tr("settings_map_layer_needs_key",
+                                provider=KEY_PROVIDERS[layer.key_provider][0]))
+            if not layer.offline:
+                hints.append(tr("settings_map_layer_no_offline"))
+            if hints:
+                text += "  —  " + ", ".join(hints)
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, layer.id)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self._map_layers_list.addItem(item)
+        self._map_layers_list.setMinimumHeight(220)
+        group_layout.addWidget(self._map_layers_list)
+
+        group_layout.addWidget(QLabel(tr("settings_map_api_keys_label")))
+        keys_form = QFormLayout()
+        self._map_api_key_edits: dict[str, QLineEdit] = {}
+        for provider_id, (provider_name, signup_url) in KEY_PROVIDERS.items():
+            maps = ", ".join(layer.provider for layer in LAYERS
+                             if layer.key_provider == provider_id)
+            edit = QLineEdit()
+            edit.setPlaceholderText(tr("settings_map_api_key_for", maps=maps))
+            self._map_api_key_edits[provider_id] = edit
+            get_key = QLabel(f'<a href="{signup_url}">{tr("settings_map_api_key_get")}</a>')
+            get_key.setOpenExternalLinks(True)
+            get_key.setToolTip(signup_url)
+            row = QHBoxLayout()
+            row.addWidget(edit, 1)
+            row.addWidget(get_key)
+            keys_form.addRow(provider_name + ":", row)
+        group_layout.addLayout(keys_form)
+
+        keys_note = QLabel(tr("settings_map_api_keys_note"))
+        keys_note.setWordWrap(True)
+        keys_note.setStyleSheet(hint_style())
+        group_layout.addWidget(keys_note)
+        return group
+
+    def _load_map_layers(self) -> None:
+        s = get_settings()
+        enabled = set(s.map_base_layers)
+        for row in range(self._map_layers_list.count()):
+            item = self._map_layers_list.item(row)
+            if item is None:
+                continue
+            on = item.data(Qt.ItemDataRole.UserRole) in enabled
+            item.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+        keys = s.map_api_keys
+        for provider_id, edit in self._map_api_key_edits.items():
+            edit.setText(keys.get(provider_id, ""))
+
+    def _save_map_layers(self) -> None:
+        s = get_settings()
+        enabled = []
+        for row in range(self._map_layers_list.count()):
+            item = self._map_layers_list.item(row)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                enabled.append(item.data(Qt.ItemDataRole.UserRole))
+        s.map_base_layers = enabled
+        s.map_api_keys = {
+            provider_id: edit.text() for provider_id, edit in self._map_api_key_edits.items()
+        }
 
     # ── Fane: Avanceret ───────────────────────────────────────────────────────
 
@@ -1851,6 +1937,7 @@ class SettingsDialog(QDialog):
         self._map_enabled_cb.setChecked(s.map_enabled)
         self._map_max_caches.setValue(s.map_max_caches)
         self._map_tile_cache.setValue(s.map_tile_cache_mb)
+        self._load_map_layers()
         idx = self._map_cluster_radius.findData(s.map_cluster_radius)
         self._map_cluster_radius.setCurrentIndex(max(idx, 0))
         idx = self._map_labels.findData(s.map_labels)
@@ -1986,6 +2073,7 @@ class SettingsDialog(QDialog):
         s.map_enabled = self._map_enabled_cb.isChecked()
         s.map_max_caches = self._map_max_caches.value()
         s.map_tile_cache_mb = self._map_tile_cache.value()
+        self._save_map_layers()
         s.map_cluster_radius = self._map_cluster_radius.currentData()
         s.map_labels = self._map_labels.currentData()
         separation_val = self._map_separation_radius.value()

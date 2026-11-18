@@ -439,6 +439,49 @@ class AppSettings:
         get_store().set("display.map_tile_cache_mb", max(0, int(value)))
 
     @property
+    def map_base_layers(self) -> list[str]:
+        """#747: ids of the base maps switched on in Settings → Map (see
+        gui/map_layers.py). Unknown ids (a layer removed in a later
+        version) are dropped. Global, like map_enabled."""
+        from opensak.gui.map_layers import DEFAULT_ENABLED, get_layer
+        val = get_store().get("display.map_base_layers", None)
+        if not isinstance(val, list):
+            return list(DEFAULT_ENABLED)
+        return [v for v in val if isinstance(v, str) and get_layer(v) is not None]
+
+    @map_base_layers.setter
+    def map_base_layers(self, value: list[str]) -> None:
+        get_store().set("display.map_base_layers", [str(v) for v in value])
+
+    @property
+    def map_base_layer(self) -> str:
+        """#747: id of the base map last chosen in the map's layer switcher."""
+        from opensak.gui.map_layers import DEFAULT_LAYER
+        val = get_store().get("display.map_base_layer", DEFAULT_LAYER)
+        return val if isinstance(val, str) else DEFAULT_LAYER
+
+    @map_base_layer.setter
+    def map_base_layer(self, value: str) -> None:
+        get_store().set("display.map_base_layer", str(value))
+
+    @property
+    def map_api_keys(self) -> dict[str, str]:
+        """#747: the user's own API keys for keyed tile providers, by
+        provider id (map_layers.KEY_PROVIDERS). Empty keys are left out."""
+        val = get_store().get("display.map_api_keys", {})
+        if not isinstance(val, dict):
+            return {}
+        return {str(k): str(v).strip() for k, v in val.items()
+                if isinstance(v, str) and v.strip()}
+
+    @map_api_keys.setter
+    def map_api_keys(self, value: dict[str, str]) -> None:
+        get_store().set(
+            "display.map_api_keys",
+            {str(k): str(v).strip() for k, v in value.items() if str(v).strip()},
+        )
+
+    @property
     def map_cluster_radius(self) -> int:
         """Issue #1087: Leaflet.markercluster's maxClusterRadius in pixels,
         one of MAP_CLUSTER_RADII, used while map_clustering is on. Default

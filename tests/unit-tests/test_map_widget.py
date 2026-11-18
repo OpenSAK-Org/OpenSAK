@@ -49,7 +49,9 @@ def fake_settings(monkeypatch):
                         map_tile_cache_mb=200,
                         map_clustering=True, map_cluster_radius=40,
                         map_labels="off",
-                        map_separation_radius_km=0.161, map_separation_circles=False)
+                        map_separation_radius_km=0.161, map_separation_circles=False,
+                        map_base_layers=["osm"], map_base_layer="osm",
+                        map_api_keys={})
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     return s
 
