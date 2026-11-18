@@ -76,6 +76,8 @@ _CHECK_TEXT = {
     repair.DATE_UNREADABLE: "repair_chk_date_unreadable",
     repair.DATE_RANGE: "repair_chk_date_range",
     repair.DATE_PLACEHOLDER: "repair_chk_date_placeholder",
+    repair.TOTALS: "repair_chk_totals",
+    repair.FOUND_MARK: "repair_chk_found_mark",
 }
 # The fix each fixable check makes, as a translation key.
 _FIX_TEXT = {
@@ -86,6 +88,8 @@ _FIX_TEXT = {
     repair.DATE_FORMAT: "repair_fix_convert",
     repair.DATE_UNREADABLE: "repair_fix_clear",
     repair.DATE_PLACEHOLDER: "repair_fix_clear",
+    repair.TOTALS: "repair_fix_recalculate",
+    repair.FOUND_MARK: "repair_fix_mark_found",
 }
 # Fixable checks that are not ticked after a scan: their fix loses data (an
 # ambiguous date like 03/05/2024 becomes empty), so the user opts in after
@@ -106,9 +110,17 @@ def _with_companion(db_path: Path) -> bool:
     return bool(flags.companion_db) and companion.exists(db_path)
 
 
+def _account() -> repair.Account:
+    """The account in Settings, for the checks of the user's own logs."""
+    from opensak.gui.settings import get_settings
+
+    settings = get_settings()
+    return settings.gc_finder_id, settings.gc_username
+
+
 def run_scan(db_path: Path, step: Step) -> repair.ScanResult:
     step(tr("repair_step_scan"))
-    return repair.scan(db_path, with_companion=_with_companion(db_path))
+    return repair.scan(db_path, with_companion=_with_companion(db_path), account=_account())
 
 
 def run_repair(db: Any, keys: set[str], backup: bool, step: Step) -> RepairOutcome:
@@ -122,7 +134,7 @@ def run_repair(db: Any, keys: set[str], backup: bool, step: Step) -> RepairOutco
         step(tr("maint_step_backup"))
         backup_path = write_backup_set([db], KIND_MANUAL).backup_set.path
     step(tr("repair_step_fix"))
-    outcome = RepairOutcome(repair.repair(db.path, keys), backup_path)
+    outcome = RepairOutcome(repair.repair(db.path, keys, account=_account()), backup_path)
     step(tr("maint_step_optimize", file=tr("maint_db_group")))
     maintenance.optimize_file(db.path)
     stats = maintenance.file_info(db.path).stats

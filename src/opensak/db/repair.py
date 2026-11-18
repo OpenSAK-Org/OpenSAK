@@ -29,6 +29,11 @@ Checks in this phase:
   sorts and filters wrongly. Fix: convert them to the stored format, or
   clear the ones that can't be read as a date at all. GSAK's "no date",
   1970-01-01, is a check of its own. Fix: clear it.
+* totals (phase 3, details in db/repair_totals.py): log and found-log
+  counts, last log and found dates, the last four logs, waypoint and
+  trackable counts that don't match the cache's rows. Fix: recalculate them
+  as the importer does. And a cache with one of the user's own found logs
+  that isn't marked found. Fix: mark it (found is never cleared).
 * report only: coordinates out of range, difficulty or terrain outside
   1–5 or not in 0.5 steps, an empty GC code or name, dates before May 2000
   or in the future, and a custom waypoint's link to its parent cache
@@ -58,7 +63,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
-from opensak.db import repair_dates
+from opensak.db import repair_dates, repair_totals
+from opensak.db.repair_totals import Account
 from opensak.db.repair_dates import Detail
 
 logger = logging.getLogger(__name__)
@@ -84,6 +90,8 @@ IDENTITY = "identity"
 DATE_FORMAT = "date_format"
 DATE_UNREADABLE = "date_unreadable"
 DATE_PLACEHOLDER = "date_placeholder"
+TOTALS = "totals"
+FOUND_MARK = "found_mark"
 DATE_RANGE = "date_range"
 
 
@@ -189,11 +197,14 @@ def _corrected_flag_where(alias: str = "") -> str:
 # ── Scan ──────────────────────────────────────────────────────────────────────
 
 def scan(db_path: Path, with_companion: bool = False,
-         step: Optional[Callable[[str], None]] = None) -> ScanResult:
+         step: Optional[Callable[[str], None]] = None,
+         account: Optional[Account] = None) -> ScanResult:
     """
     Run every check on the database *db_path* (and on its companion when
     *with_companion*). Changes nothing. *step* is called with each check id
-    before it runs. Raises sqlite3.Error if the file can't be read.
+    before it runs. *account* (finder id, username) is needed for the
+    checks of the user's own logs. Raises sqlite3.Error if the file can't
+    be read.
     """
     db_path = Path(db_path)
     notify = step or (lambda _id: None)
@@ -218,6 +229,9 @@ def scan(db_path: Path, with_companion: bool = False,
 
         notify(DATE_FORMAT)
         findings += _date_findings(conn)
+
+        notify(TOTALS)
+        findings += _totals_findings(conn, account)
 
         if with_companion:
             notify(COMPANION_ORPHANS)
@@ -318,7 +332,8 @@ def _companion_orphans(db_path: Path) -> dict[str, int]:
 # ── Repair ────────────────────────────────────────────────────────────────────
 
 def repair(db_path: Path, keys: set[str],
-           step: Optional[Callable[[str], None]] = None) -> RepairResult:
+           step: Optional[Callable[[str], None]] = None,
+           account: Optional[Account] = None) -> RepairResult:
     """
     Fix the findings *keys* (Finding.key of fixable findings) in *db_path*.
     The main database's fixes run in one transaction; the companion is
@@ -353,6 +368,10 @@ def repair(db_path: Path, keys: set[str],
             if keys & set(_DATE_CHECKS):
                 notify(DATE_FORMAT)
                 result.fixed.update(_fix_dates(conn, keys))
+            # After the rows and dates they are derived from were fixed.
+            if keys & {TOTALS, FOUND_MARK}:
+                notify(TOTALS)
+                result.fixed.update(_fix_totals(conn, keys, account))
     finally:
         conn.close()
     if COMPANION_ORPHANS in keys:
@@ -385,6 +404,47 @@ def _fix_dates(conn: sqlite3.Connection, keys: set[str]) -> dict[str, int]:
             f"UPDATE {_quote(bad.column.table)} SET {_quote(bad.column.column)} = ? "
             "WHERE rowid = ?", (value, bad.rowid))
         fixed[check] += 1
+    return fixed
+
+
+def _totals_findings(conn: sqlite3.Connection, account: Optional[Account]) -> list[Finding]:
+    counts = {TOTALS: 0, FOUND_MARK: 0}
+    details: dict[str, list[Detail]] = {TOTALS: [], FOUND_MARK: []}
+    for cache in repair_totals.differences(conn, account):
+        if cache.changes:
+            counts[TOTALS] += 1
+            for column, (old, new) in cache.changes.items():
+                if len(details[TOTALS]) < MAX_DETAILS:
+                    details[TOTALS].append(Detail(
+                        cache.gc_code, column,
+                        f"{repair_totals.shown(old)} → {repair_totals.shown(new)}"))
+        if cache.mark_found:
+            counts[FOUND_MARK] += 1
+            if len(details[FOUND_MARK]) < MAX_DETAILS:
+                value = "0 → 1"
+                if cache.found_date:
+                    value += f", found_date {cache.found_date[:10]}"
+                details[FOUND_MARK].append(Detail(cache.gc_code, "found", value))
+    return [Finding(check, counts[check], True, tuple(sorted(details[check])))
+            for check in counts]
+
+
+def _fix_totals(conn: sqlite3.Connection, keys: set[str],
+                account: Optional[Account]) -> dict[str, int]:
+    """Recalculate the totals (TOTALS) and mark found (FOUND_MARK)."""
+    fixed = {TOTALS: 0, FOUND_MARK: 0}
+    for cache in list(repair_totals.differences(conn, account)):
+        if TOTALS in keys and cache.changes:
+            columns = list(cache.changes)
+            conn.execute(
+                f"UPDATE caches SET {', '.join(f'{_quote(c)} = ?' for c in columns)} "
+                "WHERE id = ?", [cache.changes[c][1] for c in columns] + [cache.cache_id])
+            fixed[TOTALS] += 1
+        if FOUND_MARK in keys and cache.mark_found:
+            conn.execute("UPDATE caches SET found = 1, "
+                         "found_date = COALESCE(found_date, ?) WHERE id = ?",
+                         (cache.found_date, cache.cache_id))
+            fixed[FOUND_MARK] += 1
     return fixed
 
 

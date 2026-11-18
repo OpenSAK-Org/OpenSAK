@@ -40,7 +40,11 @@ def _database(path: Path) -> Path:
     init_db(db_path=path)
     with get_session() as s:
         gc1 = Cache(gc_code="GC1", name="One", cache_type="Traditional Cache",
-                    latitude=47.0, longitude=8.0, hidden_date=datetime(2010, 5, 1))
+                    latitude=47.0, longitude=8.0, hidden_date=datetime(2010, 5, 1),
+                    # Its totals, as the importer sets them (#1051 phase 3).
+                    log_count=1, last_log_date=datetime(2020, 1, 2, 3, 4, 5),
+                    last_found_date=datetime(2020, 1, 2, 3, 4, 5),
+                    last_four_logs="2020-01-02T03:04:05	Found it	")
         s.add_all([gc1,
                    Cache(gc_code="GC2", name="Two", cache_type="Traditional Cache",
                          latitude=47.1, longitude=8.1),
@@ -72,7 +76,10 @@ def _value(path: Path, sql: str):
 
 
 def _counts(result: repair.ScanResult) -> dict[str, int]:
-    return {f.key: f.count for f in result.problems}
+    """The problems found, without the totals: changing log dates or adding
+    waypoints by SQL makes those differ too (tested in TestTotals)."""
+    return {f.key: f.count for f in result.problems
+            if f.check not in (repair.TOTALS, repair.FOUND_MARK)}
 
 
 def _load_all(path: Path) -> None:
@@ -159,13 +166,13 @@ class TestScan:
         future = repair_dates.to_stored(datetime.now() + timedelta(days=300))
         _sql(db, "UPDATE caches SET cache_type = 'GPS Adventures Maze', hidden_date = ? "
                  "WHERE gc_code = 'GC2'", params=(future,))
-        assert repair.scan(db).problems == ()
+        assert _counts(repair.scan(db)) == {}
         assert "GPS Adventures Maze" in repair_dates.DATED_CACHE_TYPES
 
     def test_first_geocaching_day_is_fine(self, tmp_path):
         db = _database(tmp_path / "Dates.db")
         _sql(db, "UPDATE caches SET hidden_date = '2000-05-03 00:00:00.000000'")
-        assert repair.scan(db).problems == ()
+        assert _counts(repair.scan(db)) == {}
 
 
 class TestRepair:
@@ -177,13 +184,16 @@ class TestRepair:
             _load_all(db)
         dispose_engine(db)
         keys = {f.key for f in repair.scan(db).fixable}
+        # The cleared log date also changes GC1's totals (phase 3), which the
+        # same repair recalculates after the dates.
         assert repair.repair(db, keys).fixed == {repair.DATE_FORMAT: 1,
-                                                 repair.DATE_UNREADABLE: 1}
+                                                 repair.DATE_UNREADABLE: 1, repair.TOTALS: 1}
+        assert _value(db, "SELECT last_log_date FROM caches WHERE gc_code = 'GC1'") is None
         _load_all(db)
         assert _value(db, "SELECT found_date FROM caches WHERE gc_code = 'GC2'") \
             == "2024-03-05 00:00:00.000000"
         assert _value(db, "SELECT log_date FROM logs") is None
-        assert repair.scan(db).problems == ()
+        assert _counts(repair.scan(db)) == {}
 
     def test_not_null_columns_get_now(self, tmp_path):
         db = _database(tmp_path / "Dates.db")
@@ -192,7 +202,7 @@ class TestRepair:
         repair.repair(db, {repair.DATE_UNREADABLE})
         stamp = _value(db, "SELECT imported_at FROM caches WHERE gc_code = 'GC1'")
         assert stamp >= before
-        assert repair.scan(db).problems == ()
+        assert _counts(repair.scan(db)) == {}
 
     def test_only_the_ticked_date_fix(self, tmp_path):
         db = _database(tmp_path / "Dates.db")
@@ -238,7 +248,8 @@ class TestDialog:
         assert rows[repair.DATE_FORMAT].text(3) == "GC1 hidden_date 2011-04-03"
         assert "GC1 hidden_date 2011-04-03" in rows[repair.DATE_FORMAT].toolTip(3)
         assert rows[repair.DATE_RANGE].text(2) == tr("repair_report_only")
-        assert dlg.checked_keys() == {repair.DATE_FORMAT}
+        assert repair.DATE_FORMAT in dlg.checked_keys()
+        assert repair.DATE_RANGE not in dlg.checked_keys()
 
     def test_unreadable_dates_are_not_ticked(self, qtbot, tmp_path):
         """#1051 feedback: clearing loses the value (03/05/2024 is ambiguous),
@@ -258,9 +269,10 @@ class TestDialog:
         unreadable = rows[repair.DATE_UNREADABLE]
         assert unreadable.flags() & drd.Qt.ItemFlag.ItemIsUserCheckable
         assert unreadable.checkState(0) == drd.Qt.CheckState.Unchecked
-        assert dlg.checked_keys() == {repair.DATE_FORMAT}
+        # The unreadable log date also leaves GC1's stored totals stale.
+        assert dlg.checked_keys() == {repair.DATE_FORMAT, repair.TOTALS}
         unreadable.setCheckState(0, drd.Qt.CheckState.Checked)
-        assert dlg.checked_keys() == {repair.DATE_FORMAT, repair.DATE_UNREADABLE}
+        assert dlg.checked_keys() == {repair.DATE_FORMAT, repair.DATE_UNREADABLE, repair.TOTALS}
 
 
 class TestPlaceholder:
@@ -296,7 +308,7 @@ class TestPlaceholder:
         assert _value(db, "SELECT count(*) FROM waypoints WHERE wp_date IS NULL") == 2
         # imported_at is NOT NULL: now instead.
         assert _value(db, "SELECT imported_at FROM caches WHERE gc_code = 'GC2'") > "2000"
-        assert repair.scan(db).problems == ()
+        assert _counts(repair.scan(db)) == {}
 
     def test_other_old_dates_are_still_too_early(self, tmp_path):
         db = self._with_waypoints(tmp_path / "Dates.db")
