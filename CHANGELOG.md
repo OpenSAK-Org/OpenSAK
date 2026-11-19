@@ -4,6 +4,97 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.6] — 2026-11-19
+
+> Headline: **GSAK habits in the cache list and filters.** An optional
+> Row number column, F8 to show only flagged caches (plus GSAK's keys
+> for the other flag actions), the attribute filter with its Yes/No
+> boxes next to the names, and found dates that match the day you
+> logged. Plus fixes for the map, macros, imports, GPX exports and
+> keyboard shortcuts.
+>
+> New texts in the user interface are machine-translated for all
+> languages except English and Danish. Corrections are welcome.
+
+### Added
+
+- **Row number column (#545)** — an optional column, as in GSAK, that
+  numbers the caches 1, 2, 3 … in the order the list is filtered and
+  sorted right now. Choose it in View → Choose columns…; it is added as
+  the first column. It can't be sorted and nothing is stored.
+
+- **Show flagged caches only, and GSAK's keys for user flags (#1314)** —
+  Waypoint → User flags → Show flagged caches only (F8); Esc shows all
+  caches again. Set flag on caches in filter is Shift+F6, Clear flag on
+  caches in filter Shift+F7 and Clear all flags F7. All four can be
+  changed in Help → Keyboard Shortcuts…; a macro that already uses one
+  of these keys keeps it.
+
+### Changed
+
+- **Selecting a cache inside a cluster shows only that cache (#1324)** —
+  the selected cache is taken out of its cluster and shown at its real
+  position; the rest stays clustered and the zoom is kept. The whole
+  cluster used to fan out, with every pin away from its real position.
+
+- **Attribute filter: Yes/No/Any before the names (#796)** — the boxes
+  now come first, with the attribute name right after them, so they stay
+  next to the names however wide the dialog is. Rows have alternating
+  colours.
+
+- **Column list in the View window is alphabetical (#1321)** — sorted by
+  the rules of your language, so a column is easy to find among 50+.
+
+- **Owner name, Source and GPX symbol are centered (#733)** — like the
+  other short values. Only names, codes and long free text such as Hints
+  and Notes are left-aligned.
+
+- **"Add corrected coordinates" is toned down for most cache types
+  (#1335)** — the prompt in the detail panel stays orange for Multi,
+  Mystery, Wherigo and Letterbox Hybrid caches and is grey for all other
+  types. It can still be used for every cache.
+
+### Fixed
+
+- **Found dates one day late for evening finds (#875)** — log dates come
+  as UTC timestamps, so a find logged in the evening in the Americas
+  showed the next day. Found and DNF dates are now the date the log was
+  written for: geocaching.com's fixed website times keep their date, and
+  real app times of your own logs are read in your local time zone, like
+  GSAK's log date correction. Existing databases are corrected the next
+  time the caches are imported.
+
+- **A macro filter could be replaced by the full cache list (#1325)** —
+  `opensak.clear_filter()` followed by `opensak.filter{}` sometimes
+  showed every cache while the filter stayed active. Contributed by
+  nagisml.
+
+- **GPX/GGZ exports that c:geo couldn't read (#1329)** — invalid control
+  characters (for example in Adventure Lab descriptions from GSAK) are
+  left out, and line breaks are no longer doubled on Windows.
+  Contributed by nagisml.
+
+- **Trackable names starting with `<BR>` after a GSAK import (#1331)** —
+  the tag is removed on import, and from names already imported when the
+  database is opened (database version 29). Contributed by nagisml.
+
+- **Waypoints without a cache were dropped silently (#648)** — importing
+  a Pocket Query's -wpts.gpx without its caches ended as a success with
+  every count at 0. The import now warns how many waypoints were
+  skipped. The import window also shows the importer's other warnings,
+  which it never did.
+
+- **Reset all in Keyboard Shortcuts removed three keys (#1327)** — Clear
+  filter (Esc), Maximize map (F11) and Pop-out map (Ctrl+Shift+M) kept no
+  key until OpenSAK was restarted.
+
+- **A key removed in Keyboard Shortcuts came back after a restart
+  (#1336)** — the default key returned the next time OpenSAK started.
+  A removed key now stays removed until you set one again or click
+  Reset all.
+
+---
+
 ## [1.23.0-beta.5] — 2026-11-16
 
 > Headline: **GPX/GGZ export like GSAK's.** Exported files now follow
