@@ -47,6 +47,7 @@ _KIND_KEYS: dict[LocationKind, str] = {
     LocationKind.EXTERNAL_DATABASE: "file_locations_kind_external_database",
     LocationKind.QT_SETTINGS: "file_locations_kind_qt_settings",
     LocationKind.KEYRING_ENTRY: "file_locations_kind_keyring_entry",
+    LocationKind.MAP_KEY_ENTRY: "file_locations_kind_map_key_entry",
     LocationKind.APPIMAGE_BINARY: "file_locations_kind_appimage_binary",
     LocationKind.APPIMAGE_DESKTOP_FILE: "file_locations_kind_appimage_desktop_file",
     LocationKind.APPIMAGE_ICON: "file_locations_kind_appimage_icon",
@@ -66,6 +67,9 @@ def display_location(loc: StorageLocation) -> str:
     if loc.kind is LocationKind.KEYRING_ENTRY:
         from opensak.email.credentials import _SERVICE_NAME
         return f"{_SERVICE_NAME} / {loc.location}"
+    if loc.kind is LocationKind.MAP_KEY_ENTRY:
+        from opensak.map_keys import SERVICE_NAME
+        return f"{SERVICE_NAME} / {loc.location}"
     if loc.is_path:
         from opensak.msix import resolve_physical_appdata_path
         return str(resolve_physical_appdata_path(Path(loc.location)))

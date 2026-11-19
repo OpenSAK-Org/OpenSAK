@@ -1396,7 +1396,7 @@ class MapWidget(QWidget):
         # #747: the base maps too — Settings → OK switches them on/off.
         from opensak.gui.map_layers import available_layers, layer_js_defs
         keys = s.map_api_keys
-        layers = layer_js_defs(available_layers(s.map_base_layers, keys), keys)
+        layers = layer_js_defs(available_layers(s.map_base_layers, keys))
         return {"map_actions": self._map_actions, "draw_button": self._draw_button,
                 "auto_fit_caches": self._auto_fit_caches,
                 "clustering": s.map_clustering, "cluster_radius": s.map_cluster_radius,
@@ -1418,7 +1418,7 @@ class MapWidget(QWidget):
         from opensak.gui import map_layers
         if not base_layers:
             base_layers = map_layers.layer_js_defs(
-                map_layers.available_layers([map_layers.DEFAULT_LAYER], {}), {}
+                map_layers.available_layers([map_layers.DEFAULT_LAYER], {})
             )
         html = MAP_HTML.replace("INIT_LAT", str(lat))
         html = html.replace("INIT_LON", str(lon))

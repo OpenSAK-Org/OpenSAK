@@ -12,7 +12,10 @@ prefetching, as the OSM tile usage policy requires.
 #747: the other base maps (map_layers.py) share this cache, each for as long
 as its provider's cache headers allow. Layers whose provider does not allow
 tiles on the device are fetched through opensak://tiles/ (web_assets.py),
-which Chromium never writes to this cache.
+which Chromium never writes to this cache. So are the layers that need an API
+key, so the key stays out of the page; when their tiles may be kept, the
+proxy caches them in <data dir>/map_cache/proxy_tiles (tile_disk_cache.py),
+under the same size cap. cache_size_bytes() and clear_cache() cover both.
 
 Why one shared profile: two profiles with the same storage name in one
 process hang QtWebEngine (both open the same on-disk cache), and the main
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, QObject
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineUrlRequestInterceptor
@@ -38,6 +42,9 @@ from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineUrlRequestInter
 from opensak.logger import get_logger
 
 log = get_logger("map_profile")
+
+if TYPE_CHECKING:
+    from opensak.gui.tile_disk_cache import TileDiskCache
 
 STORAGE_NAME = "opensak-map"
 
@@ -67,9 +74,17 @@ def _http_cache_dir() -> Path:
     return map_cache_dir() / "http"
 
 
+def proxy_tile_cache() -> TileDiskCache:
+    """The disk cache of the tile proxy (#747), capped like the HTTP cache."""
+    from opensak.gui.settings import get_settings
+    from opensak.gui.tile_disk_cache import TileDiskCache
+    return TileDiskCache(map_cache_dir() / "proxy_tiles",
+                         get_settings().map_tile_cache_mb * 1024 * 1024)
+
+
 def cache_size_bytes() -> int:
     """Disk space the tile cache uses right now."""
-    total = 0
+    total = proxy_tile_cache().size_bytes()
     for path in _http_cache_dir().rglob("*"):
         try:
             if path.is_file():
@@ -89,6 +104,7 @@ def clear_cache() -> int:
         _profile.clearHttpCache()
     else:
         shutil.rmtree(_http_cache_dir(), ignore_errors=True)
+    proxy_tile_cache().clear()
     log.info("map tile cache cleared (%d bytes)", size)
     return size
 

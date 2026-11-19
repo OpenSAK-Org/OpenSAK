@@ -2,7 +2,8 @@
 # can be switched on/off in Settings → Map, keyed maps appear only with the
 # user's API key, the map offers the switched-on ones in a layer switcher and
 # remembers the choice, and maps whose provider forbids keeping tiles on the
-# device are fetched through opensak://tiles/ (never the disk cache).
+# device are fetched through opensak://tiles/ (never the disk cache). So are
+# all keyed maps, so the API key never reaches the page.
 
 from __future__ import annotations
 
@@ -78,17 +79,42 @@ class TestAvailableLayers:
 
 
 class TestOfflineRouting:
-    def test_cacheable_layer_loads_from_provider(self):
-        defs = layer_js_defs([get_layer("maptiler_aerial")], {"maptiler": "MYKEY"})
-        assert defs[0]["url"] == "https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=MYKEY"
+    def test_keyless_layer_loads_from_provider(self):
+        defs = layer_js_defs([get_layer("opentopomap")])
+        assert defs[0]["url"] == get_layer("opentopomap").url
 
     def test_no_offline_layer_goes_through_proxy(self):
         # Esri allows caching only while connected: its tiles must not reach
-        # the disk HTTP cache, so they come via opensak://tiles/, and the key
-        # stays out of the page.
-        defs = layer_js_defs([get_layer("esri_aerial")], {"esri": "SECRET"})
+        # the disk HTTP cache, so they come via opensak://tiles/.
+        defs = layer_js_defs([get_layer("esri_aerial")])
         assert defs[0]["url"] == TILE_BASE + "esri_aerial/{z}/{x}/{y}"
-        assert "SECRET" not in json.dumps(defs)
+
+    @pytest.mark.parametrize("layer", [layer for layer in LAYERS if layer.key_provider],
+                             ids=lambda layer: layer.id)
+    def test_keyed_layer_goes_through_proxy(self, layer):
+        # The key is added by the proxy: never in the page, Leaflet's tile
+        # URLs or Chromium's cache — also for layers that may be cached.
+        assert layer.proxied
+        defs = layer_js_defs([layer])
+        assert defs[0]["url"] == f"{TILE_BASE}{layer.id}/{{z}}/{{x}}/{{y}}"
+        assert "{key}" not in json.dumps(defs)
+
+    def test_keys_never_reach_the_page(self):
+        s = get_settings()
+        s.map_api_keys = {p: f"SECRET-{p}" for p in map_layers.KEY_PROVIDERS}
+        s.map_base_layers = [layer.id for layer in LAYERS]
+        w = MapWidget.__new__(MapWidget)
+        w._map_actions = True
+        w._draw_button = False
+        w._auto_fit_caches = True
+        html = MapWidget._render_map_html(46.9, 7.4, **w._html_options())
+        assert len(_layers_in_html(html)) == len(LAYERS)
+        assert "SECRET" not in html
+
+    def test_resolve_cacheable_keyed_tile(self):
+        get_settings().map_api_keys = {"maptiler": "MYKEY"}
+        assert resolve_tile("/maptiler_aerial/3/1/2") == (
+            "https://api.maptiler.com/tiles/satellite-v2/3/1/2.jpg?key=MYKEY")
 
     def test_resolve_tile_with_key(self):
         get_settings().map_api_keys = {"esri": "SECRET"}
@@ -99,7 +125,8 @@ class TestOfflineRouting:
 
     @pytest.mark.parametrize("path", [
         "/esri_aerial/12/2145/1434",   # no key entered
-        "/osm/12/2145/1434",           # cacheable layer: never proxied
+        "/maptiler_aerial/3/1/2",      # no key entered
+        "/osm/12/2145/1434",           # keyless cacheable layer: never proxied
         "/nope/12/2145/1434",          # unknown layer
         "/esri_aerial/12/2145",        # too short
         "/esri_aerial/12/x/1434",      # not a number
@@ -127,7 +154,7 @@ class TestSettings:
 
     def test_junk_values(self):
         get_store().set("display.map_base_layers", "junk")
-        get_store().set("display.map_api_keys", ["junk"])
+        get_store().set("display.map_api_key_providers", "junk")
         assert get_settings().map_base_layers == list(map_layers.DEFAULT_ENABLED)
         assert get_settings().map_api_keys == {}
 
@@ -162,6 +189,10 @@ class TestSettings:
         assert dlg._map_api_key_edits["thunderforest"].placeholderText() == tr(
             "settings_map_api_key_for", maps="Thunderforest Outdoors, OpenCycleMap")
         assert dlg._map_api_key_edits["thunderforest"].text() == "TF"
+        # Keys are masked on screen, like a password
+        from PySide6.QtWidgets import QLineEdit
+        assert all(edit.echoMode() == QLineEdit.EchoMode.Password
+                   for edit in dlg._map_api_key_edits.values())
         # The section-1 layers can be switched off too
         checked["osm"].setCheckState(Qt.CheckState.Unchecked)
         checked["esri_aerial"].setCheckState(Qt.CheckState.Checked)
@@ -169,6 +200,8 @@ class TestSettings:
         dlg._save()
         assert get_settings().map_base_layers == ["swisstopo_aerial", "esri_aerial"]
         assert get_settings().map_api_keys == {"thunderforest": "TF", "esri": "E"}
+        # Keys are not in the settings file (only which providers have one)
+        assert "TF" not in json.dumps(get_store()._data)
 
 
 class TestMapPage:

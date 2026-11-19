@@ -23,6 +23,11 @@ keeping tiles on the device (Esri: caching only while connected). Its tiles
 are fetched through opensak://tiles/<id>/z/x/y (web_assets.py) instead —
 Chromium keeps custom-scheme responses out of its HTTP cache, so they never
 reach the disk.
+
+API keys: every keyed layer goes through opensak://tiles/ too, and the proxy
+adds the key. The key is thus never in the page, in Leaflet's tile URLs or in
+Chromium's cache. A keyed layer whose tiles may be kept (offline=True) is
+cached by the proxy itself (gui/tile_disk_cache.py), keyed by layer/z/x/y.
 """
 
 from __future__ import annotations
@@ -100,13 +105,20 @@ class MapLayer:
         """name plus the region code, e.g. "swisstopo – Aerial imagery (CH)"."""
         return f"{self.name} ({self.region})" if self.region else self.name
 
-    def tile_url(self, api_key: str = "") -> str:
-        """The URL template the page loads tiles from."""
-        if not self.offline:
-            # Fetched through web_assets.TileProxy, never cached on disk.
+    @property
+    def proxied(self) -> bool:
+        """Whether the page loads this layer's tiles through opensak://tiles/
+        (web_assets.py): layers whose tiles must not be kept on the device,
+        and every keyed layer, so its key stays out of the page."""
+        return not self.offline or self.key_provider is not None
+
+    def tile_url(self) -> str:
+        """The URL template the page loads tiles from. Never holds an API
+        key — a keyed layer's tiles come through the proxy, which adds it."""
+        if self.proxied:
             from opensak.gui.web_assets import TILE_BASE
             return f"{TILE_BASE}{self.id}/{{z}}/{{x}}/{{y}}"
-        return self.url.replace("{key}", api_key)
+        return self.url
 
     def upstream_url(self, z: int, x: int, y: int, api_key: str = "") -> str:
         """The provider's URL of one tile (used by the tile proxy)."""
@@ -273,11 +285,11 @@ def available_layers(enabled_ids, api_keys: dict[str, str]) -> list[MapLayer]:
     return out or [_BY_ID[DEFAULT_LAYER]]
 
 
-def layer_js_defs(layers: list[MapLayer], api_keys: dict[str, str]) -> list[dict]:
-    """The layer definitions the map page builds its tile layers from."""
+def layer_js_defs(layers: list[MapLayer]) -> list[dict]:
+    """The layer definitions the map page builds its tile layers from.
+    They hold no API key (see MapLayer.tile_url)."""
     defs = []
     for layer in layers:
-        key = api_keys.get(layer.key_provider, "").strip() if layer.key_provider else ""
         options: dict = {
             "attribution": layer.attribution,
             "maxZoom": layer.max_zoom,
@@ -289,5 +301,5 @@ def layer_js_defs(layers: list[MapLayer], api_keys: dict[str, str]) -> list[dict
             s, w, n, e = layer.bounds
             options["bounds"] = [[s, w], [n, e]]
         defs.append({"id": layer.id, "name": layer.label,
-                     "url": layer.tile_url(key), "options": options})
+                     "url": layer.tile_url(), "options": options})
     return defs

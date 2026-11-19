@@ -627,6 +627,8 @@ class SettingsDialog(QDialog):
             maps = ", ".join(layer.provider for layer in LAYERS
                              if layer.key_provider == provider_id)
             edit = QLineEdit()
+            # Masked like the PQ e-mail password; Qt also blocks copying it out
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
             edit.setPlaceholderText(tr("settings_map_api_key_for", maps=maps))
             self._map_api_key_edits[provider_id] = edit
             get_key = QLabel(f'<a href="{signup_url}">{tr("settings_map_api_key_get")}</a>')

@@ -467,19 +467,17 @@ class AppSettings:
     @property
     def map_api_keys(self) -> dict[str, str]:
         """#747: the user's own API keys for keyed tile providers, by
-        provider id (map_layers.KEY_PROVIDERS). Empty keys are left out."""
-        val = get_store().get("display.map_api_keys", {})
-        if not isinstance(val, dict):
-            return {}
-        return {str(k): str(v).strip() for k, v in val.items()
-                if isinstance(v, str) and v.strip()}
+        provider id (map_layers.KEY_PROVIDERS). Empty keys are left out.
+
+        Not in opensak.json: kept in the OS keyring, or a private file where
+        there is none (see opensak/map_keys.py)."""
+        from opensak import map_keys
+        return map_keys.load_keys()
 
     @map_api_keys.setter
     def map_api_keys(self, value: dict[str, str]) -> None:
-        get_store().set(
-            "display.map_api_keys",
-            {str(k): str(v).strip() for k, v in value.items() if str(v).strip()},
-        )
+        from opensak import map_keys
+        map_keys.save_keys(value)
 
     @property
     def map_cluster_radius(self) -> int:
