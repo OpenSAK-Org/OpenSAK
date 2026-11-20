@@ -5,8 +5,9 @@ what can be fixed safely, like GSAK's Repair/Defrag.
 
 1. Scan (read only, in the background): every check of db/repair.py with
    its number of problems and a few example GC codes.
-2. The user ticks what to fix. Report-only checks can't be ticked. "Make a
-   backup first" is ticked.
+2. The user ticks what to fix. Report-only checks can't be ticked;
+   "Dates that can't be read" starts unticked, since clearing loses the
+   value. "Make a backup first" is ticked.
 3. Repair: backup set, the fixes in one transaction, Optimize, and Compact
    when more than a quarter of the file is free (as GSAK does). Then a
    summary, and the scan runs again.
@@ -86,6 +87,10 @@ _FIX_TEXT = {
     repair.DATE_UNREADABLE: "repair_fix_clear",
     repair.DATE_PLACEHOLDER: "repair_fix_clear",
 }
+# Fixable checks that are not ticked after a scan: their fix loses data (an
+# ambiguous date like 03/05/2024 becomes empty), so the user opts in after
+# looking at the list.
+_UNTICKED = frozenset({repair.DATE_UNREADABLE})
 
 
 @dataclass
@@ -286,7 +291,8 @@ class DatabaseRepairDialog(QDialog):
             item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if finding.fixable:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(0, Qt.CheckState.Checked)
+                item.setCheckState(0, Qt.CheckState.Unchecked if finding.check in _UNTICKED
+                                   else Qt.CheckState.Checked)
             else:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             self._tree.addTopLevelItem(item)

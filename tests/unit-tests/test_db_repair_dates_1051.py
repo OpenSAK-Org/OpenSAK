@@ -240,6 +240,28 @@ class TestDialog:
         assert rows[repair.DATE_RANGE].text(2) == tr("repair_report_only")
         assert dlg.checked_keys() == {repair.DATE_FORMAT}
 
+    def test_unreadable_dates_are_not_ticked(self, qtbot, tmp_path):
+        """#1051 feedback: clearing loses the value (03/05/2024 is ambiguous),
+        so the user opts in; the conversion stays ticked."""
+        db = _database(tmp_path / "Dates.db")
+        _sql(db, "UPDATE caches SET hidden_date = '2011-04-03' WHERE gc_code = 'GC1'",
+             "UPDATE logs SET log_date = '03/05/2024'")
+        dlg = drd.DatabaseRepairDialog(SimpleNamespace(name="Dates", path=db))
+        qtbot.addWidget(dlg)
+        qtbot.waitUntil(lambda: not dlg.is_running() and dlg.scan_result is not None,
+                        timeout=10000)
+        rows = {}
+        for i in range(dlg._tree.topLevelItemCount()):
+            item = dlg._tree.topLevelItem(i)
+            assert item is not None
+            rows[item.data(0, drd.KEY_ROLE)] = item
+        unreadable = rows[repair.DATE_UNREADABLE]
+        assert unreadable.flags() & drd.Qt.ItemFlag.ItemIsUserCheckable
+        assert unreadable.checkState(0) == drd.Qt.CheckState.Unchecked
+        assert dlg.checked_keys() == {repair.DATE_FORMAT}
+        unreadable.setCheckState(0, drd.Qt.CheckState.Checked)
+        assert dlg.checked_keys() == {repair.DATE_FORMAT, repair.DATE_UNREADABLE}
+
 
 class TestPlaceholder:
     """#1051 feedback: GSAK's "no date" 1970-01-01 (e.g. Waypoints.cDate,
