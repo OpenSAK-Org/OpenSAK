@@ -6,6 +6,10 @@ on:
 
 jobs:
   unit-tests:
+    # A fixed name without the runner version, e.g. "unit-tests (linux, 3.11)",
+    # so a new runner image doesn't change the check names the beta and main
+    # rulesets require (#1108).
+    name: unit-tests (${{ startsWith(matrix.os, 'windows') && 'windows' || startsWith(matrix.os, 'macos') && 'macos' || 'linux' }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     # Belt-and-suspenders alongside the apt retry/timeout logic in
     # setup-qt: caps a stuck job at 45 min instead of GitHub's 360-min
@@ -16,12 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
-        # actions/runner-images#14748). A gradual rollout would make this job flip
-        # between images run to run. Unpin once 26.04 is verified green.
-        # #1108: 26.04 runs next to 24.04 until it is verified, then both
-        # become ubuntu-latest.
-        os: [ubuntu-24.04, ubuntu-26.04]
+        # Ubuntu 26.04 since Nov 2026 (verified in #1108)
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12"]
         # The app ships on Windows + macOS too — run unit tests there as well.
         include:
@@ -58,37 +58,7 @@ jobs:
 
   e2e-tests:
     needs: unit-tests
-    # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
-    # actions/runner-images#14748). A gradual rollout would make this job flip
-    # between images run to run. Unpin once 26.04 is verified green.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-      - uses: ./.github/actions/setup-qt
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Run e2e tests
-        env:
-          QT_QPA_PLATFORM: xcb
-          QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --disable-software-rasterizer"
-        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" pytest tests/e2e-tests -v --cov=opensak --cov-report=term-missing
-
-  e2e-tests-26-04:
-    needs: unit-tests
-    # #1108: the e2e tests on Ubuntu 26.04 next to e2e-tests (24.04), as a
-    # job of its own so e2e-tests keeps its check names. Removed when
-    # e2e-tests moves to ubuntu-latest.
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
