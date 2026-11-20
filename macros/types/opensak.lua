@@ -1477,8 +1477,6 @@ function opensak.open(path) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-net` feature flag is on, as it is in beta builds; check with `if opensak.get_url then`. Each web site needs the user's approval, given per macro (see Web sites).
----
 ---```lua
 ---local ok, body, info = pcall(opensak.get_url,
 ---  "https://example.com/answers.csv", { caption = "Answers" })

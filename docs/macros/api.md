@@ -1872,8 +1872,6 @@ Returns `string, opensak.UrlInfo` — The body, as text decoded with the charset
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-net` feature flag is on, as it is in beta builds; check with `if opensak.get_url then`. Each web site needs the user's approval, given per macro (see Web sites).
-
 Example:
 
 ```lua
@@ -4954,8 +4952,6 @@ The rows belonging to a cache are read with `opensak.logs()`, `opensak.waypoints
 
 ## Web sites
 
-Beta: `opensak.get_url()` is only available while the `lua-macro-net` feature flag is on, as it is in beta builds.
-
 A macro can read everything in your databases, so a macro that contacts a web site could also send your data there. Before a macro first contacts a web site (host), OpenSAK therefore asks whether this macro may: **This time only** (for this run), **Always** or **Deny** (not asked again during this run). The question names the host, says when the connection is not encrypted (`http:`) and when the macro's `Network:` header does not list the host. A host on the local network (your router, a NAS) is asked about on its own, also when it was allowed as an internet address: OpenSAK checks the address it actually connects to. A redirect to another host is asked about like the first one. Groundspeak's sites (`geocaching.com`, `coord.info`, `geocachinghq.com`, `groundspeak.com`, `groundspeak.net`, `groundspeak.org`, `groundspeak.info`, `geocaching.net`, `geocaching.org`, `geocaching.us`, `geocaching.eu`, `geocaching.co`, `geocaching.mobi`, `waymarking.com`, `waymarking.net`, `waymarking.org`, `wherigo.com`, `wherigo.net` and `wherigo.org`, with their subdomains) can never be contacted: their terms of use don't allow automated access outside their API.
 
 Like folders, the answer belongs to this macro and its code: web sites allowed always are listed with the macro in Settings → Folder permissions, and a macro changed outside OpenSAK's macro editor is asked once whether it may have them again. A macro started with `opensak.run_macro()` is asked on its own. An unsaved macro can be allowed a web site for one run only. A run asks about at most 5 web sites; after that, the ones not allowed fail without asking.
@@ -5140,7 +5136,7 @@ Write the arguments, separated by tabs, to the macro output pane (to stdout when
 
 The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` libraries, plus `os.time`, `os.date` and `os.clock`. It removes `io`, `debug`, `package`, `require`, `load*`, `dofile` and the rest of `os`. So most of GSAK's language, string and math functions need no API.
 
-**Legend:** ✅ available · β beta: needs the `lua-macro-net` feature flag, which is on in beta builds only (see [Web sites](#web-sites)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
+**Legend:** ✅ available · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
 
 ### Main gaps
 
@@ -5233,7 +5229,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GSAK | Status | Note |
 |---|---|---|
 | GetMail / Pop3 | 🚫 | deprecated in GSAK too |
-| GetUrl | ✅ β | `get_url(url [, options])`: GET only, each web site approved by the user; needs the `lua-macro-net` feature flag (see [Web sites](#web-sites)) |
+| GetUrl | ✅ | `get_url(url [, options])`: GET only, each web site approved by the user (see [Web sites](#web-sites)) |
 | PostUrl | 🚫 | GET only for now |
 | Web | ❌ | planned |
 
