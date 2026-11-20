@@ -24,21 +24,30 @@ so macros saved from an external editor show up without asking.
 The main window runs macro shortcuts through run_path() as well, so their
 output is here too when the window is closed.
 
+The OpenSAK-Macros button (#1342) checks the shared macro repository for
+updates, updates macros installed from it, and browses and installs the
+macros published there; the OpenSAK-Macros column shows where each local
+macro stands (see opensak.macro.repository). The right-click menu of a
+macro has Update, Remove and Stop tracking / Track again. Downloads run in
+the background (macro_repository.start_task()); nothing is installed,
+updated or removed without asking.
+
 Whether Shift is held is read when the user starts the macro (shift_held()),
 before any question, and passed on for opensak.shift_key() (#1038).
 """
 
 from __future__ import annotations
 
+import functools
 import re
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QKeySequenceEdit,
-    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStyle, QTreeWidget,
+    QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStyle, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -51,7 +60,7 @@ from opensak.macro.runtime import API_VERSION
 
 # Columns of the macro list.
 (COL_NAME, COL_DESCRIPTION, COL_VERSION, COL_AUTHOR, COL_API, COL_PERMISSIONS, COL_SHORTCUT,
- COL_TOOLBAR, COL_FOLDER, COL_HEADLESS) = range(10)
+ COL_TOOLBAR, COL_FOLDER, COL_HEADLESS, COL_REPO) = range(11)
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
@@ -131,6 +140,11 @@ class MacroManagerDialog(QDialog):
         self._toolbar_changed = toolbar_changed or (lambda: None)
         self._edit_macro = edit_macro or (lambda _path, _error: None)
         self._macros: list[MacroInfo] = []
+        # Where each local macro stands against OpenSAK-Macros (#1342), once
+        # an index was fetched this session.
+        self._statuses: dict[Path, Any] = {}
+        self._busy = False
+        self._browse: Optional[QDialog] = None
         # The last failed run: (macro, Lua error message), for Edit.
         self._last_error: tuple[Path, str] | None = None
         self._setup_ui()
@@ -151,6 +165,7 @@ class MacroManagerDialog(QDialog):
             tr("macro_mgr_col_api"), tr("macro_mgr_col_permissions"),
             tr("shortcuts_col_shortcut"), tr("macro_mgr_col_toolbar"),
             tr("settings_folder_perm_col_folder"), tr("macro_mgr_col_headless"),
+            tr("macro_repo_button"),
         ])
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(COL_NAME, Qt.SortOrder.AscendingOrder)
@@ -162,6 +177,8 @@ class MacroManagerDialog(QDialog):
         self._tree.itemSelectionChanged.connect(self._update_buttons)
         self._tree.itemActivated.connect(lambda *_: self._run_activated())
         self._tree.itemChanged.connect(self._on_item_changed)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._context_menu)
         header_item = self._tree.headerItem()
         if header_item is not None:
             header_item.setToolTip(COL_TOOLBAR, tr("macro_mgr_toolbar_tip"))
@@ -197,12 +214,25 @@ class MacroManagerDialog(QDialog):
         self._btn_run = button(tr("macro_btn_run"), self._run_selected)
         self._btn_edit = button(tr("edit"), self._edit_selected)
         self._btn_shortcut = button(tr("macro_mgr_shortcut"), self._set_shortcut)
+        # #1342: the shared macro repository.
+        self._btn_repo = QPushButton(tr("macro_repo_button"))
+        self._btn_repo.setAutoDefault(False)
+        self._repo_menu = QMenu(self._btn_repo)
+        self._act_check = self._repo_menu.addAction(tr("macro_repo_check"))
+        self._act_check.triggered.connect(lambda: self.check_updates())
+        self._act_update_all = self._repo_menu.addAction(tr("macro_repo_update_all"))
+        self._act_update_all.triggered.connect(self.update_all)
+        self._repo_menu.addSeparator()
+        self._act_browse = self._repo_menu.addAction(tr("macro_repo_browse"))
+        self._act_browse.triggered.connect(self.open_browse)
+        self._repo_menu.aboutToShow.connect(self._update_repo_menu)
+        self._btn_repo.setMenu(self._repo_menu)
         btn_folder = button(tr("macro_act_open_folder"), self._open_folder, sp.SP_DirOpenIcon)
         btn_reload = button(tr("macro_disk_reload"), self.reload, sp.SP_BrowserReload)
         btn_close = button(tr("close"), self.close)
 
         buttons = QHBoxLayout()
-        for btn in (self._btn_run, self._btn_edit, self._btn_shortcut):
+        for btn in (self._btn_run, self._btn_edit, self._btn_shortcut, self._btn_repo):
             buttons.addWidget(btn)
         buttons.addStretch(1)
         for btn in (btn_folder, btn_reload, btn_close):
@@ -245,6 +275,7 @@ class MacroManagerDialog(QDialog):
         selected = self.selected_path()
         root = macros_dir()
         self._macros = discover_macros(root)
+        self._match_index()
         warn = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning)
         self._tree.setSortingEnabled(False)
         self._tree.blockSignals(True)       # no itemChanged while filling
@@ -271,6 +302,9 @@ class MacroManagerDialog(QDialog):
                 item.setIcon(COL_API, warn)
                 item.setToolTip(COL_API, tr("macro_mgr_api_newer", needed=info.requires_api,
                                             have=API_VERSION))
+            status = self._statuses.get(info.path)
+            if status is not None:
+                self._show_status(item, status, warn)
             if not info.error:
                 item.setToolTip(COL_PERMISSIONS, permissions_tooltip(info))
                 if info.unknown_permissions or info.invalid_hosts or info.blocked_hosts:
@@ -465,6 +499,277 @@ class MacroManagerDialog(QDialog):
             return
         set_on_toolbar(path, checked)
         self._toolbar_changed()
+
+    # -- OpenSAK-Macros (#1342) -----------------------------------------------
+
+    @property
+    def statuses(self) -> dict[Path, Any]:
+        """{macro file: repository.MacroStatus} after an index was fetched."""
+        return dict(self._statuses)
+
+    def _match_index(self) -> None:
+        from opensak.macro import repository as repo
+
+        index = repo.last_index()
+        self._statuses = {} if index is None else repo.match_macros(
+            self._macros, index, API_VERSION)
+
+    def _show_status(self, item: QTreeWidgetItem, status, warn) -> None:
+        from opensak.gui.dialogs.macro_repository import status_text, status_tooltip
+        from opensak.macro import repository as repo
+
+        item.setText(COL_REPO, status_text(status))
+        item.setToolTip(COL_REPO, status_tooltip(status))
+        if status.state in (repo.WITHDRAWN, repo.CHANGED, repo.NEEDS_NEWER_API):
+            item.setIcon(COL_REPO, warn)
+        elif status.state == repo.UPDATE:
+            item.setIcon(COL_REPO, self.style().standardIcon(
+                QStyle.StandardPixmap.SP_ArrowUp))
+
+    def _set_busy(self, busy: bool, message: str = "") -> None:
+        self._busy = busy
+        self._btn_repo.setEnabled(not busy)
+        if message:
+            self._append_output(message)
+
+    def _update_repo_menu(self) -> None:
+        from opensak.macro import repository as repo
+
+        count = len(repo.updates(self._statuses))
+        self._act_update_all.setText(tr("macro_repo_update_all_n", count=count) if count
+                                     else tr("macro_repo_update_all"))
+        self._act_update_all.setEnabled(count > 0 and not self._busy)
+        self._act_check.setEnabled(not self._busy)
+        self._act_browse.setEnabled(not self._busy)
+
+    def check_updates(self, then: Optional[Callable[[], None]] = None) -> None:
+        """Fetch the index in the background, then show the statuses and
+        offer to remove withdrawn macros; *then* runs after a successful
+        fetch (Browse fetches first when there is no index yet)."""
+        from opensak.gui.dialogs.macro_repository import start_task
+        from opensak.macro import repository as repo
+
+        if self._busy:
+            return
+        self._set_busy(True, tr("macro_repo_checking"))
+
+        def done(_index) -> None:
+            self._set_busy(False)
+            repo.note_checked()
+            self.reload()
+            self._report_check()
+            if then is not None:
+                then()
+            else:
+                self._offer_withdrawn_removal()
+
+        def failed(message: str) -> None:
+            self._set_busy(False, tr("macro_repo_check_failed", msg=message))
+            QMessageBox.warning(self, tr("macro_repo_button"),
+                                tr("macro_repo_check_failed", msg=message))
+
+        start_task(self, repo.fetch_index, done, failed)
+
+    def _report_check(self) -> None:
+        from opensak.macro import repository as repo
+
+        updates = repo.updates(self._statuses)
+        withdrawn = repo.withdrawn_macros(self._statuses)
+        if not updates and not withdrawn:
+            self._append_output(tr("macro_repo_all_up_to_date"))
+            return
+        if updates:
+            self._append_output(tr("macro_repo_updates_found", count=len(updates)))
+        if withdrawn:
+            self._append_output(tr("macro_repo_withdrawn_found", count=len(withdrawn)))
+
+    def _offer_withdrawn_removal(self) -> None:
+        """After a check the user started: offer to remove each withdrawn
+        macro. Keeping it is fine; it stays marked."""
+        from opensak.macro import repository as repo
+
+        for path in list(repo.withdrawn_macros(self._statuses)):
+            self.remove_macro(path, withdrawn=True)
+
+    def _info(self, path: Path) -> Optional[MacroInfo]:
+        return next((m for m in self._macros if m.path == path), None)
+
+    def update_selected(self) -> None:
+        path = self.selected_path()
+        if path is not None:
+            self.update_macros([path])
+
+    def update_all(self) -> None:
+        from opensak.macro import repository as repo
+        self.update_macros(list(repo.updates(self._statuses)))
+
+    def update_macros(self, paths: list[Path]) -> None:
+        """Update the macros *paths* one after another, asking for each."""
+        from opensak.gui.dialogs.macro_repository import confirm_install, start_task
+        from opensak.macro import repository as repo
+
+        queue = list(paths)
+
+        def next_one() -> None:
+            while queue:
+                path = queue.pop(0)
+                status = self._statuses.get(path)
+                if status is None or not status.can_update:
+                    continue
+                macro = status.macro
+                folder, only_lua = repo.update_folder(status, path)
+                names = [macro.lua] if only_lua else [f.name for f in macro.files]
+                targets = [path if n == macro.lua else folder / n for n in names]
+                replaced = [t for t in targets if t.exists()]
+                if not confirm_install(self, macro, targets, replaced, local=self._info(path),
+                                       from_version=status.version,
+                                       changed=status.state == repo.CHANGED):
+                    continue
+                self._set_busy(True, tr("macro_repo_downloading", name=macro.name))
+
+                def done(contents, macro=macro, folder=folder, status=status,
+                         path=path) -> None:
+                    self._set_busy(False)
+                    try:
+                        repo.install(macro, contents, folder, status.record, lua_target=path)
+                    except (OSError, repo.RepositoryError) as exc:
+                        self._install_failed(macro.name, str(exc))
+                    else:
+                        self._append_output(tr("macro_repo_updated", name=macro.name,
+                                               version=macro.version))
+                    self.reload()
+                    next_one()
+
+                def failed(message: str, name=macro.name) -> None:
+                    self._set_busy(False)
+                    self._install_failed(name, message)
+                    next_one()
+
+                start_task(self, functools.partial(repo.download_files, macro, only_lua),
+                           done, failed)
+                return
+
+        next_one()
+
+    def _install_failed(self, name: str, message: str) -> None:
+        text = tr("macro_repo_install_failed", name=name, msg=message)
+        self._append_output(text)
+        QMessageBox.warning(self, tr("macro_repo_button"), text)
+
+    def install_macro(self, macro_id: str, parent: Optional[QWidget] = None) -> bool:
+        """Install the published macro *macro_id* into <macros folder>/<id>/
+        after asking; the download runs in the background. True if it was
+        started (the list is reloaded when it is done)."""
+        from opensak.gui.dialogs.macro_repository import confirm_install, start_task
+        from opensak.macro import repository as repo
+
+        index = repo.last_index()
+        macro = index.macros.get(macro_id) if index else None
+        if macro is None or self._busy:
+            return False
+        folder = repo.install_folder(macro.id)
+        targets = [folder / f.name for f in macro.files]
+        replaced = [t for t in targets if t.exists()]
+        record = repo.install_records().get(macro.id)
+        foreign = folder if folder.exists() and record is None and any(folder.iterdir()) \
+            else None
+        if not confirm_install(parent or self, macro, targets, replaced,
+                               foreign_folder=foreign):
+            return False
+        self._set_busy(True, tr("macro_repo_downloading", name=macro.name))
+
+        def done(contents) -> None:
+            self._set_busy(False)
+            try:
+                repo.install(macro, contents, folder, record)
+            except (OSError, repo.RepositoryError) as exc:
+                self._install_failed(macro.name, str(exc))
+            else:
+                self._append_output(tr("macro_repo_installed_msg", name=macro.name,
+                                       version=macro.version, folder=str(folder)))
+            self.reload()
+            if self._browse is not None:
+                self._browse.reload()   # type: ignore[attr-defined]
+
+        def failed(message: str) -> None:
+            self._set_busy(False)
+            self._install_failed(macro.name, message)
+
+        start_task(self, lambda: repo.download_files(macro), done, failed)
+        return True
+
+    def installed_from_index(self) -> dict[str, Any]:
+        """{id: status} of the local macros from the index."""
+        return {s.id: s for s in self._statuses.values() if s.from_index and s.id}
+
+    def open_browse(self) -> None:
+        """The Browse dialog; fetches the index first if there is none yet."""
+        from opensak.gui.dialogs.macro_repository import MacroBrowseDialog
+        from opensak.macro import repository as repo
+
+        index = repo.last_index()
+        if index is None:
+            self.check_updates(then=self.open_browse)
+            return
+        if self._browse is None:
+            self._browse = MacroBrowseDialog(
+                index, API_VERSION, self.installed_from_index,
+                lambda macro_id: self.install_macro(macro_id, self._browse), self)
+        self._browse.show()
+        self._browse.raise_()
+        self._browse.activateWindow()
+
+    def remove_macro(self, path: Path, withdrawn: bool = False) -> bool:
+        """Remove macro *path* after asking (its data only if ticked)."""
+        from opensak.gui.dialogs.macro_repository import confirm_remove
+        from opensak.macro import repository as repo
+
+        info = self._info(path)
+        name = info.name if info else path.stem
+        delete_data = confirm_remove(self, name, path, withdrawn)
+        if delete_data is None:
+            return False
+        try:
+            result = repo.remove(path, delete_data)
+        except OSError as exc:
+            self._append_output(tr("macro_repo_remove_failed", name=name, msg=str(exc)))
+            return False
+        self._append_output(tr("macro_repo_removed", name=name))
+        for kept in result.kept:
+            self._append_output(tr("macro_repo_kept", file=str(kept)))
+        self.reload()
+        return True
+
+    def set_tracking(self, path: Path, tracked: bool) -> None:
+        from opensak.macro import repository as repo
+        repo.set_tracked(path, tracked)
+        self.reload()
+
+    def _context_menu(self, pos: QPoint) -> None:
+        from opensak.macro import repository as repo
+
+        item = self._tree.itemAt(pos)
+        if item is None:
+            return
+        path = Path(item.data(COL_NAME, _PATH_ROLE))
+        status = self._statuses.get(path)
+        menu = QMenu(self)
+        if status is not None and status.can_update:
+            act = menu.addAction(tr("macro_repo_update_one"))
+            act.triggered.connect(lambda: self.update_macros([path]))
+        if status is not None and status.from_index:
+            act = menu.addAction(tr("macro_repo_remove_one"))
+            act.triggered.connect(
+                lambda: self.remove_macro(path, status.state == repo.WITHDRAWN))
+            act = menu.addAction(tr("macro_repo_stop_tracking"))
+            act.triggered.connect(lambda: self.set_tracking(path, False))
+        elif status is not None and status.state == repo.UNTRACKED:
+            act = menu.addAction(tr("macro_repo_track_again"))
+            act.triggered.connect(lambda: self.set_tracking(path, True))
+        if menu.isEmpty():
+            return
+        viewport = self._tree.viewport()
+        menu.exec(viewport.mapToGlobal(pos) if viewport is not None else pos)
 
     # -- Window ----------------------------------------------------------------
 
