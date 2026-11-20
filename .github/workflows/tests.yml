@@ -19,7 +19,9 @@ jobs:
         # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
         # actions/runner-images#14748). A gradual rollout would make this job flip
         # between images run to run. Unpin once 26.04 is verified green.
-        os: [ubuntu-24.04]
+        # #1108: 26.04 runs next to 24.04 until it is verified, then both
+        # become ubuntu-latest.
+        os: [ubuntu-24.04, ubuntu-26.04]
         python-version: ["3.11", "3.12"]
         # The app ships on Windows + macOS too — run unit tests there as well.
         include:
@@ -60,6 +62,33 @@ jobs:
     # actions/runner-images#14748). A gradual rollout would make this job flip
     # between images run to run. Unpin once 26.04 is verified green.
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - uses: ./.github/actions/setup-qt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run e2e tests
+        env:
+          QT_QPA_PLATFORM: xcb
+          QTWEBENGINE_CHROMIUM_FLAGS: "--disable-gpu --disable-software-rasterizer"
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" pytest tests/e2e-tests -v --cov=opensak --cov-report=term-missing
+
+  e2e-tests-26-04:
+    needs: unit-tests
+    # #1108: the e2e tests on Ubuntu 26.04 next to e2e-tests (24.04), as a
+    # job of its own so e2e-tests keeps its check names. Removed when
+    # e2e-tests moves to ubuntu-latest.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       matrix:
