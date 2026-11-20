@@ -6,6 +6,10 @@ on:
 
 jobs:
   unit-tests:
+    # A fixed name without the runner version, e.g. "unit-tests (linux, 3.11)",
+    # so a new runner image doesn't change the check names the beta and main
+    # rulesets require (#1108).
+    name: unit-tests (${{ startsWith(matrix.os, 'windows') && 'windows' || startsWith(matrix.os, 'macos') && 'macos' || 'linux' }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     # Belt-and-suspenders alongside the apt retry/timeout logic in
     # setup-qt: caps a stuck job at 45 min instead of GitHub's 360-min
@@ -16,10 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
-        # actions/runner-images#14748). A gradual rollout would make this job flip
-        # between images run to run. Unpin once 26.04 is verified green.
-        os: [ubuntu-24.04]
+        # Ubuntu 26.04 since Nov 2026 (verified in #1108)
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12"]
         # The app ships on Windows + macOS too — run unit tests there as well.
         include:
@@ -56,10 +58,7 @@ jobs:
 
   e2e-tests:
     needs: unit-tests
-    # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
-    # actions/runner-images#14748). A gradual rollout would make this job flip
-    # between images run to run. Unpin once 26.04 is verified green.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:

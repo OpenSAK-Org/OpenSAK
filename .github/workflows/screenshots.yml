@@ -28,10 +28,7 @@ permissions:
 
 jobs:
   capture:
-    # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
-    # actions/runner-images#14748). A gradual rollout would make this job flip
-    # between images run to run. Unpin once 26.04 is verified green.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -44,6 +41,14 @@ jobs:
           cache: pip
 
       - uses: ./.github/actions/setup-qt
+
+      # The runner's fonts lack symbols OpenSAK's buttons use (⛶ and ⧉ on
+      # the map, ⓘ next to Where), which came out as empty boxes. A desktop
+      # has them; Noto Sans Symbols and Noto Sans Math do (#1108).
+      - name: Install symbol fonts
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=15 fonts-noto-core
 
       - name: Install dependencies
         run: |

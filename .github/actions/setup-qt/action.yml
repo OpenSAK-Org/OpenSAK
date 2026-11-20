@@ -36,10 +36,14 @@ runs:
         # bounded per-request timeout/retries — kept as a second layer of
         # defence alongside the lock fix above, since a real mirror issue
         # is still possible independently of the lock issue.
+        # From Ubuntu 24.04 the sources are in deb822 format
+        # (/etc/apt/sources.list.d/ubuntu.sources), so *.sources too (#1108).
         sudo sed -i \
           -e 's|http://azure\.archive\.ubuntu\.com/ubuntu/|http://archive.ubuntu.com/ubuntu/|g' \
           -e 's|http://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-          /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+          /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+        grep -rhs "^URIs:\|^deb " /etc/apt/sources.list /etc/apt/sources.list.d/ | sort -u || true
 
         APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15"
 
