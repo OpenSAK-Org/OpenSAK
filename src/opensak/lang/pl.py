@@ -98,7 +98,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Zaktualizuj znalezione z bazy referencyjnej…",
     # Lua macros
     "action_run_macro":             "Uruchom makro (Lua)…",
-    "action_find_more_macros":      "Znajdź więcej makr…",
+    "action_browse_macros":         "Przeglądaj i instaluj makra…",
     "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otwórz…",
     "macro_btn_run":                "▶  Uruchom",
@@ -154,6 +154,7 @@ STRINGS: dict[str, str] = {
     "macro_repo_update_all":         "Aktualizuj wszystkie",
     "macro_repo_update_all_n":       "Aktualizuj wszystkie ({count})",
     "macro_repo_browse":             "Przeglądaj i instaluj…",
+    "macro_repo_github_link":        "Otwórz OpenSAK-Macros na GitHubie",
     "macro_repo_checking":           "Sprawdzanie aktualizacji w OpenSAK-Macros…",
     "macro_repo_check_failed":       "Nie można odczytać listy makr z OpenSAK-Macros: {msg}",
     "macro_repo_all_up_to_date":     "Wszystkie makra z OpenSAK-Macros są aktualne.",

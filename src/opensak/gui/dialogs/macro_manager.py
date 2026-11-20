@@ -632,11 +632,20 @@ class MacroManagerDialog(QDialog):
         from opensak.macro import repository as repo
         self.update_macros(list(repo.updates(self._statuses)))
 
-    def update_macros(self, paths: list[Path]) -> None:
-        """Update the macros *paths* one after another, asking for each."""
+    def update_from_browse(self, macro_id: str) -> None:
+        """Update… in the Browse dialog: the installed copies of *macro_id*,
+        asking on top of that dialog."""
+        paths = [p for p, s in self._statuses.items() if s.id == macro_id and s.can_update]
+        self.update_macros(paths, self._browse)
+
+    def update_macros(self, paths: list[Path], parent: Optional[QWidget] = None) -> None:
+        """Update the macros *paths* one after another, asking for each
+        (on top of *parent*, this window by default)."""
         from opensak.gui.dialogs.macro_repository import confirm_install, start_task
         from opensak.macro import repository as repo
 
+        if self._busy:
+            return
         queue = list(paths)
 
         def next_one() -> None:
@@ -650,7 +659,8 @@ class MacroManagerDialog(QDialog):
                 names = [macro.lua] if only_lua else [f.name for f in macro.files]
                 targets = [path if n == macro.lua else folder / n for n in names]
                 replaced = [t for t in targets if t.exists()]
-                if not confirm_install(self, macro, targets, replaced, local=self._info(path),
+                if not confirm_install(parent or self, macro, targets, replaced,
+                                       local=self._info(path),
                                        from_version=status.version,
                                        changed=status.state == repo.CHANGED):
                     continue
@@ -667,6 +677,7 @@ class MacroManagerDialog(QDialog):
                         self._append_output(tr("macro_repo_updated", name=macro.name,
                                                version=macro.version))
                     self.reload()
+                    self._reload_browse()
                     next_one()
 
                 def failed(message: str, name=macro.name) -> None:
@@ -717,8 +728,7 @@ class MacroManagerDialog(QDialog):
                 self._append_output(tr("macro_repo_installed_msg", name=macro.name,
                                        version=macro.version, folder=str(folder)))
             self.reload()
-            if self._browse is not None:
-                self._browse.reload()   # type: ignore[attr-defined]
+            self._reload_browse()
 
         def failed(message: str) -> None:
             self._set_busy(False)
@@ -726,6 +736,10 @@ class MacroManagerDialog(QDialog):
 
         start_task(self, lambda: repo.download_files(macro), done, failed)
         return True
+
+    def _reload_browse(self) -> None:
+        if self._browse is not None:
+            self._browse.reload()   # type: ignore[attr-defined]
 
     def installed_from_index(self) -> dict[str, Any]:
         """{id: status} of the local macros from the index."""
@@ -743,7 +757,8 @@ class MacroManagerDialog(QDialog):
         if self._browse is None:
             self._browse = MacroBrowseDialog(
                 index, API_VERSION, self.installed_from_index,
-                lambda macro_id: self.install_macro(macro_id, self._browse), self)
+                lambda macro_id: self.install_macro(macro_id, self._browse),
+                self.update_from_browse, self)
         self._browse.show()
         self._browse.raise_()
         self._browse.activateWindow()

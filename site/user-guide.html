@@ -1581,7 +1581,7 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
         <tr><td><strong>Run macro (Lua)…</strong></td><td>Opens the macro editor, where you open, write, save and run a macro.</td></tr>
         <tr><td><strong>Macro manager…</strong></td><td>Lists the macros in your macros folder, to run them, edit them, give them a keyboard shortcut or put them on the Macros toolbar.</td></tr>
         <tr><td><strong>Open example</strong></td><td>Copies one of the example macros that come with OpenSAK into your macros folder and opens it in the editor.</td></tr>
-        <tr><td><strong>Find more macros…</strong></td><td>Opens the shared macro repository, OpenSAK-Macros, in your browser (see <a href="#macros-sharing">Finding and sharing macros</a>).</td></tr>
+        <tr><td><strong>Browse and install macros…</strong></td><td>Opens the Macro manager with its Browse dialog, where you install macros from the shared repository, OpenSAK-Macros (see <a href="#macros-sharing">Finding and sharing macros</a>).</td></tr>
       </tbody>
     </table>
 
@@ -1688,7 +1688,7 @@ Register-ScheduledTask -TaskName "OpenSAK clean-up" -Action $action -Trigger $tr
     <p>The exit codes are those of <a href="#import-command-line">the command-line import</a>, plus <code>7</code>: the macro needs an answer or an approval it didn't get. A macro can also set its own with <code>opensak.exit()</code>. <code>--json</code> writes the result for your own scripts, and <code>--log-file FILE</code> keeps a macro's output in a file of its own.</p>
 
     <h3 id="macros-sharing">Finding and sharing macros</h3>
-    <p>Macros written by other users are collected in the <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros">OpenSAK-Macros</a> repository on GitHub, one folder per macro with a short description. <strong>Macros → Find more macros…</strong> opens it, and so does the link in an empty Macro manager.</p>
+    <p>Macros written by other users are collected in the <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros">OpenSAK-Macros</a> repository on GitHub, one folder per macro with a short description. <strong>Macros → Browse and install macros…</strong> lists them and installs the one you pick; its <strong>Open OpenSAK-Macros on GitHub</strong> link, and the link in an empty Macro manager, open the repository with each macro's README and author.</p>
     <ul>
       <li><strong>Installing a macro.</strong> Open the macro's folder in the repository, download its <code>.lua</code> file (and any other files in the folder), and put them in your macros folder: click <strong>Open macros folder</strong> in the Macro manager and save them there. Click <strong>Reload</strong>, and the macro appears in the list.</li>
       <li><strong>What it may do.</strong> The <code>Permissions</code> and <code>Network</code> lines in a macro's header are the author's own statement of what it does. OpenSAK still asks before the macro first changes your caches, uses a folder or contacts a web site (see above), and asks again when an update of the macro changes it.</li>

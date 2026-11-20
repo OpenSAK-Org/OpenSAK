@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import repository as repo
-from opensak.macro.metadata import MacroInfo
+from opensak.macro.metadata import MACROS_REPO_URL, MacroInfo
 
 
 # ── Background task ─────────────────────────────────────────────────────────
@@ -240,16 +240,20 @@ _ID_ROLE = Qt.ItemDataRole.UserRole
 
 
 class MacroBrowseDialog(QDialog):
-    """Every macro in the index, with its details, and Install.
+    """Every macro in the index, with its details, and Install or Update.
 
     *installed()* returns {id: status} of the local macros that came from
     the index; *install(macro_id)* installs one (asking first) and returns
-    True when it did, after which the list is refreshed.
+    True when it did, after which the list is refreshed; *update(macro_id)*
+    updates an installed one (asking first; the caller refreshes the list
+    when the download is done).
     """
 
     def __init__(self, index: repo.MacroIndex, api_version: int,
                  installed: Callable[[], dict[str, repo.MacroStatus]],
-                 install: Callable[[str], bool], parent: Optional[QWidget] = None):
+                 install: Callable[[str], bool],
+                 update: Callable[[str], None],
+                 parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle(tr("macro_repo_browse_title"))
         self.resize(860, 520)
@@ -258,6 +262,7 @@ class MacroBrowseDialog(QDialog):
         self._api = api_version
         self._installed = installed
         self._install = install
+        self._update = update
 
         self._search = QLineEdit()
         self._search.setPlaceholderText(tr("macro_repo_browse_search"))
@@ -301,6 +306,16 @@ class MacroBrowseDialog(QDialog):
         self._source = QLabel(tr("macro_repo_browse_source", commit=index.commit[:8],
                                  date=index.generated[:10]))
         self._source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Where READMEs, author credits and contributing live.
+        self._github = QLabel(f'<a href="{html.escape(MACROS_REPO_URL)}">'
+                              f'{html.escape(tr("macro_repo_github_link"))}</a>')
+        self._github.setTextFormat(Qt.TextFormat.RichText)
+        self._github.setOpenExternalLinks(True)
+        self._github.setToolTip(MACROS_REPO_URL)
+        footer = QHBoxLayout()
+        footer.addWidget(self._github)
+        footer.addStretch(1)
+        footer.addWidget(self._source)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._tree)
@@ -309,7 +324,7 @@ class MacroBrowseDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(self._search)
         layout.addWidget(splitter, 1)
-        layout.addWidget(self._source)
+        layout.addLayout(footer)
         layout.addLayout(buttons)
         self.reload()
 
@@ -374,8 +389,14 @@ class MacroBrowseDialog(QDialog):
         macro = self._index.macros.get(self.selected_id() or "")
         installed = getattr(self, "_installed_now", {})
         self._btn_page.setEnabled(bool(macro and macro.page))
-        self._btn_install.setEnabled(bool(
-            macro and macro.id not in installed and not macro.needs_newer_api(self._api)
+        status = installed.get(macro.id) if macro else None
+        # An installed macro with a newer version (or local changes) is
+        # updated from here too, as with Update… in the Macro manager.
+        updatable = status is not None and status.can_update
+        self._btn_install.setText(tr("macro_repo_update_one") if updatable
+                                  else tr("macro_repo_install_btn"))
+        self._btn_install.setEnabled(updatable or bool(
+            macro and status is None and not macro.needs_newer_api(self._api)
             and macro.lua_file is not None))
         if macro is None:
             self._details.clear()
@@ -401,7 +422,12 @@ class MacroBrowseDialog(QDialog):
 
     def _install_selected(self) -> None:
         macro_id = self.selected_id()
-        if macro_id and self._install(macro_id):
+        if not macro_id:
+            return
+        status = getattr(self, "_installed_now", {}).get(macro_id)
+        if status is not None and status.can_update:
+            self._update(macro_id)
+        elif self._install(macro_id):
             self.reload()
 
     def _open_page(self) -> None:

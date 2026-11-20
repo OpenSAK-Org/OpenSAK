@@ -96,7 +96,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Update finds from reference database…",
     # Lua macros
     "action_run_macro":             "Run macro (Lua)…",
-    "action_find_more_macros":      "Find more macros…",
+    "action_browse_macros":         "Browse and install macros…",
     "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Open…",
     "macro_btn_run":                "▶  Run",
@@ -152,6 +152,7 @@ STRINGS: dict[str, str] = {
     "macro_repo_update_all":         "Update all",
     "macro_repo_update_all_n":       "Update all ({count})",
     "macro_repo_browse":             "Browse and install…",
+    "macro_repo_github_link":        "Open OpenSAK-Macros on GitHub",
     "macro_repo_checking":           "Checking OpenSAK-Macros for updates…",
     "macro_repo_check_failed":       "Could not read the macro list of OpenSAK-Macros: {msg}",
     "macro_repo_all_up_to_date":     "All macros from OpenSAK-Macros are up to date.",

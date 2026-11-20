@@ -206,6 +206,27 @@ def test_browse_and_install(make_manager, macros_dir, answers, qtbot):
     assert "Installed Roadsheet 1.1" in d._output.toPlainText()
 
 
+def test_browse_updates_an_installed_macro(make_manager, macros_dir, answers, qtbot):
+    """An installed macro with a newer version is updated from Browse too;
+    before, Install was just disabled for it."""
+    lua = _put(macros_dir / "roadsheet" / "roadsheet.lua", V1)
+    d = make_manager()
+    d.open_browse()
+    browse = d._browse
+    qtbot.addWidget(browse)
+    assert browse.select("roadsheet")
+    assert browse._tree.topLevelItem(0).text(mr.B_STATUS) == "Update: 1.0 → 1.1"
+    assert browse._btn_install.isEnabled() and browse._btn_install.text() == "Update…"
+    browse._install_selected()
+    macro_id, _targets, replaced, kw = answers["installs"][-1]
+    assert macro_id == "roadsheet" and kw["from_version"] == "1.0" and lua in replaced
+    assert lua.read_bytes() == V2
+    assert browse._tree.topLevelItem(0).text(mr.B_STATUS) == "Up to date (1.1)"
+    assert not browse._btn_install.isEnabled()
+    assert browse._btn_install.text() == "Install"
+    assert "Updated Roadsheet to 1.1." in d._output.toPlainText()
+
+
 def test_install_into_existing_own_folder_warns(make_manager, macros_dir, answers):
     _put(macros_dir / "roadsheet" / "notes.txt", b"mine")
     d = make_manager()
@@ -213,6 +234,19 @@ def test_install_into_existing_own_folder_warns(make_manager, macros_dir, answer
     answers["install"] = False
     assert not d.install_macro("roadsheet")
     assert answers["installs"][-1][3]["foreign_folder"] == macros_dir / "roadsheet"
+
+
+def test_browse_links_to_the_repository_on_github(make_manager, macros_dir, answers, qtbot):
+    from PySide6.QtCore import Qt
+
+    from opensak.macro.metadata import MACROS_REPO_URL
+
+    d = make_manager()
+    d.open_browse()
+    qtbot.addWidget(d._browse)
+    link = d._browse._github
+    assert link.textFormat() == Qt.TextFormat.RichText and link.openExternalLinks()
+    assert f'<a href="{MACROS_REPO_URL}">Open OpenSAK-Macros on GitHub</a>' == link.text()
 
 
 def test_browse_refuses_macros_for_a_newer_api(make_manager, macros_dir, answers, qtbot,

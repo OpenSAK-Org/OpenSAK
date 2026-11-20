@@ -96,7 +96,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
     # Lua macros
     "action_run_macro":             "Spustit makro (Lua)…",
-    "action_find_more_macros":      "Najít další makra…",
+    "action_browse_macros":         "Procházet a instalovat makra…",
     "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
@@ -152,6 +152,7 @@ STRINGS: dict[str, str] = {
     "macro_repo_update_all":         "Aktualizovat vše",
     "macro_repo_update_all_n":       "Aktualizovat vše ({count})",
     "macro_repo_browse":             "Procházet a instalovat…",
+    "macro_repo_github_link":        "Otevřít OpenSAK-Macros na GitHubu",
     "macro_repo_checking":           "Kontroluji aktualizace v OpenSAK-Macros…",
     "macro_repo_check_failed":       "Seznam maker z OpenSAK-Macros nelze načíst: {msg}",
     "macro_repo_all_up_to_date":     "Všechna makra z OpenSAK-Macros jsou aktuální.",
