@@ -113,6 +113,31 @@ def test_check_for_updates_shows_statuses(make_manager, macros_dir, answers, no_
     assert d._act_update_all.isEnabled() and "(1)" in d._act_update_all.text()
 
 
+def test_check_lists_each_update_and_withdrawn_macro(make_manager, macros_dir, answers):
+    """The column may be off screen: the log names each macro too."""
+    _put(macros_dir / "roadsheet" / "roadsheet.lua", V1)
+    _put(macros_dir / "old.lua", GONE)
+    d = make_manager()
+    d.check_updates()
+    lines = d._output.toPlainText().splitlines()
+    assert "  • Roadsheet: Update: 1.0 → 1.1" in lines
+    assert "  • Old one: Withdrawn" in lines
+
+
+def test_repo_button_shows_update_count(make_manager, macros_dir, answers):
+    _put(macros_dir / "roadsheet" / "roadsheet.lua", V1)
+    d = make_manager()
+    assert d._btn_repo.text() == "OpenSAK-Macros"
+    d.check_updates()
+    assert d._btn_repo.text() == "OpenSAK-Macros (1)"
+    assert d._btn_repo.font().bold()
+
+
+def test_repo_column_is_shown_next_to_version(make_manager):
+    header = make_manager()._tree.header()
+    assert header.visualIndex(mm.COL_REPO) == header.visualIndex(mm.COL_VERSION) + 1
+
+
 def test_check_offers_to_remove_withdrawn_macros(make_manager, macros_dir, answers):
     gone = _put(macros_dir / "old.lua", GONE)
     d = make_manager()

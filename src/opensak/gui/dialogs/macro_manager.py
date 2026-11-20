@@ -174,6 +174,9 @@ class MacroManagerDialog(QDialog):
         for col in range(self._tree.columnCount()):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(COL_DESCRIPTION, QHeaderView.ResizeMode.Stretch)
+        # The OpenSAK-Macros status goes next to the version it compares
+        # with, not off screen to the right (the logical index stays).
+        header.moveSection(header.visualIndex(COL_REPO), header.visualIndex(COL_VERSION) + 1)
         self._tree.itemSelectionChanged.connect(self._update_buttons)
         self._tree.itemActivated.connect(lambda *_: self._run_activated())
         self._tree.itemChanged.connect(self._on_item_changed)
@@ -325,7 +328,19 @@ class MacroManagerDialog(QDialog):
         self._tree.setVisible(has_macros)
         self._search.setVisible(has_macros)
         self._empty.setVisible(not has_macros)
+        self._show_update_count()
         self._apply_search()
+
+    def _show_update_count(self) -> None:
+        """The OpenSAK-Macros button says how many updates there are."""
+        from opensak.macro import repository as repo
+
+        count = len(repo.updates(self._statuses))
+        text = tr("macro_repo_button")
+        self._btn_repo.setText(f"{text} ({count})" if count else text)
+        font = self._btn_repo.font()
+        font.setBold(bool(count))
+        self._btn_repo.setFont(font)
 
     def selected_path(self) -> Path | None:
         items = self._tree.selectedItems()
@@ -580,8 +595,22 @@ class MacroManagerDialog(QDialog):
             return
         if updates:
             self._append_output(tr("macro_repo_updates_found", count=len(updates)))
+            self._list_statuses(updates)
         if withdrawn:
             self._append_output(tr("macro_repo_withdrawn_found", count=len(withdrawn)))
+            self._list_statuses(withdrawn)
+
+    def _list_statuses(self, statuses: dict[Path, Any]) -> None:
+        """One line per macro under a check's summary, sorted by name, so
+        the result can be read without scrolling to the column."""
+        from opensak.gui.dialogs.macro_repository import status_text
+
+        def name(path: Path) -> str:
+            info = self._info(path)
+            return info.name if info else path.stem
+
+        for path in sorted(statuses, key=lambda p: name(p).casefold()):
+            self._append_output(f"  • {name(path)}: {status_text(statuses[path])}")
 
     def _offer_withdrawn_removal(self) -> None:
         """After a check the user started: offer to remove each withdrawn
