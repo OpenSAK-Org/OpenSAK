@@ -194,6 +194,55 @@ def _has_appimagelauncher_desktop_entry() -> bool:
     return False
 
 
+def _integration_artifacts_present() -> bool:
+    """
+    True if the menu integration the stored flag claims actually exists on
+    this machine.
+
+    Two cases, matching the two ways the flag can be set:
+      - We integrated ourselves (``appimage.install_path`` is stored): the
+        installed AppImage copy and our .desktop file must both exist.
+      - We silently adopted an AppImageLauncher integration (no install
+        path stored): its .desktop entry must still be there.
+    """
+    install_path = get_integration_install_path()
+    if install_path is not None:
+        return install_path.is_file() and get_desktop_file_path().is_file()
+    return _has_appimagelauncher_desktop_entry()
+
+
+def reconcile_integration_state() -> bool:
+    """
+    Clear a stale "integrated" flag whose files are gone.
+
+    The flag lives in opensak.json, which travels with the user's data:
+    copying ~/.config to a new PC, restoring a backup, or deleting the
+    .desktop file by hand all leave the flag set while the menu entry is
+    missing. Without this check OpenSAK never offers integration again,
+    the Settings page wrongly says "Installed in your program menu", and
+    "Upgrade now" would try to replace a file that does not exist.
+
+    Only the integration state is reset. A permanent "Don't ask again" is
+    left alone — that is the user's own choice, and the Settings button
+    still works.
+
+    Only acts when running as an AppImage, so a source run or a test never
+    rewrites the stored state. Returns True if the flag was cleared.
+    """
+    if not is_running_as_appimage():
+        return False
+    if not is_appimage_integrated():
+        return False
+    if _integration_artifacts_present():
+        return False
+
+    log.info("AppImage integration flag is set but its files are missing — resetting it")
+    store = get_store()
+    store.set(_KEY_INTEGRATED, False)
+    store.delete(_KEY_INSTALL_PATH)
+    return True
+
+
 def should_prompt_for_integration() -> bool:
     """
     Kaldes ved opstart. Returnerer True hvis førstegangs-dialogen
@@ -205,6 +254,9 @@ def should_prompt_for_integration() -> bool:
     """
     if not is_running_as_appimage():
         return False
+    # A flag copied over from another machine (or left behind after
+    # the menu entry was removed by hand) must not hide the offer.
+    reconcile_integration_state()
     if is_appimage_integrated():
         return False
     if _has_appimagelauncher_desktop_entry():

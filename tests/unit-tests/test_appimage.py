@@ -142,8 +142,31 @@ class TestShouldPromptForIntegration:
     def test_false_when_already_integrated(self, monkeypatch, tmp_path):
         fake = _make_fake_appimage(tmp_path)
         monkeypatch.setenv("APPIMAGE", str(fake))
-        get_store().set("appimage.integrated", True)
+        # A real integration, so the files behind the flag exist — a bare
+        # flag without files is now treated as stale (see
+        # TestReconcileIntegrationState below).
+        assert appimage.integrate_appimage().success
         assert appimage.should_prompt_for_integration() is False
+
+    def test_true_when_flag_copied_from_another_machine(self, monkeypatch, tmp_path):
+        # Allan's case: opensak.json copied to a new PC, menu entry not.
+        fake = _make_fake_appimage(tmp_path)
+        monkeypatch.setenv("APPIMAGE", str(fake))
+        get_store().set_many({
+            "appimage.integrated": True,
+            "appimage.install_path": str(appimage.get_integrated_appimage_path()),
+        })
+        assert appimage.should_prompt_for_integration() is True
+        assert appimage.is_appimage_integrated() is False
+
+    def test_false_when_stale_flag_but_declined_permanently(self, monkeypatch, tmp_path):
+        fake = _make_fake_appimage(tmp_path)
+        monkeypatch.setenv("APPIMAGE", str(fake))
+        get_store().set("appimage.integrated", True)
+        appimage.decline_integration(remember=True)
+        # The stale flag is cleared, but "Don't ask again" is still honoured.
+        assert appimage.should_prompt_for_integration() is False
+        assert appimage.is_appimage_integrated() is False
 
     def test_false_and_silently_adopts_when_appimagelauncher_present(
         self, monkeypatch, tmp_path
@@ -170,6 +193,89 @@ class TestShouldPromptForIntegration:
         fake = _make_fake_appimage(tmp_path)
         monkeypatch.setenv("APPIMAGE", str(fake))
         assert appimage.should_prompt_for_integration() is True
+
+
+class TestReconcileIntegrationState:
+    """A stored "integrated" flag whose files are gone must be cleared."""
+
+    def _run_as_appimage(self, monkeypatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("APPIMAGE", str(_make_fake_appimage(tmp_path)))
+
+    def test_noop_when_not_running_as_appimage(self):
+        get_store().set("appimage.integrated", True)
+        assert appimage.reconcile_integration_state() is False
+        # A source run must never rewrite the stored state.
+        assert appimage.is_appimage_integrated() is True
+
+    def test_noop_when_not_integrated(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        assert appimage.reconcile_integration_state() is False
+        assert appimage.is_appimage_integrated() is False
+
+    def test_keeps_flag_when_integration_is_intact(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        assert appimage.integrate_appimage().success
+
+        assert appimage.reconcile_integration_state() is False
+        assert appimage.is_appimage_integrated() is True
+        assert appimage.get_integration_install_path() == appimage.get_integrated_appimage_path()
+
+    def test_resets_when_installed_copy_missing(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        assert appimage.integrate_appimage().success
+        appimage.get_integrated_appimage_path().unlink()
+
+        assert appimage.reconcile_integration_state() is True
+        assert appimage.is_appimage_integrated() is False
+        assert appimage.get_integration_install_path() is None
+
+    def test_resets_when_desktop_file_missing(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        assert appimage.integrate_appimage().success
+        appimage.get_desktop_file_path().unlink()
+
+        assert appimage.reconcile_integration_state() is True
+        assert appimage.is_appimage_integrated() is False
+
+    def test_resets_flag_copied_without_any_files(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        get_store().set_many({
+            "appimage.integrated": True,
+            "appimage.install_path": str(appimage.get_integrated_appimage_path()),
+        })
+
+        assert appimage.reconcile_integration_state() is True
+        assert appimage.is_appimage_integrated() is False
+        assert appimage.get_integration_install_path() is None
+
+    def test_keeps_adopted_appimagelauncher_integration(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        apps_dir = Path.home() / ".local" / "share" / "applications"
+        apps_dir.mkdir(parents=True)
+        (apps_dir / "appimagekit_abc123-OpenSAK.desktop").write_text(
+            "[Desktop Entry]\nName=OpenSAK\nX-AppImage-Identifier=abc123\n",
+            encoding="utf-8",
+        )
+        # Adoption sets the flag but no install path.
+        get_store().set("appimage.integrated", True)
+
+        assert appimage.reconcile_integration_state() is False
+        assert appimage.is_appimage_integrated() is True
+
+    def test_resets_adopted_integration_when_its_entry_is_gone(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        get_store().set("appimage.integrated", True)
+
+        assert appimage.reconcile_integration_state() is True
+        assert appimage.is_appimage_integrated() is False
+
+    def test_leaves_declined_flag_untouched(self, monkeypatch, tmp_path):
+        self._run_as_appimage(monkeypatch, tmp_path)
+        get_store().set("appimage.integrated", True)
+        appimage.decline_integration(remember=True)
+
+        assert appimage.reconcile_integration_state() is True
+        assert get_store().get("appimage.integration_declined", False) is True
 
 
 class TestIntegrateAppimage:
