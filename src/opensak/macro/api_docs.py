@@ -169,7 +169,9 @@ def _header_section() -> list[str]:
         "`Name` the file name is shown. `Requires-API` is the lowest "
         "`opensak.api_version()` the macro works with: the manager marks a "
         "macro that needs a newer one and asks before running it. Only the "
-        "comment lines before the first line of code are read.",
+        "comment lines before the first line of code are read. A macro reads "
+        "its own header with `opensak.macro_info()`, e.g. to print its "
+        "`Version` without repeating it in the code.",
         "",
         "`Headless: no` says the macro can't run without a window: `opensak run` "
         "refuses it before it starts, with exit code 7. Without the key, or with "
@@ -1233,6 +1235,18 @@ def render_lua_stub() -> str:
         "---@field status integer The HTTP status, e.g. 200 or 404.",
         "---@field content_type string The Content-Type header (\"\" if none).",
         "---@field url string The URL after redirects.",
+        "",
+        "---The header of the running macro, from `opensak.macro_info()`.",
+        "---@class opensak.MacroInfo",
+        "---@field name string `Name`, or the file name without `.lua`.",
+        "---@field author string `Author` (\"\" if not set).",
+        "---@field version string `Version` as written, e.g. \"1.3\" (\"\" if not set).",
+        "---@field requires_api string `Requires-API` as written (\"\" if not set).",
+        "---@field description string `Description` (\"\" if not set).",
+        "---@field headless boolean False only for `Headless: no`.",
+        "---@field permissions string[] The words of `Permissions`, lower-cased (\"none\" left out).",
+        "---@field network string[] The hosts of `Network`.",
+        "---@field file string? The macro file; nil for code not saved to a file.",
         "",
         "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
         "---@class opensak.TransferOptions",
