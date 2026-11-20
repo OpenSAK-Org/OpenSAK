@@ -1126,7 +1126,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Schwierigkeit oder Gelände nicht zwischen 1 und 5 in Schritten von 0,5",
     "repair_chk_identity": "Leerer GC-Code oder Name",
     "repair_fix_delete": "Löschen",
-    "repair_fix_clear_link": "Verknüpfung entfernen",
     "repair_fix_set_parent": "Code des Caches setzen",
     "repair_fix_clear_flag": "Markierung entfernen",
     "repair_report_only": "Nur melden",

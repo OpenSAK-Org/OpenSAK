@@ -16,8 +16,6 @@ Checks in this phase:
   Fix: delete them. Foreign keys are enforced and cache_delete.py removes
   the child rows first, so these come from older databases, migrations that
   run with foreign keys off, or a crash.
-* a custom waypoint's link to its parent cache (``caches.parent_gc_code``)
-  that points to a cache that is not in the database. Fix: clear the link.
 * a waypoint's ``parent_gc_code`` that isn't the code of its own cache.
   Fix: set it, as the importer and macros do.
 * the corrected-coordinates flag without corrected coordinates. Filters
@@ -27,7 +25,11 @@ Checks in this phase:
 * rows of the companion database (#1034) whose cache is gone. Fix:
   ``companion.cleanup()``.
 * report only: coordinates out of range, difficulty or terrain outside
-  1–5 or not in 0.5 steps, an empty GC code or name.
+  1–5 or not in 0.5 steps, an empty GC code or name, and a custom
+  waypoint's link to its parent cache (``caches.parent_gc_code``) that
+  points to a cache that is not in the database. Every database is
+  independent, so the parent may be in another database or be imported
+  later: the link isn't necessarily wrong, and clearing it would lose it.
 
 No duplicate check: the unique constraints on attributes, ``logs.log_id``
 and waypoints exist in every database (models since v0.2.0, migrations 2 and
@@ -129,7 +131,13 @@ def _rating_bad(col: str) -> str:
             f"OR {col} * 2 <> CAST({col} * 2 AS INTEGER)))")
 
 
+_PARENT_LINK_WHERE = (
+    "parent_gc_code IS NOT NULL AND trim(parent_gc_code) <> '' "
+    "AND upper(trim(parent_gc_code)) NOT IN (SELECT gc_code FROM caches)"
+)
+
 _REPORT_CHECKS: tuple[tuple[str, str], ...] = (
+    (PARENT_LINK, _PARENT_LINK_WHERE),
     (COORDS, _COORDS_WHERE),
     (RATINGS, f"{_rating_bad('difficulty')} OR {_rating_bad('terrain')}"),
     (IDENTITY, "gc_code IS NULL OR trim(gc_code) = '' OR name IS NULL OR trim(name) = ''"),
@@ -142,10 +150,6 @@ _CORRECTED_COORDS_WHERE = (
 
 # ── Fixable checks on the main database ───────────────────────────────────────
 
-_PARENT_LINK_WHERE = (
-    "parent_gc_code IS NOT NULL AND trim(parent_gc_code) <> '' "
-    "AND upper(trim(parent_gc_code)) NOT IN (SELECT gc_code FROM caches)"
-)
 _WAYPOINT_PARENT_FROM = (
     "FROM waypoints w JOIN caches c ON c.id = w.cache_id "
     "WHERE w.parent_gc_code IS NOT c.gc_code"
@@ -177,9 +181,6 @@ def scan(db_path: Path, with_companion: bool = False,
         notify(ORPHANS)
         for table, count in sorted(_orphan_rowids_by_table(conn, count_only=True).items()):
             findings.append(Finding(ORPHANS, count, True, table=table))
-
-        notify(PARENT_LINK)
-        findings.append(_cache_finding(conn, PARENT_LINK, _PARENT_LINK_WHERE, True))
 
         notify(WAYPOINT_PARENT)
         count = conn.execute(f"SELECT count(*) {_WAYPOINT_PARENT_FROM}").fetchone()[0]
@@ -273,11 +274,6 @@ def repair(db_path: Path, keys: set[str],
                 for table, rowids in _orphan_rowids_by_table(conn).items():
                     if table in orphan_tables:
                         result.fixed[f"{ORPHANS}:{table}"] = _delete_rowids(conn, table, rowids)
-            if PARENT_LINK in keys:
-                notify(PARENT_LINK)
-                result.fixed[PARENT_LINK] = conn.execute(
-                    f"UPDATE caches SET parent_gc_code = NULL WHERE {_PARENT_LINK_WHERE}"
-                ).rowcount
             if WAYPOINT_PARENT in keys:
                 notify(WAYPOINT_PARENT)
                 result.fixed[WAYPOINT_PARENT] = conn.execute(

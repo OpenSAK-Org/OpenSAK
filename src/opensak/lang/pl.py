@@ -1126,7 +1126,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Trudność lub teren nie od 1 do 5 w krokach co 0,5",
     "repair_chk_identity": "Pusty kod GC lub nazwa",
     "repair_fix_delete": "Usuń",
-    "repair_fix_clear_link": "Usuń powiązanie",
     "repair_fix_set_parent": "Ustaw kod skrzynki",
     "repair_fix_clear_flag": "Usuń oznaczenie",
     "repair_report_only": "Tylko zgłoś",

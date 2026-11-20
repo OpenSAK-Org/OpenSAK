@@ -117,10 +117,11 @@ class TestScan:
         assert by_key[repair.RATINGS].examples == ("GC3",)
         assert by_key[repair.IDENTITY].examples == ("GC4",)
         assert not by_key[repair.COORDS].fixable
+        # The parent may be in another database or be imported later.
+        assert not by_key[repair.PARENT_LINK].fixable
         assert {f.key for f in result.fixable} == {
             "orphans:logs", "orphans:waypoints", "orphans:attributes", "orphans:trackables",
-            "orphans:user_notes", repair.PARENT_LINK, repair.WAYPOINT_PARENT,
-            repair.CORRECTED_FLAG,
+            "orphans:user_notes", repair.WAYPOINT_PARENT, repair.CORRECTED_FLAG,
         }
 
     def test_ratings_in_half_steps_are_fine(self, tmp_path):
@@ -182,12 +183,13 @@ class TestRepair:
         assert result.fixed == {
             "orphans:logs": 2, "orphans:waypoints": 1, "orphans:attributes": 1,
             "orphans:trackables": 1, "orphans:user_notes": 1,
-            repair.PARENT_LINK: 1, repair.WAYPOINT_PARENT: 1, repair.CORRECTED_FLAG: 1,
+            repair.WAYPOINT_PARENT: 1, repair.CORRECTED_FLAG: 1,
         }
         again = repair.scan(db)
         assert again.fixable == ()
         # Report-only problems are left for the user.
-        assert set(_counts(again)) == {repair.COORDS, repair.RATINGS, repair.IDENTITY}
+        assert set(_counts(again)) == {repair.PARENT_LINK, repair.COORDS, repair.RATINGS,
+                                       repair.IDENTITY}
         assert maintenance.check_file(db).ok
         assert repair.repair(db, keys).fixed == {}
 
@@ -200,7 +202,7 @@ class TestRepair:
             assert [lg.log_id for lg in gc1.logs] == ["1"]
             assert [w.parent_gc_code for w in gc1.waypoints] == ["GC1"]
             assert s.query(Cache).filter_by(gc_code="CW1").one().parent_gc_code == "GC1"
-            assert s.query(Cache).filter_by(gc_code="CW2").one().parent_gc_code is None
+            assert s.query(Cache).filter_by(gc_code="CW2").one().parent_gc_code == "gc404"
             gc2 = s.query(Cache).filter_by(gc_code="GC2").one()
             assert gc2.user_note is not None and not gc2.user_note.is_corrected
             assert gc2.user_note.corrected_source is None
@@ -216,12 +218,13 @@ class TestRepair:
 
     def test_only_the_chosen_fixes(self, tmp_path):
         db = _broken(tmp_path / "Broken.db")
-        result = repair.repair(db, {"orphans:logs", repair.COORDS})
+        result = repair.repair(db, {"orphans:logs", repair.COORDS, repair.PARENT_LINK})
         assert result.fixed == {"orphans:logs": 2}
         counts = _counts(repair.scan(db))
         assert "orphans:logs" not in counts
         assert counts["orphans:waypoints"] == 1
         assert counts[repair.COORDS] == 1
+        assert counts[repair.PARENT_LINK] == 1
 
     def test_a_failure_changes_nothing(self, tmp_path):
         db = _broken(tmp_path / "Broken.db")
@@ -298,6 +301,9 @@ class TestDialog:
         assert not report.flags() & drd.Qt.ItemFlag.ItemIsUserCheckable
         assert report.text(2) == tr("repair_report_only")
         assert "GC3" in rows[repair.COORDS].text(3)
+        link = rows[repair.PARENT_LINK]
+        assert not link.flags() & drd.Qt.ItemFlag.ItemIsUserCheckable
+        assert link.text(2) == tr("repair_report_only")
         assert dlg._backup.isChecked()
         assert dlg._btn_repair.isEnabled()
         assert dlg.checked_keys() == {f.key for f in dlg.scan_result.fixable}
@@ -325,7 +331,8 @@ class TestDialog:
                         and not dlg.scan_result.fixable, timeout=20000)
         assert tr("repair_fixed", count=2, check=tr("repair_chk_orphans", table="logs")) \
             in dlg._results.toPlainText()
-        assert set(_rows(dlg)) == {repair.COORDS, repair.RATINGS, repair.IDENTITY}
+        assert set(_rows(dlg)) == {repair.PARENT_LINK, repair.COORDS, repair.RATINGS,
+                                   repair.IDENTITY}
         with get_session() as s:            # the active database is still usable
             assert s.query(Log).count() == 1
 

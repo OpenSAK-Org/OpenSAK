@@ -67,7 +67,6 @@ _CHECK_TEXT = {
 # The fix each fixable check makes, as a translation key.
 _FIX_TEXT = {
     repair.ORPHANS: "repair_fix_delete",
-    repair.PARENT_LINK: "repair_fix_clear_link",
     repair.WAYPOINT_PARENT: "repair_fix_set_parent",
     repair.CORRECTED_FLAG: "repair_fix_clear_flag",
     repair.COMPANION_ORPHANS: "repair_fix_delete",

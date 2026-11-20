@@ -1125,7 +1125,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Obtížnost nebo terén není mezi 1 a 5 v krocích po 0,5",
     "repair_chk_identity": "Prázdný GC kód nebo název",
     "repair_fix_delete": "Smazat",
-    "repair_fix_clear_link": "Odstranit odkaz",
     "repair_fix_set_parent": "Nastavit kód keše",
     "repair_fix_clear_flag": "Zrušit označení",
     "repair_report_only": "Pouze hlásit",

@@ -1125,7 +1125,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Svårighet eller terräng inte mellan 1 och 5 i steg om 0,5",
     "repair_chk_identity": "Tom GC-kod eller namn",
     "repair_fix_delete": "Ta bort",
-    "repair_fix_clear_link": "Ta bort länken",
     "repair_fix_set_parent": "Sätt cachens kod",
     "repair_fix_clear_flag": "Ta bort markeringen",
     "repair_report_only": "Endast rapport",

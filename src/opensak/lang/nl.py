@@ -1128,7 +1128,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Moeilijkheid of terrein niet tussen 1 en 5 in stappen van 0,5",
     "repair_chk_identity": "Lege GC-code of naam",
     "repair_fix_delete": "Verwijderen",
-    "repair_fix_clear_link": "Koppeling verwijderen",
     "repair_fix_set_parent": "Code van de cache instellen",
     "repair_fix_clear_flag": "Markering verwijderen",
     "repair_report_only": "Alleen melden",

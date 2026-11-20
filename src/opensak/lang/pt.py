@@ -1125,7 +1125,6 @@ STRINGS: dict[str, str] = {
     "repair_chk_ratings": "Dificuldade ou terreno fora de 1 a 5 em passos de 0,5",
     "repair_chk_identity": "Código GC ou nome vazio",
     "repair_fix_delete": "Eliminar",
-    "repair_fix_clear_link": "Remover a ligação",
     "repair_fix_set_parent": "Definir o código da cache",
     "repair_fix_clear_flag": "Remover a marca",
     "repair_report_only": "Só reportar",
