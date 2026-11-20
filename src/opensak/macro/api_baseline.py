@@ -7,7 +7,8 @@ Renaming or removing a function, parameter, cache field, header key or
 documented database column (db_schema.py) needs a new API version and a
 deprecation period (deprecation.py). snapshot() records what the API
 has — each entry with the API version it was deprecated in, and the
-feature flag it is only available with — and check() compares the
+feature flag it is only available with when that flag is off in stable
+builds (flags.BETA_ONLY) — and check() compares the
 API with such a snapshot taken at the last stable release (BASELINE_PATH,
 written by scripts/update_macro_api_baseline.py).
 
@@ -18,7 +19,7 @@ check() accepts:
     (removal_allowed(), runtime.API_STABLE) — a function then has to be in
     runtime.REMOVED, for the clear error;
   * removing or changing anything only available with a feature flag
-    (beta builds).
+    that is off in stable builds (beta-only).
 Anything else that is in the baseline and gone now is reported, renames
 included (a rename is a removal plus an addition).
 """
@@ -49,16 +50,23 @@ def snapshot() -> dict[str, Any]:
     from opensak.macro.db_schema import TABLES
     from opensak.macro.metadata import HEADER_KEYS
     from opensak.macro.runtime import API, API_VERSION
+    from opensak.utils import flags
+
+    def beta_only(flag: Optional[str]) -> Optional[str]:
+        """*flag* if it is off in stable builds: a flag that is on there
+        (lua-macro-write and companion-db since v1.22.0, lua-macro-net since
+        v1.23.0) gates nothing, and what it gates is in the stable API."""
+        return flag if flag in flags.BETA_ONLY else None
 
     functions: dict[str, Any] = {}
     for func in API:
-        entry = _entry(func.deprecated, func.flag)
+        entry = _entry(func.deprecated, beta_only(func.flag))
         entry["params"] = {p.name: _entry(p.deprecated)
                            for form in (func.params, *func.overloads) for p in form}
         functions[func.name] = entry
     fields = {f.name: _entry(f.deprecated) for f in CACHE_FIELDS}
     # Its values are read from the companion database (companion-db flag)
-    fields[CUSTOM_FIELD.name] = _entry(CUSTOM_FIELD.deprecated, "companion-db")
+    fields[CUSTOM_FIELD.name] = _entry(CUSTOM_FIELD.deprecated, beta_only("companion-db"))
     return {
         "api_version": API_VERSION,
         "functions": functions,

@@ -5907,7 +5907,7 @@ API_VERSION = 5
 # is too (api_baseline.removal_allowed()). Add the API version when a stable
 # release ships it, and update the baseline then:
 #   python scripts/update_macro_api_baseline.py
-API_STABLE: dict[int, str] = {4: "1.22.0"}
+API_STABLE: dict[int, str] = {4: "1.22.0", 5: "1.23.0"}
 
 
 @dataclass(frozen=True)
@@ -5954,7 +5954,7 @@ class ApiFunction:
     # Only registered with the companion-db feature flag (opensak.companion)
     companion: bool = False
     # Contacts web sites: only registered with the lua-macro-net feature
-    # flag (beta builds), see utils/flags.py.
+    # flag (on in every build since v1.23.0), see utils/flags.py.
     net: bool = False
     # Not a function: *bind* gives the value of opensak.<name> (opensak.args)
     # and *returns* its type and description.

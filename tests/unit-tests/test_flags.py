@@ -1,6 +1,5 @@
 # tests/unit-tests/test_flags.py — feature flag resolution tests.
 
-import opensak
 import opensak.utils.flags as flags_module
 
 
@@ -15,7 +14,7 @@ class TestLoad:
             "lua-macros": True,
             "lua-macro-write": True,
             "companion-db": True,
-            "lua-macro-net": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-net": True,
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -33,7 +32,7 @@ class TestLoad:
             "lua-macros": True,
             "lua-macro-write": True,
             "companion-db": True,
-            "lua-macro-net": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-net": True,
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):
@@ -100,9 +99,9 @@ class TestCompanionDb:
 
 
 class TestLuaMacroNet:
-    def test_default_follows_version(self, no_features_file):
-        # beta-only for one more cycle (#1079, v1.22.0 plan D1)
-        assert flags_module.lua_macro_net is ("-" in opensak.__version__)
+    def test_on_by_default(self, no_features_file):
+        # On in stable builds too since v1.23.0 (#1079, #1195)
+        assert flags_module.lua_macro_net is True
 
     def test_independent_of_lua_macro_write(self, patch_features_file):
         patch_features_file({"lua-macro-write": True, "lua-macro-net": False})
@@ -114,22 +113,23 @@ class TestReleaseDefaults:
     """What a stable and a beta build ship with (#1190)."""
 
     def test_stable_build(self):
+        # Since v1.23.0 a stable build has every flag on, get_url() too
         assert flags_module._release_defaults(
-            flags_module._is_prerelease("1.22.0")) == {
+            flags_module._is_prerelease("1.23.0")) == {
             "reverse-geocoding": True,
             "map-popout": True,
             "lua-macros": True,
             "lua-macro-write": True,
             "companion-db": True,
-            "lua-macro-net": False,
+            "lua-macro-net": True,
         }
 
     def test_beta_build(self):
         assert all(flags_module._release_defaults(
             flags_module._is_prerelease("1.22.0-beta.12")).values())
 
-    def test_only_lua_macro_net_is_beta_only(self):
-        assert flags_module.BETA_ONLY == {"lua-macro-net"}
+    def test_nothing_is_beta_only(self):
+        assert flags_module.BETA_ONLY == frozenset()
 
 
 # ── _parse_argv() ─────────────────────────────────────────────────────────────

@@ -6,9 +6,10 @@ The macros in macros/examples/ are the first thing people copy, so each one
 runs here with the runtime the app uses, against the test database
 tests/fixtures/macros/examples.gpx, and must finish without a Lua or API
 error, without calling anything deprecated and without being refused a
-folder. Each runs twice: with the feature flags as they will be in
-the stable release (decision D1 in #1196: `lua-macro-net` off) and with all
-beta flags on.
+folder. Each runs with the feature flags of a stable release, and once
+more with those of a beta build when they differ (in v1.22.0 a stable
+release had `lua-macro-net` off, decision D1 in #1196; since v1.23.0 they
+are the same).
 
 A new example is picked up by itself. The user is scripted: confirmations
 are answered Yes, writes are allowed until OpenSAK closes, a form is closed
@@ -62,13 +63,16 @@ def _load(name: str):
 
 Scripted = _load("test_macro_forms.py").Scripted
 
-# Feature flags per run: as decided for v1.22.0 stable (D1) and all on.
-FLAGS = {
-    "stable": {"lua_macros": True, "lua_macro_write": True, "companion_db": True,
-               "lua_macro_net": False},
-    "beta": {"lua_macros": True, "lua_macro_write": True, "companion_db": True,
-             "lua_macro_net": True},
-}
+def _flag_attrs(prerelease: bool) -> dict[str, bool]:
+    """The flags module's attributes as a stable or beta build sets them."""
+    return {name.replace("-", "_"): on
+            for name, on in flags._release_defaults(prerelease).items()}
+
+
+# Feature flags per run: a stable release's, and a beta build's if different
+FLAGS = {"stable": _flag_attrs(False)}
+if _flag_attrs(True) != FLAGS["stable"]:
+    FLAGS["beta"] = _flag_attrs(True)
 
 
 # ── The user and the window ──────────────────────────────────────────────────

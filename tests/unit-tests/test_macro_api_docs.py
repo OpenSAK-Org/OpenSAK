@@ -220,26 +220,33 @@ def test_npp_standard_function_calltip():
 
 # ── Beta notes (#1190) ────────────────────────────────────────────────────────
 
-def test_beta_notes_only_for_flags_off_in_stable_builds():
-    # Since v1.22.0 only lua-macro-net (get_url) is beta-only, whatever
-    # build generates the docs: every "Beta:" note names that flag.
-    from opensak.utils.flags import BETA_ONLY
+def test_no_beta_notes_since_get_url_is_stable():
+    # Since v1.23.0 no flag is off in stable builds (#1195), so the docs
+    # have no "Beta:" note, whatever build generates them.
+    for text in (render_api_markdown(), render_lua_stub()):
+        assert [line for line in text.splitlines() if "Beta:" in line] == []
+        assert "feature flag" not in text
 
+
+def test_beta_notes_for_flags_off_in_stable_builds(monkeypatch):
+    # The mechanism stays for a later beta-only function: as in v1.22.0,
+    # when only lua-macro-net (get_url) was beta-only.
+    import opensak.macro.api_docs as api_docs
+
+    monkeypatch.setattr(api_docs, "BETA_ONLY", frozenset({"lua-macro-net"}))
     for text in (render_api_markdown(), render_lua_stub()):
         notes = [line for line in text.splitlines() if "Beta:" in line]
-        assert notes, "get_url() must keep its beta note"
+        assert notes, "get_url() must get a beta note"
         for note in notes:
-            assert any(f"`{flag}`" in note for flag in BETA_ONLY), note
-        assert "`lua-macro-write` feature flag" not in text
-        assert "`companion-db` feature flag" not in text
+            assert "`lua-macro-net`" in note, note
 
 
 def test_gsak_comparison_marks_only_beta_only_functions():
     from opensak.macro.gsak_compare import GSAK_COMPARE
 
-    rows = [line for line in GSAK_COMPARE.splitlines()
-            if line.startswith("|") and "β" in line]
-    assert [row.split("|")[1].strip() for row in rows] == ["GetUrl"]
+    # Nothing is beta-only since v1.23.0 (#1195)
+    assert "β" not in GSAK_COMPARE
+    assert "feature flag" not in GSAK_COMPARE
 
 
 def test_gsak_comparison_resynclogs_is_local():

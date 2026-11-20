@@ -1,9 +1,10 @@
 {
-  "api_version": 4,
+  "api_version": 5,
   "cache_fields": {
     "archived": {},
     "available": {},
     "bearing": {},
+    "changed_date": {},
     "code": {},
     "color": {},
     "container": {},
@@ -11,9 +12,7 @@
     "corrected_source": {},
     "country": {},
     "county": {},
-    "custom": {
-      "flag": "companion-db"
-    },
+    "custom": {},
     "difficulty": {},
     "distance": {},
     "dnf": {},
@@ -167,15 +166,16 @@
     "api_version": {
       "params": {}
     },
+    "args": {
+      "params": {}
+    },
     "attach": {
-      "flag": "lua-macro-write",
       "params": {
         "name": {},
         "schema": {}
       }
     },
     "attached": {
-      "flag": "lua-macro-write",
       "params": {}
     },
     "attributes": {
@@ -283,11 +283,9 @@
       }
     },
     "companion": {
-      "flag": "companion-db",
       "params": {}
     },
     "companion_tables": {
-      "flag": "companion-db",
       "params": {}
     },
     "confirm": {
@@ -302,7 +300,8 @@
         "lat1": {},
         "lat2": {},
         "lon1": {},
-        "lon2": {}
+        "lon2": {},
+        "method": {}
       }
     },
     "coords.distance": {
@@ -312,7 +311,8 @@
         "lat1": {},
         "lat2": {},
         "lon1": {},
-        "lon2": {}
+        "lon2": {},
+        "method": {}
       }
     },
     "coords.format": {
@@ -360,7 +360,8 @@
         "coords": {},
         "km": {},
         "lat": {},
-        "lon": {}
+        "lon": {},
+        "method": {}
       }
     },
     "copy_caches": {
@@ -393,7 +394,6 @@
       "params": {}
     },
     "custom_fields": {
-      "flag": "companion-db",
       "params": {
         "options": {}
       }
@@ -434,26 +434,22 @@
       }
     },
     "define_custom_field": {
-      "flag": "lua-macro-write",
       "params": {
         "field": {}
       }
     },
     "delete": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "codes": {}
       }
     },
     "delete_attribute": {
-      "flag": "lua-macro-write",
       "params": {
         "id": {}
       }
     },
     "delete_custom_field": {
-      "flag": "lua-macro-write",
       "params": {
         "name": {}
       }
@@ -469,19 +465,16 @@
       }
     },
     "delete_log": {
-      "flag": "lua-macro-write",
       "params": {
         "id": {}
       }
     },
     "delete_trackable": {
-      "flag": "lua-macro-write",
       "params": {
         "id": {}
       }
     },
     "delete_waypoint": {
-      "flag": "lua-macro-write",
       "params": {
         "id": {}
       }
@@ -493,7 +486,6 @@
       }
     },
     "detach": {
-      "flag": "lua-macro-write",
       "params": {
         "schema": {}
       }
@@ -565,8 +557,10 @@
         "options": {}
       }
     },
+    "get_clipboard": {
+      "params": {}
+    },
     "get_url": {
-      "flag": "lua-macro-net",
       "params": {
         "options": {},
         "url": {}
@@ -605,21 +599,18 @@
       }
     },
     "import_gpx": {
-      "flag": "lua-macro-write",
       "params": {
         "options": {},
         "source": {}
       }
     },
     "import_gsak": {
-      "flag": "lua-macro-write",
       "params": {
         "options": {},
         "source": {}
       }
     },
     "in_transaction": {
-      "flag": "lua-macro-write",
       "params": {}
     },
     "input": {
@@ -630,37 +621,53 @@
       }
     },
     "insert": {
-      "flag": "lua-macro-write",
       "params": {
         "fields": {}
       }
     },
     "insert_attribute": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "fields": {}
       }
     },
     "insert_log": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "fields": {}
       }
     },
     "insert_trackable": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "fields": {}
       }
     },
     "insert_waypoint": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "fields": {}
+      }
+    },
+    "inspect": {
+      "params": {
+        "options": {},
+        "value": {}
+      }
+    },
+    "is_headless": {
+      "params": {}
+    },
+    "json.decode": {
+      "params": {
+        "options": {},
+        "text": {}
+      }
+    },
+    "json.encode": {
+      "params": {
+        "options": {},
+        "value": {}
       }
     },
     "list_dir": {
@@ -674,6 +681,11 @@
         "...": {}
       }
     },
+    "log_vars": {
+      "params": {
+        "options": {}
+      }
+    },
     "logs": {
       "params": {
         "code": {},
@@ -684,7 +696,6 @@
       "params": {}
     },
     "macro_flag": {
-      "flag": "lua-macro-write",
       "params": {
         "action": {},
         "caches": {}
@@ -784,7 +795,6 @@
       }
     },
     "resync": {
-      "flag": "lua-macro-write",
       "params": {}
     },
     "run_macro": {
@@ -805,7 +815,6 @@
       "params": {}
     },
     "set_center": {
-      "flag": "lua-macro-write",
       "params": {
         "coords": {},
         "lat": {},
@@ -813,8 +822,12 @@
         "name": {}
       }
     },
+    "set_clipboard": {
+      "params": {
+        "text": {}
+      }
+    },
     "set_companion_table": {
-      "flag": "companion-db",
       "params": {
         "spec": {}
       }
@@ -837,6 +850,9 @@
       "params": {
         "settings": {}
       }
+    },
+    "shift_key": {
+      "params": {}
     },
     "sleep": {
       "params": {
@@ -864,7 +880,6 @@
       }
     },
     "sql_write": {
-      "flag": "lua-macro-write",
       "params": {
         "params": {},
         "query": {}
@@ -1032,41 +1047,35 @@
       }
     },
     "transaction": {
-      "flag": "lua-macro-write",
       "params": {
         "fn": {}
       }
     },
     "update": {
-      "flag": "lua-macro-write",
       "params": {
         "code": {},
         "fields": {}
       }
     },
     "update_attribute": {
-      "flag": "lua-macro-write",
       "params": {
         "fields": {},
         "id": {}
       }
     },
     "update_log": {
-      "flag": "lua-macro-write",
       "params": {
         "fields": {},
         "id": {}
       }
     },
     "update_trackable": {
-      "flag": "lua-macro-write",
       "params": {
         "fields": {},
         "id": {}
       }
     },
     "update_waypoint": {
-      "flag": "lua-macro-write",
       "params": {
         "fields": {},
         "id": {}
@@ -1100,6 +1109,7 @@
   "header_keys": {
     "Author": {},
     "Description": {},
+    "Headless": {},
     "Name": {},
     "Network": {},
     "Permissions": {},

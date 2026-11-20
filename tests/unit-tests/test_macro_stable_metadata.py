@@ -25,8 +25,8 @@ def test_beta_only_flags_are_those_off_in_a_stable_release():
     stable = flags_module._release_defaults(False)
     assert flags_module.BETA_ONLY == {k for k, on in stable.items() if not on}
     assert set(stable) == set(flags_module._RELEASE_DEFAULTS)
-    # get_url() stays beta-only in v1.22.0 (D1)
-    assert "lua-macro-net" in flags_module.BETA_ONLY
+    # get_url() is stable since v1.23.0 (#1195): nothing is beta-only
+    assert "lua-macro-net" not in flags_module.BETA_ONLY
     assert "reverse-geocoding" not in flags_module.BETA_ONLY
 
 
@@ -58,7 +58,8 @@ def test_beta_only_names_follow_the_registry():
     functions = {n.name: n.flag for n in names if n.kind == "function"}
     assert functions == {f"opensak.{f.name}": f.flag for f in rt.API
                          if f.flag in flags_module.BETA_ONLY}
-    assert functions["opensak.get_url"] == "lua-macro-net"
+    # Nothing is beta-only since v1.23.0
+    assert "opensak.get_url" not in functions
 
 
 def test_beta_only_names_ignore_this_builds_flags(monkeypatch):
@@ -70,7 +71,7 @@ def test_beta_only_names_ignore_this_builds_flags(monkeypatch):
 
 
 def test_beta_only_names_after_the_flags_flip(monkeypatch):
-    # As planned for v1.22.0: only lua-macro-net stays beta-only
+    # As in v1.22.0, when only lua-macro-net was beta-only
     monkeypatch.setattr(flags_module, "BETA_ONLY", frozenset({"lua-macro-net"}))
     names = beta_only_names()
     assert {n.flag for n in names} == {"lua-macro-net"}

@@ -60,8 +60,9 @@ repository's CI everything deprecated in the macro API — functions,
 parameters, cache fields and header keys — to warn about.
 newest_stable_api(), beta_only_names() and find_beta_only() let the same
 CI refuse a Requires-API that no stable release has and flag macros that
-use what only beta builds have (opensak.get_url() while lua-macro-net is
-beta-only), taken from the registries and feature flags themselves.
+use what only beta builds have (in v1.22.0 opensak.get_url(), which needed
+the lua-macro-net flag; nothing since v1.23.0), taken from the registries
+and feature flags themselves.
 """
 
 from __future__ import annotations

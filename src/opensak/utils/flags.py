@@ -48,10 +48,9 @@ def _release_defaults(prerelease: bool) -> dict[str, bool]:
         # Companion database per cache database (#1034), which custom fields
         # (#1028) live in: stable since v1.22.0 (#1190).
         "companion-db": True,
-        # Macros contacting web sites (opensak.get_url, #1079): beta-only for
-        # one more release cycle (v1.22.0 plan, D1), so it does not hold up
-        # the stable macro release.
-        "lua-macro-net": prerelease,
+        # Macros contacting web sites (opensak.get_url, #1079): stable since
+        # v1.23.0, macro API 5 (beta-only in v1.22.0, v1.22.0 plan D1, #1195).
+        "lua-macro-net": True,
     }
 
 

@@ -15,7 +15,7 @@ GSAK_COMPARE = """\
 
 The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` libraries, plus `os.time`, `os.date` and `os.clock`. It removes `io`, `debug`, `package`, `require`, `load*`, `dofile` and the rest of `os`. So most of GSAK's language, string and math functions need no API.
 
-**Legend:** ✅ available · β beta: needs the `lua-macro-net` feature flag, which is on in beta builds only (see [Web sites](#web-sites)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
+**Legend:** ✅ available · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
 
 ### Main gaps
 
@@ -108,7 +108,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GSAK | Status | Note |
 |---|---|---|
 | GetMail / Pop3 | 🚫 | deprecated in GSAK too |
-| GetUrl | ✅ β | `get_url(url [, options])`: GET only, each web site approved by the user; needs the `lua-macro-net` feature flag (see [Web sites](#web-sites)) |
+| GetUrl | ✅ | `get_url(url [, options])`: GET only, each web site approved by the user (see [Web sites](#web-sites)) |
 | PostUrl | 🚫 | GET only for now |
 | Web | ❌ | planned |
 

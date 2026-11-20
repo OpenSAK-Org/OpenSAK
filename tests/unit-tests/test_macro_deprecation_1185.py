@@ -325,7 +325,11 @@ def test_api_matches_the_committed_baseline():
 
 
 def test_snapshot_records_deprecations_and_flags(monkeypatch):
+    from opensak.utils import flags
+
     _deprecate(monkeypatch, "count", "opensak.new_count()")
+    monkeypatch.setattr(flags, "BETA_ONLY",
+                        frozenset({"lua-macro-write", "companion-db"}))
     data = snapshot()
     assert data["functions"]["count"] == {"deprecated": 5, "params": {}}
     assert data["functions"]["transaction"]["flag"] == "lua-macro-write"
@@ -333,6 +337,16 @@ def test_snapshot_records_deprecations_and_flags(monkeypatch):
     assert data["cache_fields"]["custom"] == {"flag": "companion-db"}
     assert set(data["header_keys"]) == {k.name for k in metadata.HEADER_KEYS}
     assert to_json(data) == to_json(snapshot())
+
+
+def test_snapshot_leaves_out_flags_that_are_on_in_stable_builds():
+    # Since v1.23.0 every flag is on in stable builds: write functions,
+    # custom fields and get_url() are protected by the baseline like the rest
+    data = snapshot()
+    assert "flag" not in data["functions"]["transaction"]
+    assert "flag" not in data["functions"]["set_companion_table"]
+    assert "flag" not in data["functions"]["get_url"]
+    assert data["cache_fields"]["custom"] == {}
 
 
 STABLE = {4: "1.22.0", 5: "1.23.0"}
