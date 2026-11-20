@@ -57,6 +57,10 @@ jobs:
     name: "Build Windows .exe"
     runs-on: windows-latest
     needs: test
+    # version-check is skipped on manual runs from a branch, and a skipped
+    # job anywhere upstream skips this one too unless the `if:` uses a
+    # status function. Same condition as the test job above.
+    if: ${{ !failure() && !cancelled() }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -130,6 +134,10 @@ jobs:
     name: "Build Linux AppImage"
     runs-on: ubuntu-22.04
     needs: test
+    # version-check is skipped on manual runs from a branch, and a skipped
+    # job anywhere upstream skips this one too unless the `if:` uses a
+    # status function. Same condition as the test job above.
+    if: ${{ !failure() && !cancelled() }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -227,6 +235,10 @@ jobs:
     name: "Build macOS arm64 (Apple Silicon)"
     runs-on: macos-latest
     needs: test
+    # version-check is skipped on manual runs from a branch, and a skipped
+    # job anywhere upstream skips this one too unless the `if:` uses a
+    # status function. Same condition as the test job above.
+    if: ${{ !failure() && !cancelled() }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -305,6 +317,10 @@ jobs:
     name: "Build macOS x86_64 (Intel)"
     runs-on: macos-15-intel
     needs: test
+    # version-check is skipped on manual runs from a branch, and a skipped
+    # job anywhere upstream skips this one too unless the `if:` uses a
+    # status function. Same condition as the test job above.
+    if: ${{ !failure() && !cancelled() }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
