@@ -10,7 +10,13 @@ Within an API version, functions, parameters, cache fields and header keys are o
 
 See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support) for autocompletion in VS Code, Notepad++ and UltraEdit.
 
-Macros shared by other users are in the [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) repository, one folder per macro; its README explains how to install one and how to share your own.
+Macros shared by other users are in the [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) repository, one folder per macro; its README explains how to share your own.
+
+The **OpenSAK-Macros** button of the Macro manager installs and updates them. *Browse and install…* lists every published macro with its description, permissions, web sites and changes; *Install* puts all its files into a folder of its own in the macros folder. *Check for updates* reads the repository's list of macros, and the OpenSAK-Macros column then shows for each local macro whether it is up to date, has an update, needs a newer OpenSAK, was changed locally or was withdrawn. *Update* (or *Update all*) shows the changes and any new permissions or web sites first; every download is checked against its SHA-256 before anything is written, and the replaced files are kept in the hidden `.previous` folder next to them. A withdrawn macro is marked and can be removed, but it isn't blocked. Removing a macro keeps its companion database (`<name>.db3`) unless you tick *Also delete its data*. An updated macro asks again for its write, folder and web site approvals.
+
+A macro counts as one from OpenSAK-Macros only when it was installed from there or its file is byte for byte a published version; a matching name or folder is not enough, so your own macros are never touched, and nothing about them is sent anywhere. Right-click → *Stop tracking* keeps a macro from being compared again (for your own working copy of a published macro); *Track again* undoes it.
+
+With **Settings → Advanced → Check for macro updates at startup** on (the default), OpenSAK checks once a day when it starts and says in the status bar how many macros have an update or were withdrawn. Nothing is installed without asking. Turned off, it checks only when you click *Check for updates*.
 
 ## Functions
 
