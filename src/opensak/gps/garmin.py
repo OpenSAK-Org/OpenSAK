@@ -1852,7 +1852,7 @@ def write_export(path: Path | MTPPath, write, binary: bool = False):
             # The device copy keeps the local filename, so use the target's.
             local = Path(tmpdir) / path.name
             result = write_export(local, write, binary)
-            path.copy_from(local)
+            path.move_from(local)
         return result
 
     part = path.with_name(path.name + ".part")
