@@ -45,7 +45,8 @@ def _healthy(path: Path) -> Path:
     init_db(db_path=path)
     with get_session() as s:
         gc1 = Cache(gc_code="GC1", name="One", cache_type="Traditional Cache",
-                    latitude=47.0, longitude=8.0, difficulty=1.5, terrain=5.0)
+                    latitude=47.0, longitude=8.0, difficulty=1.5, terrain=5.0,
+                    log_count=1, waypoint_count=1)
         gc2 = Cache(gc_code="GC2", name="Two", cache_type="Mystery Cache",
                     latitude=47.1, longitude=8.1, difficulty=2.0, terrain=2.0)
         cw = Cache(gc_code="CW1", name="Parking", cache_type="Custom",
