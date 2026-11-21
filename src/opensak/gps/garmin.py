@@ -35,7 +35,7 @@ from opensak.lang import tr
 from opensak.utils.constants import CUSTOM_WP_TYPES
 
 if TYPE_CHECKING:
-    from opensak.gps.mtp import MTPDevice
+    from opensak.gps.mtp import MTPDevice, MTPPath
 
 logger = logging.getLogger(__name__)
 
@@ -1830,7 +1830,7 @@ def write_ggz(
     return count
 
 
-def write_export(path: Path, write, binary: bool = False):
+def write_export(path: Path | MTPPath, write, binary: bool = False):
     """Call *write(f)* with a file open on a temporary file next to *path*,
     which replaces *path* only once *write* has finished; returns what it
     returns.
@@ -1840,7 +1840,21 @@ def write_export(path: Path, write, binary: bool = False):
     Text is written with the platform's newlines, as Path.write_text() did
     (the GPX writer writes LF only, so a line break is one CR LF on Windows,
     #1329).
+
+    A Windows MTP target (MTPPath) cannot be opened or renamed into: the
+    file is written to a local temporary folder and copied to the device
+    once complete (#1346).
     """
+    from opensak.gps.mtp import MTPPath
+
+    if isinstance(path, MTPPath):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # The device copy keeps the local filename, so use the target's.
+            local = Path(tmpdir) / path.name
+            result = write_export(local, write, binary)
+            path.copy_from(local)
+        return result
+
     part = path.with_name(path.name + ".part")
     try:
         with (open(part, "wb") if binary else open(part, "w", encoding="utf-8")) as f:

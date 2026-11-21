@@ -10,7 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from opensak.gps.garmin import get_garmin_ggz_path, get_garmin_gpx_path
+from opensak.gps.garmin import (
+    export_ggz_to_device,
+    export_to_device,
+    get_garmin_ggz_path,
+    get_garmin_gpx_path,
+    write_export,
+)
 from opensak.gps.mtp import (
     MTPDevice,
     MTPError,
@@ -28,8 +34,10 @@ from opensak.gps.mtp import (
 class FakeItem:
     """Mimics a Shell FolderItem with Name, Path, and optional GetFolder."""
 
-    def __init__(self, name: str, children=None, *, path: str = "", filename: str | None = None):
+    def __init__(self, name: str, children=None, *, path: str = "", filename: str | None = None,
+                 data: bytes | None = None):
         self.Name = name
+        self.data = data  # a file's content, as CopyHere received it
         self.Path = path
         self._filename = filename
         self._children = children  # list[FakeItem] or None (file)
@@ -66,8 +74,10 @@ class FakeFolder:
 
     def CopyHere(self, source: str, flags: int) -> None:
         # Simulate CopyHere by adding a new item with the source filename
+        # (replacing an existing item, as the "yes to all" flag does).
         name = Path(source).name
-        self._items.append(FakeItem(name))
+        self._items = [i for i in self._items if i.Name.casefold() != name.casefold()]
+        self._items.append(FakeItem(name, data=Path(source).read_bytes()))
 
     def NewFolder(self, name: str) -> None:
         self._items.append(FakeItem(name, children=[]))
@@ -322,6 +332,66 @@ class TestMTPDevice:
         dev = _make_device()
         # Should not raise
         dev.delete_file(("Internal Storage", "GARMIN", "GPX", "nonexistent.gpx"))
+
+
+# ── Export to a Windows MTP device (#1346) ─────────────────────────────────────
+
+
+class TestExportToWindowsMtp:
+    """Exports to a Windows MTP device failed with "'MTPPath' object has no
+    attribute 'with_name'" once they streamed into a .part file (#1346)."""
+
+    def _file(self, dev, *parts):
+        item = dev._resolve(("Internal Storage", "GARMIN") + parts)
+        assert item is not None, "/".join(parts)
+        return item
+
+    def test_write_export_copies_finished_file_to_device(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "opensak.gpx"
+
+        result = write_export(target, lambda f: f.write("<gpx/>") and 7)
+
+        assert result == 7
+        assert self._file(dev, "GPX", "opensak.gpx").data == b"<gpx/>"
+
+    def test_write_export_binary(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "x.bin"
+        write_export(target, lambda f: f.write(b"\x00\x01"), binary=True)
+        assert self._file(dev, "GPX", "x.bin").data == b"\x00\x01"
+
+    def test_write_export_failure_leaves_device_file_alone(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "opensak.gpx"
+        target.write_bytes(b"old")
+
+        def fail(f):
+            f.write("partial")
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            write_export(target, fail)
+        assert self._file(dev, "GPX", "opensak.gpx").data == b"old"
+
+    def test_export_to_device_writes_gpx(self):
+        dev = _make_device()
+        result = export_to_device([], dev, "opensak")
+        assert result.success, result.error
+        assert b"<gpx" in self._file(dev, "GPX", "opensak.gpx").data
+
+    def test_export_ggz_to_device_creates_ggz_folder(self):
+        dev = _make_device()
+        result = export_ggz_to_device([], dev, "opensak")
+        assert result.success, result.error
+        assert self._file(dev, "GGZ", "opensak.ggz").data[:2] == b"PK"
+
+    def test_copy_file_requires_target_name(self, tmp_path):
+        dev = _make_device()
+        source = tmp_path / "other.gpx"
+        source.write_bytes(b"x")
+        with pytest.raises(ValueError):
+            dev.copy_file(("Internal Storage", "GARMIN", "GPX", "opensak.gpx"), source)
 
 
 # ── find_mtp_devices ─────────────────────────────────────────────────────────
