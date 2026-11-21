@@ -120,6 +120,7 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.waypoint_types`](#opensakwaypointtypes) | 3 |
 | [`opensak.waypoint_type`](#opensakwaypointtype) | 3 |
 | [`opensak.version`](#opensakversion) | 2 |
+| [`opensak.macro_info`](#opensakmacroinfo) | 5 |
 | [`opensak.run_macro`](#opensakrunmacro) | 3 |
 | [`opensak.is_headless`](#opensakisheadless) | 5 |
 | [`opensak.args`](#opensakargs) | 5 |
@@ -2626,6 +2627,25 @@ Example:
 print("Running in OpenSAK " .. opensak.version())
 ```
 
+### opensak.macro_info
+
+```lua
+opensak.macro_info()
+```
+
+The header of the running macro (see Macro header), so a macro can show its own name or version without repeating it in the code. The values are the text as written, e.g. version "1.10" stays "1.10"; a key the header does not set gives "", and `name` falls back to the file name. In a macro started with opensak.run_macro() it is that macro's header. From the editor it is the header of the code as it runs, saved or not.
+
+Returns `opensak.MacroInfo` — The header values.
+
+Since API version 5.
+
+Example:
+
+```lua
+local info = opensak.macro_info()
+print("This is version " .. info.version .. " of " .. info.name)
+```
+
 ### opensak.run_macro
 
 ```lua
@@ -5026,7 +5046,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 -- Permissions: none
 ```
 
-Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read.
+Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read. A macro reads its own header with `opensak.macro_info()`, e.g. to print its `Version` without repeating it in the code.
 
 `Headless: no` says the macro can't run without a window: `opensak run` refuses it before it starts, with exit code 7. Without the key, or with any other value, it counts as `yes`. A macro that can do without its dialogs can check `opensak.is_headless()`.
 
@@ -5246,7 +5266,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | Delay | ✅ | `sleep(ms)` (max 10 s per call, 60 s per run) |
 | Include | ❌ | `require` is removed |
 | Macro | ✅ | `run_macro(path, ...)` |
-| MacHeader | ✅ | comment header (`-- Name:`, `-- Version:`, `-- Requires-API:`, …), shown in the Macro manager; see "Macro header" |
+| MacHeader | ✅ | comment header (`-- Name:`, `-- Version:`, `-- Requires-API:`, …), shown in the Macro manager and read by the macro with `macro_info()`; see "Macro header" |
 | NoError / Deprecated / VerCheck | ✅ | `api_version()`, `version()`, `if opensak.x then` |
 | UpdateCheck | 🚫 | online version check |
 | SpeedMode | ➖ | the UI refreshes when the macro ends; `refresh()` redraws it earlier |

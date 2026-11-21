@@ -110,6 +110,18 @@
 ---@field content_type string The Content-Type header ("" if none).
 ---@field url string The URL after redirects.
 
+---The header of the running macro, from `opensak.macro_info()`.
+---@class opensak.MacroInfo
+---@field name string `Name`, or the file name without `.lua`.
+---@field author string `Author` ("" if not set).
+---@field version string `Version` as written, e.g. "1.3" ("" if not set).
+---@field requires_api string `Requires-API` as written ("" if not set).
+---@field description string `Description` ("" if not set).
+---@field headless boolean False only for `Headless: no`.
+---@field permissions string[] The words of `Permissions`, lower-cased ("none" left out).
+---@field network string[] The hosts of `Network`.
+---@field file string? The macro file; nil for code not saved to a file.
+
 ---Options of `opensak.move_caches()` and `opensak.copy_caches()`.
 ---@class opensak.TransferOptions
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
@@ -1911,6 +1923,17 @@ function opensak.waypoint_type(value) end
 ---```
 ---@return string # Version, e.g. "1.21.0-beta.3".
 function opensak.version() end
+
+---The header of the running macro (see Macro header), so a macro can show its own name or version without repeating it in the code. The values are the text as written, e.g. version "1.10" stays "1.10"; a key the header does not set gives "", and `name` falls back to the file name. In a macro started with opensak.run_macro() it is that macro's header. From the editor it is the header of the code as it runs, saved or not.
+---
+---Since API version 5.
+---
+---```lua
+---local info = opensak.macro_info()
+---print("This is version " .. info.version .. " of " .. info.name)
+---```
+---@return opensak.MacroInfo # The header values.
+function opensak.macro_info() end
 
 ---Run another macro and wait until it has finished, e.g. to chain several macros from one control macro. A relative path is looked up in the folder of the calling macro, and `.lua` is added when the name has no extension. The called macro gets its own global variables; values are passed as extra arguments (read them with `...`) and come back as its return values. An error in it stops the calling macro too, unless caught with `pcall`. Macros run this way share the run's limits, sleep time and folder approvals; they may call each other at most 10 levels deep.
 ---

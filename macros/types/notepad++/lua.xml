@@ -804,6 +804,10 @@
 				<Param name="[caches: string|string[]|{all: true}]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.macro_info" func="yes">
+			<Overload retVal="opensak.MacroInfo" descr="The header of the running macro (see Macro header), so a macro can show its own&#x0a;name or version without repeating it in the code. The values are the text as&#x0a;written, e.g. version &quot;1.10&quot; stays &quot;1.10&quot;; a key the header does not set gives&#x0a;&quot;&quot;, and `name` falls back to the file name. In a macro started with&#x0a;opensak.run_macro() it is that macro's header. From the editor it is the header&#x0a;of the code as it runs, saved or not.&#x0a;Returns opensak.MacroInfo — The header values.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.macros_dir" func="yes">
 			<Overload retVal="string" descr="OpenSAK's macros folder (read permission by default), without a trailing&#x0a;separator.&#x0a;Returns string — Folder path.">
 			</Overload>
