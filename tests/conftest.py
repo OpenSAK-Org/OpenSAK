@@ -125,6 +125,42 @@ def _no_network_update_check(monkeypatch):
     monkeypatch.setattr("opensak.updater.fetch_latest_release", lambda: None)
 
 
+class InMemoryKeyring:
+    """A keyring backend that keeps passwords in a dict. Installed for every
+    test, so no test ever reads or writes the developer's real OS keyring."""
+
+    priority = 1
+
+    def __init__(self):
+        self.passwords: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, username):
+        return self.passwords.get((service, username))
+
+    def set_password(self, service, username, password):
+        self.passwords[(service, username)] = password
+
+    def delete_password(self, service, username):
+        import keyring.errors
+        if self.passwords.pop((service, username), None) is None:
+            raise keyring.errors.PasswordDeleteError("not stored")
+
+
+@pytest.fixture(autouse=True)
+def fake_os_keyring(monkeypatch):
+    """#747: route the keyring module to an in-memory backend, and forget the
+    map API keys opensak.map_keys holds in memory between tests."""
+    import keyring
+    from opensak import map_keys
+    backend = InMemoryKeyring()
+    monkeypatch.setattr(keyring, "get_password", backend.get_password)
+    monkeypatch.setattr(keyring, "set_password", backend.set_password)
+    monkeypatch.setattr(keyring, "delete_password", backend.delete_password)
+    map_keys.reset_cache()
+    yield backend
+    map_keys.reset_cache()
+
+
 @pytest.fixture(autouse=True)
 def _no_exit_backup_prompt(monkeypatch):
     """#959: closing a MainWindow must never open the modal back-up-on-exit

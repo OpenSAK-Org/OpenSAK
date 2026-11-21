@@ -46,6 +46,7 @@ class LocationKind(str, Enum):
     EXTERNAL_DATABASE = "external_database"
     QT_SETTINGS = "qt_settings"
     KEYRING_ENTRY = "keyring_entry"
+    MAP_KEY_ENTRY = "map_key_entry"   # #747: a map tile API key in the keyring
     APPIMAGE_BINARY = "appimage_binary"
     APPIMAGE_DESKTOP_FILE = "appimage_desktop_file"
     APPIMAGE_ICON = "appimage_icon"
@@ -57,7 +58,8 @@ class StorageLocation:
     Ét sted hvor OpenSAK gemmer noget.
 
     location:          filsti, Windows-registreringsnøgle, eller (for
-                       KEYRING_ENTRY) brugernavnet som kodeordet er gemt under.
+                       KEYRING_ENTRY) brugernavnet som kodeordet er gemt under,
+                       eller (for MAP_KEY_ENTRY) udbyderens id (map_keys.py).
     is_path:           True hvis `location` er en filsystem-sti.
     removed_on_purge:  True hvis stedet slettes ved "afinstallér + slet data".
                        False for program-/integrationsfiler (dem fjerner
@@ -183,6 +185,14 @@ def get_all_storage_locations() -> list[StorageLocation]:
             StorageLocation(LocationKind.KEYRING_ENTRY, username, is_path=False)
         )
 
+    # #747: kortnøgler i keyringen. En fallback-fil (map_keys.json) ligger
+    # i install_dir og slettes med den.
+    from opensak import map_keys
+    locations += [
+        StorageLocation(LocationKind.MAP_KEY_ENTRY, provider, is_path=False)
+        for provider in map_keys.stored_providers()
+    ]
+
     locations += _appimage_locations()
 
     # Windows (ikke-MSIX) og macOS: bootstrap- og install-mappen er den
@@ -254,6 +264,12 @@ def _remove_keyring_entry(username: str) -> None:
         log.warning("Could not delete PQ email password from OS keyring")
 
 
+def _remove_map_key_entry(provider: str) -> None:
+    from opensak import map_keys
+    if not map_keys.delete_keyring_entry(provider):
+        log.warning("Could not delete map API key from OS keyring")
+
+
 def purge_user_data() -> None:
     """
     Slet alle OpenSAK-brugerdata (alle steder med removed_on_purge=True).
@@ -277,6 +293,8 @@ def purge_user_data() -> None:
     for loc in locations:
         if loc.kind is LocationKind.KEYRING_ENTRY:
             _remove_keyring_entry(loc.location)
+        elif loc.kind is LocationKind.MAP_KEY_ENTRY:
+            _remove_map_key_entry(loc.location)
         elif loc.kind is LocationKind.QT_SETTINGS:
             _remove_qsettings(loc)
         elif loc.is_path:

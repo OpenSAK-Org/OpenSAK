@@ -216,6 +216,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## Acknowledgements
 
 - [OpenStreetMap](https://www.openstreetmap.org) for map tiles
+- [OpenTopoMap](https://opentopomap.org), [OpenStreetMap France](https://www.openstreetmap.fr) (CyclOSM, OSM Humanitarian), [swisstopo](https://www.swisstopo.admin.ch), [basemap.at](https://basemap.at), [IGN](https://www.ign.fr), [PDOK](https://www.pdok.nl), [basemap.de](https://basemap.de) and the [USGS](https://www.usgs.gov) for the optional base maps
 - [Leaflet.js](https://leafletjs.com) for the map library, with
   [Leaflet.markercluster](https://github.com/Leaflet/Leaflet.markercluster) and
   [Leaflet-Geoman](https://geoman.io) (bundled; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))

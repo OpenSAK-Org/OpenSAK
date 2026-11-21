@@ -1,5 +1,5 @@
 """
-src/opensak/gui/map_widget.py — Interaktivt OSM kort via Leaflet.js + QtWebEngine.
+src/opensak/gui/map_widget.py — Interaktivt kort via Leaflet.js + QtWebEngine.
 
 Viser cache pins med farvekodet ikoner efter type.
 Kommunikerer med Python via QWebChannel.
@@ -105,6 +105,8 @@ class MapBridge(QObject):
     shape_changed = Signal(str)
     # Clustering switched on/off with the map button (#1087)
     clustering_toggled = Signal(bool)
+    # Another base map chosen in the layer switcher (#747): layer id
+    base_layer_changed = Signal(str)
     # Separation circles switched on/off with the map button (#1087)
     separation_toggled = Signal(bool)
 
@@ -147,6 +149,11 @@ class MapBridge(QObject):
     def on_separation_toggled(self, on: bool) -> None:
         """Called from JavaScript when the separation circles button is clicked."""
         self.separation_toggled.emit(on)
+
+    @Slot(str)
+    def on_base_layer_changed(self, layer_id: str) -> None:
+        """Called from JavaScript when another base map is chosen (#747)."""
+        self.base_layer_changed.emit(layer_id)
 
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
@@ -299,11 +306,11 @@ var map = L.map('map', {
     zoomControl: true
 });
 
-var tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom: 19,
-    crossOrigin: true
-}).addTo(map);
+// #747: the base maps switched on in Settings → Map (gui/map_layers.py).
+// With more than one, Leaflet's layer switcher offers them; the choice is
+// reported to Python and becomes the base map next time.
+var BASE_LAYERS = MAP_BASE_LAYERS;
+var ACTIVE_BASE_LAYER = MAP_ACTIVE_BASE_LAYER;
 
 // #1111: tiles that are neither online nor in the tile cache fail to load —
 // say so instead of leaving grey squares unexplained. Pins, clustering and
@@ -317,16 +324,42 @@ var TilesOffline = L.Control.extend({
     }
 });
 var tilesOfflineNotice = null;
-tileLayer.on('tileerror', function() {
-    if (!tilesOfflineNotice) {
-        tilesOfflineNotice = new TilesOffline().addTo(map);
-    }
-});
-tileLayer.on('tileload', function() {
+function hideTilesOffline() {
     if (tilesOfflineNotice) {
         map.removeControl(tilesOfflineNotice);
         tilesOfflineNotice = null;
     }
+}
+
+var tileLayer = null;
+var baseLayerControl = {};
+BASE_LAYERS.forEach(function(def) {
+    var opts = Object.assign({}, def.options);
+    var layer = L.tileLayer(def.url, opts);
+    layer.opensakId = def.id;
+    layer.on('tileerror', function() {
+        if (layer === tileLayer && !tilesOfflineNotice) {
+            tilesOfflineNotice = new TilesOffline().addTo(map);
+        }
+    });
+    layer.on('tileload', function() {
+        if (layer === tileLayer) hideTilesOffline();
+    });
+    baseLayerControl[def.name] = layer;
+    if (def.id === ACTIVE_BASE_LAYER) tileLayer = layer;
+});
+// The last chosen map may have been switched off since: use the first one.
+if (tileLayer === null) {
+    tileLayer = baseLayerControl[BASE_LAYERS[0].name];
+}
+tileLayer.addTo(map);
+if (BASE_LAYERS.length > 1) {
+    L.control.layers(baseLayerControl, null, { position: 'topright' }).addTo(map);
+}
+map.on('baselayerchange', function(e) {
+    tileLayer = e.layer;
+    hideTilesOffline();
+    if (bridge) bridge.on_base_layer_changed(e.layer.opensakId);
 });
 
 // ── Marker cluster gruppe ─────────────────────────────────────────────────────
@@ -1252,6 +1285,7 @@ class MapWidget(QWidget):
             self._bridge.shape_changed.connect(self._on_shape_changed)
             self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
             self._bridge.separation_toggled.connect(self._on_separation_toggled)
+            self._bridge.base_layer_changed.connect(self._on_base_layer_changed)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
@@ -1279,6 +1313,7 @@ class MapWidget(QWidget):
         self._bridge.shape_changed.connect(self._on_shape_changed)
         self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
         self._bridge.separation_toggled.connect(self._on_separation_toggled)
+        self._bridge.base_layer_changed.connect(self._on_base_layer_changed)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -1358,18 +1393,33 @@ class MapWidget(QWidget):
         # after Settings → OK (reload_map) applies them to the open map.
         from opensak.gui.settings import get_settings
         s = get_settings()
+        # #747: the base maps too — Settings → OK switches them on/off.
+        from opensak.gui.map_layers import available_layers, layer_js_defs
+        keys = s.map_api_keys
+        layers = layer_js_defs(available_layers(s.map_base_layers, keys))
         return {"map_actions": self._map_actions, "draw_button": self._draw_button,
                 "auto_fit_caches": self._auto_fit_caches,
                 "clustering": s.map_clustering, "cluster_radius": s.map_cluster_radius,
-                "label_mode": s.map_labels}
+                "label_mode": s.map_labels,
+                "base_layers": layers, "active_base_layer": s.map_base_layer}
 
     @staticmethod
     def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
                          draw_button: bool = False, auto_fit_caches: bool = True,
                          clustering: bool = True, cluster_radius: int = 40,
-                         label_mode: str = "off") -> str:
-        """Render MAP_HTML template with dynamic values and localized tooltips."""
+                         label_mode: str = "off",
+                         base_layers: Optional[list[dict]] = None,
+                         active_base_layer: str = "") -> str:
+        """Render MAP_HTML template with dynamic values and localized tooltips.
+
+        *base_layers* are map_layers.layer_js_defs() entries (default:
+        OpenStreetMap only); *active_base_layer* is the id shown first."""
         import opensak.utils.flags as flags
+        from opensak.gui import map_layers
+        if not base_layers:
+            base_layers = map_layers.layer_js_defs(
+                map_layers.available_layers([map_layers.DEFAULT_LAYER], {})
+            )
         html = MAP_HTML.replace("INIT_LAT", str(lat))
         html = html.replace("INIT_LON", str(lon))
         html = html.replace("INIT_ZOOM", "12")
@@ -1407,6 +1457,9 @@ class MapWidget(QWidget):
         html = html.replace(
             "MAP_TIP_SEPARATION", _js_inline_arg(tr("map_separation_tooltip"))
         )
+        # #747: layer names hold translated text too — substituted last.
+        html = html.replace("MAP_ACTIVE_BASE_LAYER", _js_inline_arg(active_base_layer))
+        html = html.replace("MAP_BASE_LAYERS", _js_inline_arg(base_layers))
         return html
 
     def _run_js(self, js: str) -> None:
@@ -1711,6 +1764,15 @@ class MapWidget(QWidget):
     def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
         if self._ready:
             self._run_js(f"setView({lat}, {lon}, {int(zoom)})")
+
+    def _on_base_layer_changed(self, layer_id: str) -> None:
+        """#747: remember the base map chosen in the layer switcher; every
+        map (main, split-screen, pop-out) opens with it next time."""
+        from opensak.gui.map_layers import get_layer
+        if get_layer(layer_id) is None:
+            return
+        from opensak.gui.settings import get_settings
+        get_settings().map_base_layer = layer_id
 
     def _on_clustering_toggled(self, on: bool) -> None:
         """The map button already regrouped the pins; remember the choice

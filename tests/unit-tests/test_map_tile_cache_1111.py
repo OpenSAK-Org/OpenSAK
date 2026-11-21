@@ -186,7 +186,8 @@ class TestSetting:
 class TestOfflineNotice:
     def test_notice_wired_to_tile_events(self):
         html = MapWidget._render_map_html(55.0, 10.0)
-        assert "tileLayer.on('tileerror'" in html
-        assert "tileLayer.on('tileload'" in html
+        # #747: wired on every base layer, acting only for the shown one
+        assert "layer.on('tileerror'" in html
+        assert "layer.on('tileload'" in html
         assert "MAP_TILES_OFFLINE" not in html
         assert f"div.textContent = {_js_inline_arg(tr('map_tiles_offline'))};" in html
