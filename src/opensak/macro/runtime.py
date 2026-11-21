@@ -2060,6 +2060,22 @@ class MacroRuntime:
         """The header of the running macro's code."""
         return parse_header(self._macro_source, self._macro_path or Path("macro.lua"))
 
+    def _macro_info_table(self, lua) -> Any:
+        """opensak.macro_info(): the running macro's header as a Lua table
+        (#1351). Inside opensak.run_macro() it is the called macro's."""
+        info = self._macro_info()
+        return lua.table_from({
+            "name": info.name,
+            "author": info.author,
+            "version": info.version,
+            "requires_api": info.requires_api,
+            "description": info.description,
+            "headless": info.runs_headless,
+            "permissions": lua.table_from(info.permissions + info.unknown_permissions),
+            "network": lua.table_from(info.network),
+            "file": str(self._macro_path) if self._macro_path is not None else None,
+        })
+
     def _show_declarations(self) -> None:
         """Before a macro file first runs with a Permissions or Network
         declaration, or once it declares more than the user has seen, show
@@ -7839,6 +7855,22 @@ API: tuple[ApiFunction, ...] = (
         since=2,
         bind=lambda rt, lua: lambda: __version__,
         returns=("string", 'Version, e.g. "1.21.0-beta.3".'),
+    ),
+    ApiFunction(
+        name="macro_info",
+        description="The header of the running macro (see Macro header), so a "
+                    "macro can show its own name or version without repeating "
+                    "it in the code. The values are the text as written, e.g. "
+                    'version "1.10" stays "1.10"; a key the header does not '
+                    'set gives "", and `name` falls back to the file name. '
+                    "In a macro started with opensak.run_macro() it is that "
+                    "macro's header. From the editor it is the header of the "
+                    "code as it runs, saved or not.",
+        example='local info = opensak.macro_info()\n'
+                'print("This is version " .. info.version .. " of " .. info.name)',
+        since=5,
+        bind=lambda rt, lua: lambda: rt._macro_info_table(lua),
+        returns=("opensak.MacroInfo", "The header values."),
     ),
     ApiFunction(
         name="run_macro",
