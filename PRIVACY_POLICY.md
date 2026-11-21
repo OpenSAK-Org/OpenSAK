@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: November 11, 2026*
+*Effective date: November 21, 2026*
 
 ---
 
@@ -144,6 +144,11 @@ Country, state and county lookup works offline. Only when you choose to download
 ### 5.5 Lua macros contacting web sites (beta)
 
 In beta builds, a Lua macro can download web pages or files (`opensak.get_url()`). A macro only contacts a web site after you allowed that site for that macro, when OpenSAK asks. Such a request goes from your device directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in **Settings → Folder permissions**, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com).
+
+### 5.6 Macros from OpenSAK-Macros (beta)
+
+In beta builds, OpenSAK checks the shared macro repository, OpenSAK-Macros on GitHub, for new versions of the macros you installed from it. It downloads the repository's macro list, `index.json` (from `raw.githubusercontent.com/OpenSAK-Org/OpenSAK-Macros`), at most once a day at startup, and whenever you click **Check for updates** or open **Browse** in the Macro manager. This is a plain download: nothing about your local macros is sent; OpenSAK compares the list with your macros on your own device. The request includes what any web request does, such as your IP address. Nothing is installed without asking: only when you click **Install** or **Update** does OpenSAK download that macro's files from the same repository, and checks each against the size and checksum in the list before saving it. To turn the startup check off, clear **Settings → Advanced → Check for macro updates at startup (once a day)**; the Macro manager then only checks when you click **Check for updates**. GitHub's privacy statement applies:
+https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement
 
 ---
 
