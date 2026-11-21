@@ -13,6 +13,8 @@ For the selected database and its companion database (#1034) together:
 * **Checkpoint** — write the WAL back and empty the -wal file.
 * **Compact…** — VACUUM, only when it pays off, after a disk space check and
   optionally a backup set.
+* **Repair…** — check the data and fix what can be fixed safely, in its own
+  dialog (database_repair_dialog.py, #1051).
 
 While the ``companion-db`` feature flag is on, a "Companion data" section
 lists the companion's tables per owner (kind, rows, estimated size) and
@@ -392,8 +394,11 @@ class DatabaseMaintenanceDialog(QDialog):
         self._btn_compact = QPushButton(tr("maint_btn_compact"))
         self._btn_compact.setToolTip(tr("maint_tip_compact"))
         self._btn_compact.clicked.connect(self._compact)
+        self._btn_repair = QPushButton(tr("maint_btn_repair"))
+        self._btn_repair.setToolTip(tr("maint_tip_repair"))
+        self._btn_repair.clicked.connect(self._open_repair)
         for w in (self._btn_check, self._thorough, self._btn_optimize,
-                  self._btn_checkpoint, self._btn_compact):
+                  self._btn_checkpoint, self._btn_compact, self._btn_repair):
             actions.addWidget(w)
         actions.addStretch()
         layout.addLayout(actions)
@@ -420,7 +425,7 @@ class DatabaseMaintenanceDialog(QDialog):
 
         self._action_buttons: list[QWidget] = [
             self._btn_check, self._thorough, self._btn_optimize,
-            self._btn_checkpoint, self._btn_compact,
+            self._btn_checkpoint, self._btn_compact, self._btn_repair,
         ]
 
     def _build_companion_group(self) -> QGroupBox:
@@ -655,6 +660,16 @@ class DatabaseMaintenanceDialog(QDialog):
     def _on_compact_failed(self, error: str) -> None:
         self._set_busy(False)
         self._append([tr("maint_backup_failed", error=error)])
+        self.refresh()
+
+    def _open_repair(self) -> None:
+        from opensak.gui.dialogs.database_repair_dialog import DatabaseRepairDialog
+
+        dlg = DatabaseRepairDialog(self._db, self)
+        dlg.exec()
+        dlg.wait_idle()
+        dlg.deleteLater()
+        # A repair can compact the file and remove rows.
         self.refresh()
 
     # ── Companion data ────────────────────────────────────────────────────────
