@@ -743,24 +743,37 @@ def companion_db(lua: Path) -> Path:
     return lua.with_suffix(COMPANION_SUFFIX)
 
 
+def data_files(lua: Path) -> list[Path]:
+    """The data of macro file *lua* that exists: its companion database,
+    its saved settings and its remembered form values."""
+    from opensak.macro.settings import saved_files
+
+    data = companion_db(lua)
+    return ([data] if data.exists() else []) + saved_files(lua)
+
+
 @dataclass(frozen=True)
 class RemoveResult:
     removed: tuple[Path, ...]
-    kept: tuple[Path, ...]          # files left behind (changed, or the data)
+    kept: tuple[Path, ...]          # installed files changed since (left behind)
+    kept_data: tuple[Path, ...] = ()    # data_files() left behind
 
 
 def remove(lua: Path, delete_data: bool = False) -> RemoveResult:
     """Remove the macro *lua*: the files of its install record (just the
     macro file without one), its ``.previous/`` folder if it has its own
-    folder, and with *delete_data* its companion database. Files changed
-    since installed are removed too when they are the macro file itself
-    (the user asked to remove the macro) but kept otherwise. The record is
+    folder, and with *delete_data* its data_files(). Files changed since
+    installed are removed too when they are the macro file itself (the
+    user asked to remove the macro) but kept otherwise. The record is
     dropped and the folder deleted if nothing else is left in it."""
+    from opensak.macro.settings import remove_saved_file
+
     lua = Path(lua)
     record = record_for(lua)
     files = {lua: ""}
     if record is not None:
         files.update({_path(k): v for k, v in record.files.items()})
+    data = data_files(lua)          # before the macro file is gone
     removed: list[Path] = []
     kept: list[Path] = []
     for path, sha in files.items():
@@ -775,13 +788,13 @@ def remove(lua: Path, delete_data: bool = False) -> RemoveResult:
             removed.append(path)
         else:
             kept.append(path)
-    data = companion_db(lua)
-    if data.exists():
-        if delete_data:
-            data.unlink()
-            removed.append(data)
-        else:
-            kept.append(data)
+    if delete_data:
+        for path in data:
+            if path == companion_db(lua):
+                path.unlink()
+            else:
+                remove_saved_file(path)
+            removed.append(path)
     from opensak.macro.permissions import macros_dir
 
     folder = lua.parent
@@ -794,7 +807,7 @@ def remove(lua: Path, delete_data: bool = False) -> RemoveResult:
     if own_folder:
         _remove_empty(folder)       # only folders with nothing left in them
     set_tracked(lua, True)          # forget a "stop tracking" for the path
-    return RemoveResult(tuple(removed), tuple(kept))
+    return RemoveResult(tuple(removed), tuple(kept), () if delete_data else tuple(data))
 
 
 def _remove_empty(folder: Path) -> None:

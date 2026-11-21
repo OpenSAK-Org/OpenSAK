@@ -209,7 +209,8 @@ def confirm_install(
 def confirm_remove(parent: Optional[QWidget], name: str, lua: Path,
                    withdrawn: bool = False) -> Optional[bool]:
     """Ask before removing the macro *lua*. None on Cancel, else whether
-    its companion database is deleted too (a separate check box, off)."""
+    its data (companion database, saved settings) is deleted too (a
+    separate check box, off)."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle(tr("macro_repo_remove_title"))
@@ -217,10 +218,10 @@ def confirm_remove(parent: Optional[QWidget], name: str, lua: Path,
     box.setText(tr("macro_repo_remove_withdrawn_msg" if withdrawn else "macro_repo_remove_msg",
                    name=name, path=_shown(lua)))
     box.setInformativeText(tr("macro_repo_remove_hint"))
-    data = repo.companion_db(lua)
+    data = repo.data_files(lua)
     check: Optional[QCheckBox] = None
-    if data.exists():
-        check = QCheckBox(tr("macro_repo_remove_data", file=data.name))
+    if data:
+        check = QCheckBox(tr("macro_repo_remove_data", file=", ".join(_shown(p) for p in data)))
         box.setCheckBox(check)
     btn_remove = box.addButton(tr("settings_folder_perm_remove"), QMessageBox.ButtonRole.DestructiveRole)
     btn_keep = box.addButton(tr("macro_repo_keep_btn" if withdrawn else "cancel"),

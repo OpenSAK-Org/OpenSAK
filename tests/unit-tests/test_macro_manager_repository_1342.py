@@ -329,6 +329,39 @@ def test_remove_question_has_unticked_data_box(macros_dir, monkeypatch):
     assert mr.confirm_remove(None, "M", lua) is False and seen["check"] is False
 
 
+def test_remove_question_offers_saved_settings(macros_dir, monkeypatch):
+    # A macro with saved settings but no companion database got no check
+    # box, so its settings could not be deleted with it.
+    lua = _put(macros_dir / "m.lua", b"print(1)\n")
+    _put(macros_dir / "settings" / "m.json", b"{}")
+    seen = {}
+
+    def fake_exec(box):
+        seen["text"] = box.checkBox().text()
+        box.checkBox().setChecked(True)
+        next(b for b in box.buttons() if b.text() == "Remove").click()
+        return 0
+
+    monkeypatch.setattr(mr.QMessageBox, "exec", fake_exec)
+    assert mr.confirm_remove(None, "M", lua) is True
+    assert seen["text"] == "Also delete its data and saved settings (settings/m.json)"
+
+
+def test_remove_says_why_files_are_kept(make_manager, macros_dir, answers):
+    macro = repo.parse_index(_index_data()).macros["roadsheet"]
+    repo.install(macro, repo.download_files(macro, fetch=FakeFetch(_index_data())))
+    d = make_manager()
+    folder = macros_dir / "roadsheet"
+    (folder / "README.md").write_bytes(b"my notes")
+    _put(macros_dir / "settings" / "roadsheet" / "roadsheet.json", b"{}")
+    answers["remove"] = False                       # data box not ticked
+    assert d.remove_macro(folder / "roadsheet.lua")
+    out = d._output.toPlainText()
+    assert f"Kept {folder / 'README.md'} (changed since it was installed)." in out
+    settings = macros_dir / "settings" / "roadsheet" / "roadsheet.json"
+    assert f"Kept {settings} (the macro's data)." in out
+
+
 def test_status_texts():
     index = repo.parse_index(_index_data(latest_api=99))
     macro = index.macros["roadsheet"]

@@ -32,6 +32,10 @@ from opensak.macro.errors import MacroError
 
 # The folder inside the macros folder.
 SETTINGS_DIRNAME = "settings"
+# Where opensak.form{ remember = true } keeps the last values: a folder of
+# the macros' settings folder. normalize_name() strips leading dots, so no
+# macro subfolder can have this name.
+FORM_MEMORY_DIRNAME = ".forms"
 # Upper bound for one macro's settings file, so a macro cannot fill the disk.
 MAX_SETTINGS_BYTES = 1024 * 1024
 # Deeper nesting is almost certainly a mistake (and stops runaway recursion).
@@ -58,6 +62,32 @@ def settings_file(folder: Path, macro: Path, macros: Optional[Path] = None) -> P
             parts = ()
     names = [helpers.normalize_name(p) for p in parts]
     return folder.joinpath(*names, f"{helpers.normalize_name(macro.stem or macro.name)}.json")
+
+
+def saved_files(macro: Path) -> list[Path]:
+    """The files that exist with what the macro file *macro* saved through
+    OpenSAK: its settings (opensak.settings) and its remembered form values
+    (opensak.form{ remember = true })."""
+    from opensak.macro.permissions import macros_dir
+
+    folder, macros = default_settings_dir(), macros_dir()
+    files = (settings_file(folder, macro, macros),
+             settings_file(folder / FORM_MEMORY_DIRNAME, macro, macros))
+    return [f for f in files if f.is_file()]
+
+
+def remove_saved_file(path: Path) -> None:
+    """Delete the saved file *path* (from saved_files()) and the folders
+    above it that are left empty, up to the settings folder."""
+    path.unlink()
+    top = default_settings_dir().resolve()
+    folder = path.parent.resolve()
+    while folder != top and top in folder.parents:
+        try:
+            folder.rmdir()          # only when empty
+        except OSError:
+            break
+        folder = folder.parent
 
 
 def _dumps(data: Any) -> str:
