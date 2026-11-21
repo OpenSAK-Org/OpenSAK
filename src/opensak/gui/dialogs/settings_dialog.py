@@ -775,6 +775,14 @@ class SettingsDialog(QDialog):
         self._notify_betas_cb = QCheckBox(tr("settings_notify_betas_label"))
         update_layout.addWidget(self._notify_betas_cb)
 
+        # #1342: macros from OpenSAK-Macros. Off = only when the user clicks
+        # Check for updates in the Macro manager.
+        from opensak.utils import flags as _flags
+        self._macro_update_cb = QCheckBox(tr("settings_macro_update_check_label"))
+        self._macro_update_cb.setToolTip(tr("settings_macro_update_check_tip"))
+        self._macro_update_cb.setVisible(_flags.lua_macros)
+        update_layout.addWidget(self._macro_update_cb)
+
         layout.addWidget(update_group)
 
         # ── Backup (#959) ─────────────────────────────────────────────────────
@@ -1887,6 +1895,8 @@ class SettingsDialog(QDialog):
         self._search_debounce_ms.setValue(s.search_debounce_ms)
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
+        from opensak.macro import repository as macro_repo
+        self._macro_update_cb.setChecked(macro_repo.check_at_startup())
         from opensak.backup import exit_state
         from opensak.backup.backupset import get_compress, get_keep_auto
         idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
@@ -2002,6 +2012,8 @@ class SettingsDialog(QDialog):
                 apply_theme(cast(QApplication, app), new_theme)
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
+        from opensak.macro import repository as macro_repo
+        macro_repo.set_check_at_startup(self._macro_update_cb.isChecked())
         s.distance_method = self._distance_method_combo.currentData()
 
         # Backup (#959) — stored in opensak.json via the settings store.

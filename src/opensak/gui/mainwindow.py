@@ -305,6 +305,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self._maybe_offer_appimage_integration)
         # Tjek for opdateringer i baggrunden (5 sek forsinkelse — GUI er klar)
         QTimer.singleShot(5000, self._check_update_background)
+        # #1342: macros from OpenSAK-Macros, at most once a day.
+        QTimer.singleShot(9000, self._check_macro_updates_background)
         QTimer.singleShot(7000, self._check_setup_complete)
 
     # ── UI setup ──────────────────────────────────────────────────────────────
@@ -679,11 +681,12 @@ class MainWindow(QMainWindow):
             examples_menu.addAction(act)
         examples_menu.setEnabled(not examples_menu.isEmpty())
 
-        # #1173: the shared macro repository, in the browser.
+        # #1342: install from the shared macro repository (#1173) in the
+        # Macro manager's Browse dialog, which links to it on GitHub.
         macros_menu.addSeparator()
-        self._act_find_macros = QAction(tr("action_find_more_macros"), self)
-        self._act_find_macros.triggered.connect(self._open_macros_repo)
-        macros_menu.addAction(self._act_find_macros)
+        self._act_browse_macros = QAction(tr("action_browse_macros"), self)
+        self._act_browse_macros.triggered.connect(self._browse_macros)
+        macros_menu.addAction(self._act_browse_macros)
 
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
@@ -4564,12 +4567,11 @@ class MainWindow(QMainWindow):
         from opensak.updater import changelog_url_for_version
         QDesktopServices.openUrl(QUrl(changelog_url_for_version(__version__)))
 
-    def _open_macros_repo(self) -> None:
-        """Open the shared macro repository, OpenSAK-Macros (#1173)."""
-        from PySide6.QtGui import QDesktopServices
-        from PySide6.QtCore import QUrl
-        from opensak.macro.metadata import MACROS_REPO_URL
-        QDesktopServices.openUrl(QUrl(MACROS_REPO_URL))
+    def _browse_macros(self) -> None:
+        """Macros → Browse and install macros…: the Macro manager, with its
+        Browse dialog on top (#1342); its log shows the download."""
+        self._open_macro_manager()
+        self._macro_manager_instance().open_browse()
 
     def _open_community_link(self, url: str) -> None:
         """Open one of the Help → Community links in the browser (#1230)."""
@@ -4662,6 +4664,36 @@ class MainWindow(QMainWindow):
         )
         self._update_worker.update_available.connect(self._on_update_available)
         self._update_worker.start()
+
+    def _check_macro_updates_background(self) -> None:
+        """At startup (#1342): fetch the OpenSAK-Macros index in the
+        background, at most once a day and only while "Check for macro
+        updates at startup" is on, and say in the status bar how many
+        macros have an update or were withdrawn. Nothing is installed."""
+        from opensak import net
+        from opensak.macro import repository as repo
+        from opensak.utils import flags
+        if not flags.lua_macros or not repo.startup_check_due() or net.offline_detected():
+            return
+        from opensak.gui.dialogs.macro_repository import start_task
+        start_task(self, repo.fetch_index, self._on_macro_index,
+                   lambda msg: logger.info("macro update check failed: %s", msg))
+
+    def _on_macro_index(self, index) -> None:
+        from opensak.macro import repository as repo
+        from opensak.macro.metadata import discover_macros
+        from opensak.macro.permissions import macros_dir
+        from opensak.macro.runtime import API_VERSION
+        repo.note_checked()
+        statuses = repo.match_macros(discover_macros(macros_dir()), index, API_VERSION)
+        updates = len(repo.updates(statuses))
+        withdrawn = len(repo.withdrawn_macros(statuses))
+        manager = getattr(self, "_macro_manager", None)
+        if manager is not None:
+            manager.reload()
+        if updates or withdrawn:
+            self._statusbar.showMessage(
+                tr("macro_repo_startup_notice", updates=updates, withdrawn=withdrawn), 20000)
 
     def _check_update_manual(self) -> None:
         """Kald fra menuen — viser resultat uanset om der er opdatering."""

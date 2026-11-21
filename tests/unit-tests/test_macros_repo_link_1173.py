@@ -1,7 +1,8 @@
 # tests/unit-tests/test_macros_repo_link_1173.py — issue #1173.
 #
-# Macros → Find more macros… and the empty Macro manager point to the shared
-# macro repository, OpenSAK-Macros. The URL lives in one constant.
+# The Browse dialog (Macros → Browse and install macros…, #1342) and the
+# empty Macro manager point to the shared macro repository, OpenSAK-Macros.
+# The URL lives in one constant.
 
 from unittest.mock import MagicMock, patch
 
@@ -57,15 +58,20 @@ def test_url_constant():
     assert MACROS_REPO_URL == REPO
 
 
-def test_macros_menu_has_find_more_macros(window):
+def test_macros_menu_has_browse_and_install(window):
+    """#1342: the menu entry installs from OpenSAK-Macros instead of
+    opening it in the browser; there is no second entry for that."""
     texts = [a.text() for a in _macros_menu(window).actions()]
-    assert texts[-1] == tr("action_find_more_macros")
+    assert texts[-1] == tr("action_browse_macros")
 
 
-def test_find_more_macros_opens_the_repository(window):
-    with patch("PySide6.QtGui.QDesktopServices.openUrl") as mock_open:
-        window._act_find_macros.trigger()
-    assert mock_open.call_args[0][0].toString() == REPO
+def test_browse_and_install_opens_the_browse_dialog(window):
+    with patch("opensak.gui.dialogs.macro_manager.MacroManagerDialog.open_browse") as browse, \
+            patch("PySide6.QtGui.QDesktopServices.openUrl") as mock_open:
+        window._act_browse_macros.trigger()
+    browse.assert_called_once_with()
+    assert window._macro_manager_instance().isVisible()
+    mock_open.assert_not_called()
 
 
 def test_empty_macro_manager_links_to_the_repository(qtbot):
