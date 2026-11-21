@@ -1,15 +1,21 @@
 """
 src/opensak/gui/dialogs/database_repair_dialog.py — Repair… in the
-Maintenance dialog (#1051, phase 1): check the data of a database and fix
+Maintenance dialog (#1051): check the data of a database and fix
 what can be fixed safely, like GSAK's Repair/Defrag.
 
 1. Scan (read only, in the background): every check of db/repair.py with
    its number of problems and a few example GC codes.
-2. The user ticks what to fix. Report-only checks can't be ticked. "Make a
-   backup first" is ticked.
+2. The user ticks what to fix. Report-only checks can't be ticked;
+   "Dates that can't be read" starts unticked, since clearing loses the
+   value. "Make a backup first" is ticked.
 3. Repair: backup set, the fixes in one transaction, Optimize, and Compact
    when more than a quarter of the file is free (as GSAK does). Then a
    summary, and the scan runs again.
+
+Every problem row shows a few affected caches with the field and its stored
+value. "Copy list" (also Ctrl+C and the context menu) copies them for the
+selected rows, or all rows, as tab-separated text, so report-only problems
+can be found and fixed by hand.
 
 A damaged file (quick_check fails) can't be repaired by SQLite; the dialog
 points to File → Restore from backup… instead.
@@ -28,11 +34,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QLabel,
-    QPlainTextEdit, QProgressBar, QPushButton, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
+    QLabel, QMenu, QPlainTextEdit, QProgressBar, QPushButton, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from opensak.db import companion, maintenance, repair
@@ -51,6 +58,8 @@ COMPACT_FRACTION = 0.25
 KEY_ROLE = Qt.ItemDataRole.UserRole
 # Damage messages listed; the rest is in the log.
 _MAX_DAMAGE_LINES = 20
+# Affected rows in an examples cell's tooltip.
+_TOOLTIP_DETAILS = 20
 
 # Each check's name, as a translation key.
 _CHECK_TEXT = {
@@ -63,6 +72,10 @@ _CHECK_TEXT = {
     repair.CORRECTED_COORDS: "repair_chk_corrected_coords",
     repair.RATINGS: "repair_chk_ratings",
     repair.IDENTITY: "repair_chk_identity",
+    repair.DATE_FORMAT: "repair_chk_date_format",
+    repair.DATE_UNREADABLE: "repair_chk_date_unreadable",
+    repair.DATE_RANGE: "repair_chk_date_range",
+    repair.DATE_PLACEHOLDER: "repair_chk_date_placeholder",
 }
 # The fix each fixable check makes, as a translation key.
 _FIX_TEXT = {
@@ -70,7 +83,14 @@ _FIX_TEXT = {
     repair.WAYPOINT_PARENT: "repair_fix_set_parent",
     repair.CORRECTED_FLAG: "repair_fix_clear_flag",
     repair.COMPANION_ORPHANS: "repair_fix_delete",
+    repair.DATE_FORMAT: "repair_fix_convert",
+    repair.DATE_UNREADABLE: "repair_fix_clear",
+    repair.DATE_PLACEHOLDER: "repair_fix_clear",
 }
+# Fixable checks that are not ticked after a scan: their fix loses data (an
+# ambiguous date like 03/05/2024 becomes empty), so the user opts in after
+# looking at the list.
+_UNTICKED = frozenset({repair.DATE_UNREADABLE})
 
 
 @dataclass
@@ -142,6 +162,27 @@ def repair_lines(outcome: RepairOutcome) -> list[str]:
     return lines
 
 
+def copy_text(findings: list[repair.Finding]) -> str:
+    """The affected rows of *findings* as tab-separated text with a header:
+    check, GC code, field, value. A finding without details (orphans, whose
+    cache is gone) gets one line with its count; one with more rows than
+    kept says how many are not listed."""
+    lines = ["\t".join([tr("repair_col_check"), tr("col_gc_code"), tr("repair_col_field"),
+                        tr("repair_col_value")])]
+    for finding in findings:
+        label = check_label(finding)
+        if not finding.details:
+            lines.append("\t".join([label, "", "", tr("repair_copy_no_code",
+                                                      count=f"{finding.count:,}")]))
+            continue
+        for d in finding.details:
+            lines.append("\t".join([label, d.gc_code, d.field, d.value]))
+        if finding.count > len(finding.details):
+            lines.append("\t".join([label, "", "", tr(
+                "repair_copy_more", count=f"{finding.count - len(finding.details):,}")]))
+    return "\n".join(lines) + "\n"
+
+
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
 class DatabaseRepairDialog(QDialog):
@@ -180,17 +221,27 @@ class DatabaseRepairDialog(QDialog):
             for col in (1, 2, 3):
                 header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.itemChanged.connect(lambda *_: self._update_buttons())
+        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._tree_menu)
+        copy = QShortcut(QKeySequence(QKeySequence.StandardKey.Copy), self._tree)
+        copy.setContext(Qt.ShortcutContext.WidgetShortcut)
+        copy.activated.connect(self.copy_list)
         layout.addWidget(self._tree, 2)
 
         row = QHBoxLayout()
         self._backup = QCheckBox(tr("maint_compact_backup"))
         self._backup.setChecked(True)
+        self._btn_copy = QPushButton(tr("repair_btn_copy"))
+        self._btn_copy.setToolTip(tr("repair_tip_copy"))
+        self._btn_copy.clicked.connect(self.copy_list)
         self._btn_rescan = QPushButton(tr("repair_btn_rescan"))
         self._btn_rescan.clicked.connect(self._scan)
         self._btn_repair = QPushButton(tr("repair_btn_repair"))
         self._btn_repair.clicked.connect(self._repair)
         row.addWidget(self._backup)
         row.addStretch()
+        row.addWidget(self._btn_copy)
         row.addWidget(self._btn_rescan)
         row.addWidget(self._btn_repair)
         layout.addLayout(row)
@@ -228,14 +279,20 @@ class DatabaseRepairDialog(QDialog):
             item = QTreeWidgetItem([
                 check_label(finding), f"{finding.count:,}",
                 tr(_FIX_TEXT[finding.check]) if finding.fixable else tr("repair_report_only"),
-                ", ".join(finding.examples) + (" …" if finding.count > len(finding.examples)
+                "; ".join(finding.examples) + (" …" if finding.count > len(finding.examples)
                                                and finding.examples else ""),
             ])
             item.setData(0, KEY_ROLE, finding.key)
+            if finding.details:
+                tip = [d.text for d in finding.details[:_TOOLTIP_DETAILS]]
+                if finding.count > len(tip):
+                    tip.append(tr("repair_copy_more", count=f"{finding.count - len(tip):,}"))
+                item.setToolTip(3, "\n".join(tip + ["", tr("repair_tip_copy")]))
             item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if finding.fixable:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(0, Qt.CheckState.Checked)
+                item.setCheckState(0, Qt.CheckState.Unchecked if finding.check in _UNTICKED
+                                   else Qt.CheckState.Checked)
             else:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             self._tree.addTopLevelItem(item)
@@ -260,6 +317,34 @@ class DatabaseRepairDialog(QDialog):
                     and item.checkState(0) == Qt.CheckState.Checked):
                 keys.add(str(item.data(0, KEY_ROLE)))
         return keys
+
+    # ── Copy ──────────────────────────────────────────────────────────────────
+
+    def _findings_to_copy(self) -> list[repair.Finding]:
+        """The findings of the selected rows, or all problems."""
+        if self.scan_result is None:
+            return []
+        problems = list(self.scan_result.problems)
+        selected = {str(item.data(0, KEY_ROLE)) for item in self._tree.selectedItems()}
+        return [f for f in problems if f.key in selected] if selected else problems
+
+    def copy_list(self) -> None:
+        findings = self._findings_to_copy()
+        if not findings:
+            return
+        text = copy_text(findings)
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(text)
+        self._append([tr("repair_copied", count=f"{text.count(chr(10)) - 1:,}")])
+
+    def _tree_menu(self, pos: QPoint) -> None:
+        if self.scan_result is None or not self.scan_result.problems:
+            return
+        menu = QMenu(self)
+        menu.addAction(tr("repair_btn_copy"), self.copy_list)
+        viewport = self._tree.viewport()
+        menu.exec(viewport.mapToGlobal(pos) if viewport is not None else pos)
 
     # ── Repair ────────────────────────────────────────────────────────────────
 
@@ -326,6 +411,8 @@ class DatabaseRepairDialog(QDialog):
         self._tree.setEnabled(not busy)
         self._backup.setEnabled(not busy)
         self._btn_rescan.setEnabled(not busy)
+        self._btn_copy.setEnabled(not busy and self.scan_result is not None
+                                  and bool(self.scan_result.problems))
         self._btn_repair.setEnabled(not busy and bool(self.checked_keys()))
 
     def _update_buttons(self) -> None:
