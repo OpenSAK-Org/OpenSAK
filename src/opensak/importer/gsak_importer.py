@@ -79,6 +79,11 @@ SQLAlchemy models, without going via GPX.
     All of these columns are read only when present, so a GSAK database
     (or test fixture) without them imports as before.
 
+── Issue #1349 ───────────────────────────────────────────────────────────────
+    - GSAK writes 1970-01-01 00:00:00 (the Unix epoch) as "no date". Every
+      date field is imported as NULL then, so a new import doesn't bring
+      back the dates the database Repair cleared (#1051).
+
 Deliberately NOT imported yet (later sessions per #469 plan):
     - Custom/CustomLocal, Ignore (out of scope / #473)
     - Cache.find_count (issue #517 prep column) — GSAK's own FoundCount
@@ -350,8 +355,20 @@ def _b(value) -> bool:
     return bool(value)
 
 
+# GSAK's "no date": it writes the Unix epoch into a date field that has no
+# value (for example Waypoints.cDate). Imported as None (#1349), the same
+# value the database Repair clears (#1051).
+_GSAK_NO_DATE = datetime(1970, 1, 1)
+
+
 def _d(value) -> Optional[datetime]:
-    """Parse a GSAK date string ('YYYY-MM-DD[ HH:MM:SS]' or '' -> None)."""
+    """Parse a GSAK date string ('YYYY-MM-DD[ HH:MM:SS]'). '', a value that
+    does not parse and GSAK's 1970-01-01 "no date" give None."""
+    parsed = _parse_gsak_date(value)
+    return None if parsed == _GSAK_NO_DATE else parsed
+
+
+def _parse_gsak_date(value) -> Optional[datetime]:
     raw = _s(value)
     if raw is None:
         return None

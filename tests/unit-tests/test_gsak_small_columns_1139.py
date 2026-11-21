@@ -301,6 +301,69 @@ class TestGsakImport:
         assert db_session.query(UserNote).one().corrected_source is None
 
 
+# ── GSAK's 1970-01-01 "no date" (#1349) ───────────────────────────────────────
+
+_EPOCH = "1970-01-01 00:00:00"
+
+
+def _add_waypoint_and_log(db: Path, wp_date: str, log_date: str) -> None:
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO Waypoints (cParent, cCode, cPrefix, cName, cType, cLat, cLon, "
+        "cByuser, cDate, cFlag) VALUES ('GC1SMALL', 'PK1SMALL', 'PK', 'Parking', "
+        "'Parking Area', '55.59', '11.18', 0, ?, 0)", (wp_date,),
+    )
+    conn.execute(
+        "INSERT INTO Logs (lParent, lLogId, lType, lBy, lDate, lTime) "
+        "VALUES ('GC1SMALL', 1, 'Found it', 'Someone', ?, '')", (log_date,),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestGsakEpochDates:
+    """GSAK writes the Unix epoch where a date field has no value; the
+    import stored it as a real 1970 date, and the Repair (#1051) had to
+    clear it again after every import."""
+
+    _EPOCH_CACHE = {"PlacedDate": _EPOCH, "Changed": "1970-01-01",
+                    "FoundByMeDate": _EPOCH, "DNFDate": _EPOCH,
+                    "LastUserDate": _EPOCH, "Created": _EPOCH,
+                    "LastGPXDate": _EPOCH, "UserNoteDate": _EPOCH}
+
+    def test_epoch_dates_import_as_null(self, db_session, tmp_path, no_account):
+        db = _make_gsak_db(tmp_path / "g.db3", cache=self._EPOCH_CACHE, note="hello")
+        _add_waypoint_and_log(db, wp_date=_EPOCH, log_date="1970-01-01")
+        before = utc_now()
+        result = import_gsak_db(db, db_session)
+        assert result.errors == []
+
+        cache = db_session.query(Cache).filter_by(gc_code="GC1SMALL").one()
+        assert cache.hidden_date is None
+        assert cache.last_updated is None
+        assert cache.found_date is None
+        assert cache.dnf_date is None
+        assert cache.last_user_update is None
+        assert cache.waypoints[0].wp_date is None
+        assert cache.logs[0].log_date is None
+        assert cache.last_log_date is None
+        # No GSAK date: the time of this import, as for an empty field.
+        assert cache.imported_at.replace(tzinfo=None) >= before
+        assert cache.last_gpx_update.replace(tzinfo=None) >= before
+        assert cache.user_note.updated_at.replace(tzinfo=None) >= before
+
+    def test_real_dates_are_unchanged(self, db_session, tmp_path, no_account):
+        db = _make_gsak_db(tmp_path / "g.db3")
+        _add_waypoint_and_log(db, wp_date="2024-05-17 08:15:00", log_date="1970-01-02")
+        import_gsak_db(db, db_session)
+
+        cache = db_session.query(Cache).filter_by(gc_code="GC1SMALL").one()
+        assert cache.hidden_date.replace(tzinfo=None) == datetime(2023, 10, 24)
+        assert cache.waypoints[0].wp_date.replace(tzinfo=None) == datetime(2024, 5, 17, 8, 15)
+        # The day after the epoch is a real date.
+        assert cache.logs[0].log_date.replace(tzinfo=None) == datetime(1970, 1, 2)
+
+
 # ── date filters on recorded timestamps (#1097) ───────────────────────────────
 
 def _cache(**kw):
