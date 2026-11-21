@@ -57,6 +57,27 @@ def _item_filename(item: Any) -> str:
     return str(item.Name)
 
 
+# How long a file copy to the device may take: a fixed part, plus time for
+# its size at a slow device's rate, so a large GGZ export does not time out.
+_COPY_TIMEOUT = 300
+_COPY_MIN_RATE = 256 * 1024  # bytes per second
+
+
+def _copy_timeout(size: int) -> float:
+    """Return how many seconds copying *size* bytes to the device may take."""
+    return _COPY_TIMEOUT + size / _COPY_MIN_RATE
+
+
+def _item_size(item: Any) -> int | None:
+    """Return an item's size in bytes as the Shell reports it, or None if
+    it reports none."""
+    try:
+        size = getattr(item, "Size", None)
+        return None if size is None else int(size)
+    except Exception:
+        return None
+
+
 def _find_item(folder: Any, name: str) -> Any | None:
     wanted = name.casefold()
     for item in folder.Items():
@@ -118,6 +139,11 @@ class MTPPath:
 
     def write_bytes(self, data: bytes) -> None:
         self.device.write_file(self.parts, data)
+
+    def move_from(self, source: Path) -> None:
+        """Move the local file *source* to this path on the device (see
+        MTPDevice.move_file)."""
+        self.device.move_file(self.parts, source)
 
     def unlink(self) -> None:
         self.device.delete_file(self.parts)
@@ -198,24 +224,54 @@ class MTPDevice:
     def write_file(self, parts: tuple[str, ...], data: bytes) -> None:
         if not parts:
             raise ValueError("An MTP file path is required")
-        folder = self._ensure_folder(parts[:-1])
-        filename = parts[-1]
         # CopyHere preserves the source filename, so the local file must
         # have the target name.  Use a temp *directory* + the real name.
         tmpdir = Path(tempfile.mkdtemp())
-        local_path = tmpdir / filename
+        local_path = tmpdir / parts[-1]
         local_path.write_bytes(data)
         try:
-            folder.CopyHere(str(local_path), 16 | 4 | 1024)
-            deadline = time.monotonic() + 300
-            while time.monotonic() < deadline:
-                if _find_item(folder, filename) is not None:
-                    return
-                time.sleep(0.2)
-            raise MTPError(f"Timed out copying {filename} to {self.name}")
+            self.move_file(parts, local_path)
         finally:
             local_path.unlink(missing_ok=True)
             tmpdir.rmdir()
+
+    def move_file(self, parts: tuple[str, ...], source: Path) -> None:
+        """Move the local file *source* to *parts* on the device, replacing
+        any file already there.
+
+        CopyHere keeps the source's filename, so *source* must already be
+        named like the target (its last part). CopyHere is asynchronous and
+        reads *source* while it copies, so it only counts as done once the
+        device lists the file at *source*'s size and *source* can be
+        deleted, i.e. the copy engine has closed it. An existing file is
+        deleted first, as it would otherwise be found right away (#1346).
+        """
+        if not parts:
+            raise ValueError("An MTP file path is required")
+        filename = parts[-1]
+        if source.name != filename:
+            raise ValueError(f"{source.name} must be named {filename} to be copied there")
+        folder = self._ensure_folder(parts[:-1])
+        self.delete_file(parts)
+        size = source.stat().st_size
+        folder.CopyHere(str(source), 16 | 4 | 1024)
+        deadline = time.monotonic() + _copy_timeout(size)
+        while time.monotonic() < deadline:
+            item = _find_item(folder, filename)
+            if item is not None and _item_size(item) in (None, size):
+                break
+            time.sleep(0.2)
+        else:
+            raise MTPError(f"Timed out copying {filename} to {self.name}")
+        while True:
+            try:
+                source.unlink(missing_ok=True)
+                return
+            except PermissionError:
+                # Still open by the copy engine (Windows refuses to delete it).
+                if time.monotonic() >= deadline:
+                    raise MTPError(f"Timed out copying {filename} to {self.name}")
+                time.sleep(0.2)
 
     def delete_file(self, parts: tuple[str, ...]) -> None:
         item = self._resolve(parts)

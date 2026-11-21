@@ -10,11 +10,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from opensak.gps.garmin import get_garmin_ggz_path, get_garmin_gpx_path
+from opensak.gps.garmin import (
+    export_ggz_to_device,
+    export_to_device,
+    get_garmin_ggz_path,
+    get_garmin_gpx_path,
+    write_export,
+)
 from opensak.gps.mtp import (
     MTPDevice,
     MTPError,
     MTPPath,
+    _copy_timeout,
     _find_item,
     _has_direct_garmin,
     _shell_folder,
@@ -28,8 +35,10 @@ from opensak.gps.mtp import (
 class FakeItem:
     """Mimics a Shell FolderItem with Name, Path, and optional GetFolder."""
 
-    def __init__(self, name: str, children=None, *, path: str = "", filename: str | None = None):
+    def __init__(self, name: str, children=None, *, path: str = "", filename: str | None = None,
+                 data: bytes | None = None):
         self.Name = name
+        self.data = data  # a file's content, as CopyHere received it
         self.Path = path
         self._filename = filename
         self._children = children  # list[FakeItem] or None (file)
@@ -42,6 +51,10 @@ class FakeItem:
         if self._folder is None:
             raise RuntimeError("File items do not expose GetFolder")
         return self._folder
+
+    @property
+    def Size(self):
+        return None if self.data is None else len(self.data)
 
     def InvokeVerb(self, verb: str) -> None:
         if verb == "delete":
@@ -66,11 +79,47 @@ class FakeFolder:
 
     def CopyHere(self, source: str, flags: int) -> None:
         # Simulate CopyHere by adding a new item with the source filename
+        # (replacing an existing item, as the "yes to all" flag does).
         name = Path(source).name
-        self._items.append(FakeItem(name))
+        self._items = [i for i in self._items if i.Name.casefold() != name.casefold()]
+        self._items.append(FakeItem(name, data=Path(source).read_bytes()))
 
     def NewFolder(self, name: str) -> None:
         self._items.append(FakeItem(name, children=[]))
+
+
+class AsyncCopyFolder(FakeFolder):
+    """A folder whose CopyHere, like the real one, returns before the copy
+    is done: each tick() (one time.sleep() of the caller) copies part of
+    the file, which replaces an existing one on the first tick, and the
+    source stays open (cannot be deleted) until the copy is complete."""
+
+    def __init__(self, items, steps: int = 3, keep_open: bool = False):
+        super().__init__(items)
+        self.steps = steps
+        self.keep_open = keep_open
+        self.pending: list | None = None  # [source, data, ticks]
+
+    def CopyHere(self, source: str, flags: int) -> None:
+        self.pending = [Path(source), Path(source).read_bytes(), 0]
+
+    def tick(self, _seconds=0) -> None:
+        if self.pending is None:
+            return
+        source, data, ticks = self.pending
+        ticks += 1
+        self.pending[2] = ticks
+        name = source.name
+        self._items = [i for i in self._items if i.Name.casefold() != name.casefold()]
+        if ticks >= self.steps:
+            self._items.append(FakeItem(name, data=data))
+            if not self.keep_open:
+                self.pending = None
+        else:
+            self._items.append(FakeItem(name, data=data[: len(data) * ticks // self.steps]))
+
+    def holds(self, path: Path) -> bool:
+        return self.pending is not None and self.pending[0] == path
 
 
 def _make_garmin_tree():
@@ -322,6 +371,174 @@ class TestMTPDevice:
         dev = _make_device()
         # Should not raise
         dev.delete_file(("Internal Storage", "GARMIN", "GPX", "nonexistent.gpx"))
+
+
+# ── Export to a Windows MTP device (#1346) ─────────────────────────────────────
+
+
+class TestExportToWindowsMtp:
+    """Exports to a Windows MTP device failed with "'MTPPath' object has no
+    attribute 'with_name'" once they streamed into a .part file (#1346)."""
+
+    def _file(self, dev, *parts):
+        item = dev._resolve(("Internal Storage", "GARMIN") + parts)
+        assert item is not None, "/".join(parts)
+        return item
+
+    def test_write_export_copies_finished_file_to_device(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "opensak.gpx"
+
+        result = write_export(target, lambda f: f.write("<gpx/>") and 7)
+
+        assert result == 7
+        assert self._file(dev, "GPX", "opensak.gpx").data == b"<gpx/>"
+
+    def test_write_export_binary(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "x.bin"
+        write_export(target, lambda f: f.write(b"\x00\x01"), binary=True)
+        assert self._file(dev, "GPX", "x.bin").data == b"\x00\x01"
+
+    def test_write_export_failure_leaves_device_file_alone(self):
+        dev = _make_device()
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "opensak.gpx"
+        target.write_bytes(b"old")
+
+        def fail(f):
+            f.write("partial")
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            write_export(target, fail)
+        assert self._file(dev, "GPX", "opensak.gpx").data == b"old"
+
+    def test_export_to_device_writes_gpx(self):
+        dev = _make_device()
+        result = export_to_device([], dev, "opensak")
+        assert result.success, result.error
+        assert b"<gpx" in self._file(dev, "GPX", "opensak.gpx").data
+
+    def test_export_ggz_to_device_creates_ggz_folder(self):
+        dev = _make_device()
+        result = export_ggz_to_device([], dev, "opensak")
+        assert result.success, result.error
+        assert self._file(dev, "GGZ", "opensak.ggz").data[:2] == b"PK"
+
+    def test_move_file_requires_target_name(self, tmp_path):
+        dev = _make_device()
+        source = tmp_path / "other.gpx"
+        source.write_bytes(b"x")
+        with pytest.raises(ValueError):
+            dev.move_file(("Internal Storage", "GARMIN", "GPX", "opensak.gpx"), source)
+
+
+class TestMoveFileWaitsForAsyncCopy:
+    """CopyHere is asynchronous. Overwriting an existing file returned at
+    once, because the old file was still listed, and the temporary source
+    was then deleted while the copy still read it (#1346 review)."""
+
+    PARTS = ("Internal Storage", "GARMIN", "GPX", "opensak.gpx")
+
+    def _device(self, monkeypatch, **kwargs):
+        dev = _make_device()
+        gpx = dev._resolve(self.PARTS[:-1])
+        folder = AsyncCopyFolder([FakeItem("opensak.gpx", data=b"old")], **kwargs)
+        gpx._folder = folder
+        monkeypatch.setattr("opensak.gps.mtp.time.sleep", folder.tick)
+        real_unlink = Path.unlink
+
+        def unlink(path, missing_ok=False):
+            if folder.holds(path):
+                raise PermissionError(f"{path} is in use")
+            real_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        return dev, folder
+
+    def _source(self, tmp_path, data=b"<gpx>new</gpx>"):
+        source = tmp_path / "opensak.gpx"
+        source.write_bytes(data)
+        return source
+
+    def test_overwrite_waits_until_the_copy_is_complete(self, tmp_path, monkeypatch):
+        dev, folder = self._device(monkeypatch)
+        source = self._source(tmp_path)
+
+        dev.move_file(self.PARTS, source)
+
+        assert folder.pending is None
+        assert _find_item(folder, "opensak.gpx").data == b"<gpx>new</gpx>"
+        assert not source.exists()
+
+    def test_old_file_is_deleted_before_copying(self, tmp_path, monkeypatch):
+        dev, folder = self._device(monkeypatch)
+        old = _find_item(folder, "opensak.gpx")
+
+        dev.move_file(self.PARTS, self._source(tmp_path))
+
+        assert old._deleted
+
+    def test_waits_while_source_is_still_open(self, tmp_path, monkeypatch):
+        # The device lists the file at full size before the copy engine
+        # closes the source: wait for that too.
+        dev, folder = self._device(monkeypatch, steps=1)
+        source = self._source(tmp_path)
+        released = []
+        original = folder.holds
+
+        def holds(path):
+            if len(released) < 3:
+                released.append(path)
+                return True
+            return original(path)
+
+        folder.holds = holds
+        folder.keep_open = False
+
+        dev.move_file(self.PARTS, source)
+
+        assert len(released) == 3
+        assert not source.exists()
+
+    def test_times_out_when_source_is_never_released(self, tmp_path, monkeypatch):
+        dev, folder = self._device(monkeypatch, keep_open=True)
+        monkeypatch.setattr("opensak.gps.mtp._COPY_TIMEOUT", 0.2)
+
+        with pytest.raises(MTPError):
+            dev.move_file(self.PARTS, self._source(tmp_path))
+
+    def test_timeout_grows_with_file_size(self):
+        # A large GGZ copied at a slow device's rate must not time out (#1346).
+        assert _copy_timeout(0) == 300
+        assert _copy_timeout(512 * 1024 * 1024) == 300 + 2048
+
+    def test_large_file_gets_more_time(self, tmp_path, monkeypatch):
+        dev, folder = self._device(monkeypatch, keep_open=True)
+        clock = [0.0]
+        monkeypatch.setattr("opensak.gps.mtp.time.monotonic", lambda: clock[0])
+
+        def tick(_seconds=0):
+            folder.tick()
+            clock[0] += 100
+            if clock[0] >= 600:  # past the fixed 300 s: release the source
+                folder.pending = None
+
+        monkeypatch.setattr("opensak.gps.mtp.time.sleep", tick)
+        monkeypatch.setattr("opensak.gps.mtp._copy_timeout", lambda size: 1000)
+
+        dev.move_file(self.PARTS, self._source(tmp_path))
+
+        assert clock[0] >= 600
+
+    def test_write_export_overwrites_existing_file(self, monkeypatch):
+        dev, folder = self._device(monkeypatch)
+        target = dev / "Internal Storage" / "GARMIN" / "GPX" / "opensak.gpx"
+
+        write_export(target, lambda f: f.write("<gpx>new</gpx>"), binary=False)
+
+        data = _find_item(folder, "opensak.gpx").data
+        assert data.replace(b"\r\n", b"\n") == b"<gpx>new</gpx>"
 
 
 # ── find_mtp_devices ─────────────────────────────────────────────────────────
