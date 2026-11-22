@@ -512,6 +512,13 @@ def _rewrite_custom_code(sql: str) -> str:
     sql = _CUSTOM_CCODE_RES[0].sub(lambda m: f"{m.group(1)}Code{m.group(2)}", sql)
     return _CUSTOM_CCODE_RES[1].sub("custom.Code", sql)
 
+# #1363: GSAK keeps these as local dates (YYYY-MM-DD); their OpenSAK columns
+# hold naive UTC timestamps (#1097), which for a GSAK date is local midnight,
+# i.e. the previous day in UTC east of Greenwich. The bare column would shift
+# every comparison and date difference, so the translation compares the local
+# date instead, which is GSAK's value again.
+WHERE_LOCAL_DATE_COLUMNS = frozenset({"lastgpxdate", "created", "lastuserdate"})
+
 # GSAK columns whose OpenSAK counterpart carries the opposite meaning.
 WHERE_INVERTED: dict[str, str] = {
     "tempdisabled": "(NOT available)",
@@ -522,16 +529,16 @@ WHERE_INVERTED: dict[str, str] = {
 WHERE_SOFT_NOTES: dict[str, str] = {
     "lastgpxdate": "GSAK's LastGPXDate (last GPX/API refresh) became OpenSAK's last_gpx_update — "
                    "GSAK's own date for caches imported from GSAK, the time of the import pass "
-                   "for caches OpenSAK imported itself; stored in UTC",
+                   "for caches OpenSAK imported itself; compared as its local date, as in GSAK",
     "changed": "GSAK's Changed (the GC.com-side listing change date) became OpenSAK's "
                "last_updated, which the GSAK importer fills from exactly that column",
     "created": "GSAK's Created (record-creation date) became OpenSAK's imported_at — GSAK's own "
                "date for caches imported from GSAK, otherwise when this OpenSAK database first "
-               "saw the cache; stored in UTC",
+               "saw the cache; compared as its local date, as in GSAK",
     "foundbymedate": "GSAK's FoundByMeDate became OpenSAK's found_date",
     "lastuserdate": "GSAK's LastUserDate became OpenSAK's last_user_update — GSAK's own date "
                     "for caches imported from GSAK, stamped by OpenSAK when you change a user "
-                    "field after that; stored in UTC",
+                    "field after that; compared as its local date, as in GSAK",
     "isowner": "GSAK's IsOwner became OpenSAK's is_owner, which follows the geocaching.com "
                "account set in Settings (GSAK's own value when no account is set)",
     "userdata": "GSAK's UserData became OpenSAK's user_data_1",
@@ -1054,6 +1061,8 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
             if mapped is not None:
                 if low in WHERE_SOFT_NOTES:
                     notes.append("where: " + WHERE_SOFT_NOTES[low])
+                if low in WHERE_LOCAL_DATE_COLUMNS:
+                    return f"date({_keep(mapped)}, 'localtime')"
                 return _keep(mapped)
             if low in _OSAK_COLUMNS:
                 return prefix + word   # already an OpenSAK column

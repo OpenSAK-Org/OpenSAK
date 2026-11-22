@@ -48,7 +48,7 @@ The inventory below comes from a real GSAK database (`PRAGMA user_version = 27`,
 | LastGPXDate | `last_gpx_update` | "Not refreshed by a PQ since …" filters keep working. Falls back to the import time when GSAK has no date |
 | UserNoteDate | `user_notes.updated_at` | |
 
-**Timestamps are stored in UTC (#1097).** Every timestamp OpenSAK records itself (`imported_at`, `last_gpx_update`, `last_user_update`, `user_notes.updated_at`) is naive UTC, so a database means the same on any computer and in any time zone. GSAK writes these dates in the computer's local time; the importer converts them to UTC, and a date without a time is taken as local midnight. The cache list and the date filters convert back to local time (`opensak/utils/timestamps.py`). Listing-side dates (placed, found, the listing's "changed" date, log dates) are calendar dates and are not converted.
+**Timestamps are stored in UTC (#1097).** Every timestamp OpenSAK records itself (`imported_at`, `last_gpx_update`, `last_user_update`, `user_notes.updated_at`) is naive UTC, so a database means the same on any computer and in any time zone. GSAK writes these dates in the computer's local time; the importer converts them to UTC, and a date without a time is taken as local midnight. The cache list and the date filters convert back to local time (`opensak/utils/timestamps.py`); a migrated GSAK where clause compares `date(<column>, 'localtime')`, GSAK's own value (#1363). Listing-side dates (placed, found, the listing's "changed" date, log dates) are calendar dates and are not converted.
 
 **Added in #1139 (migration 27), filled by the GSAK importer:**
 

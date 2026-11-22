@@ -138,7 +138,8 @@ class TestGsakFilterImporter:
         ("MacroFlag = 1", "macro_flag = 1"),
         ("MacroSort <> ''", "macro_sort <> ''"),
         ("Symbol = 'Geocache Found'", "symbol = 'Geocache Found'"),
-        ("LastUserDate > '2025-01-01'", "last_user_update > '2025-01-01'"),
+        # #1363: compared as the local date, GSAK's value.
+        ("LastUserDate > '2025-01-01'", "date(last_user_update, 'localtime') > '2025-01-01'"),
     ])
     def test_where_columns(self, gsak, osak):
         sql, warnings, _notes, verified = translate_where(gsak)
