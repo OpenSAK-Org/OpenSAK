@@ -13,6 +13,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
@@ -32,6 +33,7 @@ from opensak.utils import flags
 GPX10 = "{http://www.topografix.com/GPX/1/0}"
 GPX11 = "{http://www.topografix.com/GPX/1/1}"
 GSAK = "{http://www.gsak.net/xmlv1/6}"
+GS = "{http://www.groundspeak.com/cache/1/0/1}"
 
 # The order of GSAK 9's own export (checked against its GPX files), without
 # StateBeforeCorrect/CountyBeforeCorrect, which OpenSAK doesn't store.
@@ -228,6 +230,32 @@ class TestLastGpxDateIsLocal1362:
         # computer's time zone, is exported as the same date.
         cache = _cache(last_gpx_update=_gsak_utc("2026-11-20"), waypoints=[_child()])
         assert _last_gpx_dates(cache) == ["2026-11-20", "2026-11-20"]
+
+
+class TestUserNoteLogDateIsLocal1362:
+    """The user-note log's date: the local day of the note's last change
+    (stored as UTC), at 08:00 as GSAK writes its UserNoteDate."""
+
+    def _note_log_date(self, updated_at) -> Optional[str]:
+        note = SimpleNamespace(note="Solved", is_corrected=False, updated_at=updated_at)
+        gpx = generate_gpx([_cache(user_note=note)],
+                           content=GpxContent(user_note_log=True))
+        logs = [l for l in _root(gpx).iter(f"{GS}log") if l.get("id") == "-2"]
+        assert len(logs) == 1
+        return logs[0].findtext(f"{GS}date")
+
+    @pytest.mark.parametrize("stored, expected", [
+        (datetime(2017, 7, 10, 22, 0), "2017-07-11T08:00:00"),   # summer, UTC+2
+        (datetime(2013, 2, 4, 23, 0), "2013-02-05T08:00:00"),    # winter, UTC+1
+        (datetime(2026, 11, 20, 15, 45), "2026-11-20T08:00:00"),
+    ])
+    def test_utc_timestamp_written_as_local_day(self, zurich, stored, expected):
+        assert self._note_log_date(stored) == expected
+
+    def test_gsak_note_date_comes_back_unchanged(self):
+        # GSAK's UserNoteDate as the GSAK importer stores it, in this
+        # computer's time zone, is exported as GSAK writes it.
+        assert self._note_log_date(_gsak_utc("2017-07-11")) == "2017-07-11T08:00:00"
 
 
 # ── CustomData text ───────────────────────────────────────────────────────────

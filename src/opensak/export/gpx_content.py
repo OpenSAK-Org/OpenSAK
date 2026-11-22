@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Optional
 
+from opensak.utils.timestamps import utc_to_local
+
 # Which child waypoints an export writes: all of them, only those with or
 # without their flag set (Waypoint.wp_flag), or none.
 CHILDREN_CHOICES = ("all", "flagged", "unflagged", "none")
@@ -62,9 +64,12 @@ def normalize_note(text: Optional[str]) -> str:
 
 
 def user_note_log_date(updated_at: Optional[datetime]) -> str:
-    """The date of the user-note log: the note's last change (now when it
-    is unknown), formatted as GSAK writes it, without a time zone."""
-    return (updated_at or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%S")
+    """The date of the user-note log: the local day of the note's last
+    change (today when it is unknown), written as GSAK writes its
+    UserNoteDate: that day at 08:00, without a time zone. updated_at is
+    stored as UTC (#1097); its UTC day was one day early east of UTC (#1362)."""
+    day = utc_to_local(updated_at) if updated_at else datetime.now()
+    return day.strftime("%Y-%m-%dT08:00:00")
 
 
 def is_user_note_log(
