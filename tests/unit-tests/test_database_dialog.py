@@ -48,14 +48,14 @@ class TestNewDatabaseDialog:
         qtbot.addWidget(dlg)
         assert dlg._path_edit.text() == str(tmp_path)  # no name -> folder
         dlg._name_edit.setText("MyDB")
-        assert dlg._path_edit.text() == str(tmp_path / "MyDB.db")
+        assert dlg._path_edit.text() == str(tmp_path / "MyDB" / "MyDB.db")
 
     def test_path_preview_shows_physical_path_when_msix_packaged(
         self, qtbot, monkeypatch, tmp_path
     ):
         # Issue #820: same translation as the Manage databases info panel,
         # applied here since this preview is also purely for display (the
-        # actual creation path comes from custom_path/get_db_dir(), not
+        # actual creation path comes from custom_directory/get_db_dir(), not
         # from parsing this read-only field back). The existence check
         # (added after real-hardware testing, 8 Sep 2026) runs against the
         # *folder*, not the not-yet-created .db file — a new database's
@@ -81,7 +81,7 @@ class TestNewDatabaseDialog:
         qtbot.addWidget(dlg)
         dlg._name_edit.setText("MyDB")
 
-        assert dlg._path_edit.text() == str(physical_dir / "MyDB.db")
+        assert dlg._path_edit.text() == str(physical_dir / "MyDB" / "MyDB.db")
 
     def test_browse_sets_custom_path(self, qtbot, tmp_path, monkeypatch):
         dlg = NewDatabaseDialog()
@@ -89,17 +89,17 @@ class TestNewDatabaseDialog:
         target = tmp_path / "sub"
         target.mkdir()
         monkeypatch.setattr(dd.QFileDialog, "getExistingDirectory", lambda *a, **k: str(target))
-        dlg._name_edit.setText("DB")
+        dlg._name_edit.setText("My DB!")
         dlg._browse()
-        assert dlg._custom_path == target
-        assert dlg._path_edit.text() == str(target / "DB.db")
+        assert dlg.custom_directory == target
+        assert dlg._path_edit.text() == str(target / "My DB_" / "My DB_.db")
 
     def test_browse_cancel(self, qtbot, monkeypatch):
         dlg = NewDatabaseDialog()
         qtbot.addWidget(dlg)
         monkeypatch.setattr(dd.QFileDialog, "getExistingDirectory", lambda *a, **k: "")
         dlg._browse()
-        assert dlg._custom_path is None
+        assert dlg.custom_directory is None
 
     def test_validate_requires_name(self, qtbot, monkeypatch):
         dlg = NewDatabaseDialog()
@@ -117,21 +117,6 @@ class TestNewDatabaseDialog:
         dlg._validate()
         assert dlg.result() == QDialog.DialogCode.Accepted
         assert dlg.name == "Good"
-
-    def test_custom_path_property(self, qtbot, tmp_path):
-        dlg = NewDatabaseDialog()
-        qtbot.addWidget(dlg)
-        assert dlg.custom_path is None  # no custom folder
-        dlg._custom_path = tmp_path
-        dlg._name_edit.setText("My DB!")        # illegal char sanitised
-        assert dlg.custom_path == tmp_path / "My DB_.db"
-
-    def test_custom_path_no_name(self, qtbot, tmp_path):
-        dlg = NewDatabaseDialog()
-        qtbot.addWidget(dlg)
-        dlg._custom_path = tmp_path
-        assert dlg.custom_path == tmp_path  # falls back to folder when name empty
-
 
 # ── DatabaseManagerDialog ───────────────────────────────────────────────────────
 
@@ -290,7 +275,7 @@ class TestManagerDialog:
             def exec(self):
                 return 1
             name = "Fresh"
-            custom_path = None
+            custom_directory = None
         monkeypatch.setattr(dd, "NewDatabaseDialog", FakeNew)
         crit = MagicMock()
         info = MagicMock()
@@ -316,7 +301,7 @@ class TestManagerDialog:
             def exec(self):
                 return 1
             name = "Fresh"
-            custom_path = None
+            custom_directory = Path("/data")
         monkeypatch.setattr(dd, "NewDatabaseDialog", FakeNew)
         monkeypatch.setattr(dd.QMessageBox, "information", MagicMock())
         monkeypatch.setattr("opensak.gui.settings.get_settings",
@@ -324,7 +309,7 @@ class TestManagerDialog:
         emitted = []
         dlg.database_switched.connect(lambda db: emitted.append(db.name))
         dlg._new_database()
-        manager.new_database.assert_called_once()
+        manager.new_database.assert_called_once_with("Fresh", directory=Path("/data"))
         assert emitted == ["Fresh"]
 
     def test_new_database_value_error(self, dlg, manager, monkeypatch):
@@ -336,7 +321,7 @@ class TestManagerDialog:
             def exec(self):
                 return 1
             name = "X"
-            custom_path = None
+            custom_directory = None
         monkeypatch.setattr(dd, "NewDatabaseDialog", FakeNew)
         warn = MagicMock()
         monkeypatch.setattr(dd.QMessageBox, "warning", warn)

@@ -13,7 +13,9 @@ import logging
 import shutil
 import time
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
+from tempfile import TemporaryFile
 from typing import TYPE_CHECKING, Optional
 
 from opensak.backup.snapshot import SnapshotError, snapshot_database
@@ -35,6 +37,11 @@ from opensak.logger import get_logger
 _debug_log = get_logger("db_manager")
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
+_WINDOWS_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
+    f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "123456789¹²³"
+}
+# Leave room for extensions, companion files and SQLite sidecars.
+_MAX_DATABASE_STEM_BYTES = 230
 
 
 def _is_valid_sqlite_file(path: Path) -> bool:
@@ -435,66 +442,94 @@ class DatabaseManager:
 
     @staticmethod
     def default_path_for(name: str) -> Path:
-        """Stien new_database() giver en database med dette navn."""
+        """Return the flat database path used by restores and older installations."""
         from opensak.settings_store import get_db_dir
         return get_db_dir() / DatabaseManager.file_name_for(name)
+
+    @staticmethod
+    def new_database_path(name: str, directory: Path) -> Path:
+        """Build a portable folder and SQLite filename for a new database."""
+        stem = DatabaseManager.file_name_for(name).removesuffix(".db") or "_"
+        if stem.upper() in _WINDOWS_DEVICE_NAMES:
+            stem = f"_{stem}"
+        encoded = stem.encode("utf-8")
+        if len(encoded) > _MAX_DATABASE_STEM_BYTES:
+            suffix = "-" + sha256(encoded).hexdigest()[:12]
+            prefix = encoded[:_MAX_DATABASE_STEM_BYTES - len(suffix)]
+            stem = prefix.decode("utf-8", errors="ignore").rstrip() + suffix
+        return directory / stem / f"{stem}.db"
 
     @staticmethod
     def is_valid_database_file(path: Path) -> bool:
         """True hvis *path* er en SQLite-fil (magic-header, se _is_valid_sqlite_file)."""
         return _is_valid_sqlite_file(Path(path))
 
-    def new_database(self, name: str, path: Optional[Path] = None) -> "DatabaseInfo":
-        """Opret en ny tom database."""
+    def new_database(
+        self, name: str, path: Optional[Path] = None, *, directory: Optional[Path] = None
+    ) -> "DatabaseInfo":
+        """Create an empty database in its own folder, or at an explicit file path."""
         if self._find_by_name(name):
             raise ValueError(tr("db_err_name_exists", name=name))
 
-        path = Path(path) if path is not None else self.default_path_for(name)
+        from opensak.settings_store import get_db_dir
 
-        # Issue #539 (opfølgning): stien udledes deterministisk af navnet, så
-        # uden dette tjek kunne "New database" stille genbruge en efterladt/
-        # forældreløs fil på samme sti — fx en fil "remove_from_list()"
-        # bevidst har ladet ligge, eller en rest fra en tidligere
-        # rename/delete under test. init_db() bruger CREATE TABLE IF NOT
-        # EXISTS, så en genbrugt fil ville dukke op med sit gamle indhold og
-        # (via navnet) sine gamle kolonneindstillinger, selvom brugeren
-        # forventer en tom database. Afvis eksplicit i stedet for at gætte.
-        if self._find_by_path(path) or path.exists():
+        create_folder = path is None
+        path = (
+            self.new_database_path(name, directory if directory is not None else get_db_dir())
+            if path is None else Path(path)
+        )
+
+        # #539: init_db() would reopen an existing file and expose its data
+        # under the name of a supposedly empty database.
+        if self._find_by_path(path) or (not create_folder and path.exists()):
             raise ValueError(
                 tr("db_err_target_path_exists", name=name, path=str(path))
             )
 
-        # Sørg for at mappen eksisterer og er skrivbar
         parent = path.parent
         try:
-            parent.mkdir(parents=True, exist_ok=True)
+            parent.mkdir(parents=True, exist_ok=not create_folder)
+        except FileExistsError as e:
+            if create_folder:
+                raise ValueError(tr("db_err_new_folder_exists", path=parent)) from e
+            raise ValueError(tr("db_err_mkdir_failed", path=parent) + f"\n{e}") from e
         except OSError as e:
             raise ValueError(
                 tr("db_err_mkdir_failed", path=parent) + f"\n{e}"
-            )
+            ) from e
 
-        if not parent.is_dir():
-            raise ValueError(tr("db_err_dir_not_found", path=parent))
+        from opensak.db.database import init_db, session_for
 
-        # Tjek skriverettigheder ved at prøve at oprette en midlertidig fil
-        test_file = parent / f".opensak_write_test_{name}"
         try:
-            test_file.touch()
-            test_file.unlink()
-        except OSError:
-            raise ValueError(tr("db_err_no_write_permission", path=parent))
-
-        from opensak.db.database import init_db
-        try:
-            init_db(db_path=path)
-        except Exception as e:
-            raise ValueError(
-                tr("db_err_create_failed") + f"\n{e}"
-            )
-
-        # Genaktiver den nuværende database bagefter
-        if self._active:
-            init_db(db_path=self._active.path)
+            if not parent.is_dir():
+                raise ValueError(tr("db_err_dir_not_found", path=parent))
+            try:
+                with TemporaryFile(dir=parent):
+                    pass
+            except OSError as e:
+                raise ValueError(tr("db_err_no_write_permission", path=parent)) from e
+            try:
+                if create_folder:
+                    # An import worker can create a database while the UI
+                    # continues to query the active one.
+                    with session_for(path):
+                        pass
+                else:
+                    init_db(db_path=path)
+                    if self._active:
+                        init_db(db_path=self._active.path)
+            except Exception as e:
+                raise ValueError(tr("db_err_create_failed") + f"\n{e}") from e
+        except ValueError:
+            if create_folder:
+                companion.forget(path)
+                _remove_with_sidecars(path)
+                _remove_with_sidecars(companion.companion_path(path))
+                try:
+                    parent.rmdir()
+                except OSError:
+                    logger.warning("Could not remove failed database folder %s", parent)
+            raise
 
         info = DatabaseInfo(name, path)
         # Its db_uuid right away, not only when it is first opened: a
@@ -748,7 +783,7 @@ class DatabaseManager:
 
     @staticmethod
     def file_name_for(name: str) -> str:
-        """The .db file name new_database()/copy_database() use for *name*."""
+        """Return the sanitized .db filename for *name*."""
         safe_name = "".join(
             c if c.isalnum() or c in "-_ " else "_" for c in name
         ).strip()

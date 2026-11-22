@@ -102,6 +102,74 @@ class TestDatabaseManagerInit:
 # ── new_database ──────────────────────────────────────────────────────────────
 
 class TestNewDatabase:
+    @pytest.mark.parametrize("custom_directory", [None, "custom"])
+    def test_creates_database_in_its_own_folder(
+        self, real_manager, tmp_path, custom_directory
+    ):
+        from opensak.db.database import get_engine, init_db
+
+        directory = tmp_path / custom_directory if custom_directory else None
+        active_path = real_manager.active.path
+        active_engine = init_db(active_path)
+
+        info = real_manager.new_database("Norway / 2026", directory=directory)
+
+        assert info.path == (directory or tmp_path) / "Norway _ 2026" / "Norway _ 2026.db"
+        assert DatabaseManager.is_valid_database_file(info.path)
+        assert real_manager.active.path == active_path
+        assert get_engine() is active_engine
+
+    @pytest.mark.parametrize(
+        ("name", "stem"),
+        [
+            ('  Norway: ?*/\\"<>|.  ', "Norway_ _________"),
+            ("../Trips", "___Trips"),
+            ("NUL", "_NUL"),
+            ("com1", "_com1"),
+            ("LPT²", "_LPT²"),
+            ("  ", "_"),
+            ("Åland", "Åland"),
+        ],
+    )
+    def test_new_database_path_sanitizes_name(self, tmp_path, name, stem):
+        assert DatabaseManager.new_database_path(name, tmp_path) == (
+            tmp_path / stem / f"{stem}.db"
+        )
+
+    def test_long_names_fit_with_room_for_sqlite_sidecars(self, tmp_path):
+        name = "Å" * 200
+        first = DatabaseManager.new_database_path(name, tmp_path)
+        second = DatabaseManager.new_database_path(name + "2", tmp_path)
+        assert first.parent != second.parent
+        assert len((first.stem + ".companion.db3-journal").encode("utf-8")) <= 255
+
+    def test_refuses_even_an_empty_existing_folder(self, manager, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.lang._translations", {
+            "db_err_new_folder_exists": "Destination folder already exists: {path}",
+        })
+        folder = tmp_path / "Occupied"
+        folder.mkdir()
+        with pytest.raises(ValueError, match="Destination folder already exists") as error:
+            manager.new_database("Occupied", directory=tmp_path)
+        assert str(folder) in str(error.value)
+        assert list(folder.iterdir()) == []
+        assert all(db.name != "Occupied" for db in manager.databases)
+
+    def test_failed_creation_can_retry_without_a_leftover_folder(
+        self, real_manager, tmp_path
+    ):
+        path = tmp_path / "Retry" / "Retry.db"
+
+        def fail_after_writing(db_path):
+            db_path.touch()
+            raise OSError("disk write failed")
+
+        with patch("opensak.db.database.session_for", side_effect=fail_after_writing):
+            with pytest.raises(ValueError, match="disk write failed"):
+                real_manager.new_database("Retry")
+        assert not path.parent.exists()
+        assert real_manager.new_database("Retry").path == path
+
     def test_adds_entry_to_list(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             manager.new_database("Test", tmp_path / "Test.db")
@@ -154,7 +222,8 @@ class TestNewDatabase:
         # Simulate an orphaned file left behind by e.g. remove_from_list()
         # (which intentionally does not delete the physical file) or a
         # previous rename during testing.
-        stray = tmp_path / "test1.db"
+        stray = tmp_path / "test1" / "test1.db"
+        stray.parent.mkdir()
         stray.write_text("OLD CACHE DATA FROM A PREVIOUS TEST DATABASE")
 
         with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):

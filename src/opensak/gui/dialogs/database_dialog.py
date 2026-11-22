@@ -68,7 +68,7 @@ class NewDatabaseDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._custom_path: Path | None = None
+        self.custom_directory: Path | None = None
         self._update_path_preview()
 
     def _browse(self) -> None:
@@ -84,29 +84,24 @@ class NewDatabaseDialog(QDialog):
             QFileDialog.Option.ShowDirsOnly,
         )
         if folder:
-            self._custom_path = Path(folder)
+            self.custom_directory = Path(folder)
             self._update_path_preview()
 
     def _update_path_preview(self) -> None:
-        """Vis filsti i sti-feltet: kun mappe som default, fuld sti når navn er tastet."""
-        # Issue #562: se _browse() ovenfor — samme rettelse for selve
-        # preview-teksten, så den viste standard-sti matcher det sted
-        # databasen faktisk oprettes (get_db_dir(), jf. manager.py's
-        # _default_db_path()), ikke installationsmappen.
+        """Preview the final database path, or just the base folder before naming."""
         from opensak.settings_store import get_db_dir
         from opensak.msix import resolve_physical_appdata_path
-        name = self._name_edit.text().strip()
-        folder = self._custom_path or get_db_dir()
+        folder = self.custom_directory or get_db_dir()
         # Issue #820: on the MSIX/Store build, %AppData%-based paths are
         # silently virtualized by Windows to a per-package folder — show
         # the real, physical location so the preview matches what
         # Explorer would actually show, not the logical (unreachable)
         # path. No-op on non-MSIX builds/other platforms.
         display_folder = resolve_physical_appdata_path(folder)
-        if name:
-            self._path_edit.setText(str(display_folder / f"{name}.db"))
-        else:
-            self._path_edit.setText(str(display_folder))
+        name = self.name
+        path = DatabaseManager.new_database_path(name, display_folder) if name else display_folder
+        self._path_edit.setText(str(path))
+        self._path_edit.setToolTip(str(path))
 
     def _validate(self) -> None:
         name = self._name_edit.text().strip()
@@ -118,19 +113,6 @@ class NewDatabaseDialog(QDialog):
     @property
     def name(self) -> str:
         return self._name_edit.text().strip()
-
-    @property
-    def custom_path(self) -> Path | None:
-        """Returner fuld filsti (mappe + navn.db), eller None for default placering."""
-        if self._custom_path is None:
-            return None
-        name = self._name_edit.text().strip()
-        if not name:
-            return self._custom_path  # _validate() fanger dette
-        safe_name = "".join(
-            c if c.isalnum() or c in "-_ " else "_" for c in name
-        ).strip()
-        return self._custom_path / f"{safe_name}.db"
 
 
 # Issue #1047: the folder last chosen in the Copy/Move dialog, remembered for
@@ -483,7 +465,7 @@ class DatabaseManagerDialog(QDialog):
         dlg = NewDatabaseDialog(self)
         if dlg.exec():
             try:
-                db = self._manager.new_database(dlg.name, dlg.custom_path)
+                db = self._manager.new_database(dlg.name, directory=dlg.custom_directory)
             except ValueError as e:
                 QMessageBox.warning(self, tr("warning"), str(e))
                 return
