@@ -7,6 +7,7 @@
 # tells GSAK's files from OpenSAK's own by <gpx creator> (#766).
 
 import io
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from opensak.export.file_export_settings import FileExportSettings
 from opensak.export.gpx_content import DEFAULT_CONTENT, GpxContent
 from opensak.gps.garmin import custom_data_text, generate_ggz, generate_gpx
 from opensak.importer import import_gpx, parse_custom_data
+from opensak.importer.gsak_importer import _utc as _gsak_utc
 from opensak.lang import load_language
 from opensak.utils import flags
 
@@ -187,6 +189,45 @@ class TestWriter:
             assert piece.startswith("<wpt ") and piece.endswith("</wpt>")
             assert f"<name>{code}</name>" in piece
             assert "<gsak:CustomData>" in piece
+
+
+# ── #1362: LastGpxDate is the local date ─────────────────────────────────────
+# last_gpx_update is stored as naive UTC (#1139); GSAK's LastGpxDate is the
+# local calendar date. A GSAK date imported east of UTC is local midnight,
+# i.e. the previous day in UTC, and was exported one day early.
+
+@pytest.fixture
+def zurich(monkeypatch):
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset() is not available on this platform")
+    monkeypatch.setenv("TZ", "Europe/Zurich")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def _last_gpx_dates(cache) -> list:
+    cache_wpt, child_wpt = _wpts(generate_gpx([cache]))
+    return [_ext(cache_wpt).findtext(f"{GSAK}LastGpxDate"),
+            _ext(child_wpt).findtext(f"{GSAK}LastGpxDate")]
+
+
+class TestLastGpxDateIsLocal1362:
+    @pytest.mark.parametrize("stored, expected", [
+        (datetime(2026, 11, 19, 23, 0), "2026-11-20"),   # winter, UTC+1
+        (datetime(2026, 8, 19, 22, 0), "2026-08-20"),    # summer, UTC+2
+        (datetime(2026, 11, 20, 12, 0), "2026-11-20"),
+    ])
+    def test_utc_timestamp_written_as_local_date(self, zurich, stored, expected):
+        cache = _cache(last_gpx_update=stored, waypoints=[_child()])
+        assert _last_gpx_dates(cache) == [expected, expected]
+
+    def test_gsak_date_comes_back_unchanged(self):
+        # GSAK's LastGPXDate as the GSAK importer stores it, in this
+        # computer's time zone, is exported as the same date.
+        cache = _cache(last_gpx_update=_gsak_utc("2026-11-20"), waypoints=[_child()])
+        assert _last_gpx_dates(cache) == ["2026-11-20", "2026-11-20"]
 
 
 # ── CustomData text ───────────────────────────────────────────────────────────
