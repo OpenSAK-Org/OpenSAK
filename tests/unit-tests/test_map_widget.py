@@ -48,6 +48,7 @@ def fake_settings(monkeypatch):
     s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
                         map_tile_cache_mb=200,
                         map_clustering=True, map_cluster_radius=40,
+                        map_single_cache=False,
                         map_labels="off",
                         map_separation_radius_km=0.161, map_separation_circles=False,
                         map_base_layers=["osm"], map_base_layer="osm",
@@ -891,6 +892,151 @@ class TestDisplayOptions:
         assert fake_settings.map_clustering is False
         w._bridge.on_clustering_toggled(True)
         assert fake_settings.map_clustering is True
+
+
+# ── Selected cache only (issue #1328) ─────────────────────────────────────────
+#
+# The main map's button switches between the caches around the selected
+# cache (#718, the default) and only the selected cache with its own
+# waypoints. The page only keeps the button state; Python saves it and the
+# main window redraws the selection.
+
+def _wp(prefix, lat, lon, wp_type="Parking Area", name="P"):
+    return SimpleNamespace(prefix=prefix, latitude=lat, longitude=lon,
+                           wp_type=wp_type, name=name)
+
+
+class TestSingleCacheButton:
+    def _fn_body(self, fn_name: str) -> str:
+        start = mw_mod.MAP_HTML.index(f"function {fn_name}")
+        end = mw_mod.MAP_HTML.index("\n}", start)
+        return mw_mod.MAP_HTML[start:end]
+
+    @pytest.fixture
+    def w(self, qtbot, fake_settings):
+        widget = MapWidget(single_cache_button=True)
+        qtbot.addWidget(widget)
+        widget._ready = True
+        widget._page = FakePage()
+        return widget
+
+    def test_no_button_by_default(self):
+        # Trip and draw dialogs never show a selection.
+        html = MapWidget._render_map_html(55.0, 12.0)
+        assert "if (false) {\n    new L.Control.SingleCache().addTo(map);" in html
+        assert "var singleCacheOn = false;" in html
+        assert "MAP_SINGLE_CACHE" not in html
+        assert "MAP_TIP_SINGLE_CACHE" not in html
+
+    @pytest.mark.parametrize("on", [True, False])
+    def test_button_state_rendered(self, on):
+        html = MapWidget._render_map_html(55.0, 12.0, single_cache_button=True,
+                                          single_cache=on)
+        assert "if (true) {\n    new L.Control.SingleCache().addTo(map);" in html
+        assert f"var singleCacheOn = {'true' if on else 'false'};" in html
+
+    def test_tooltip_is_a_js_literal(self, monkeypatch):
+        monkeypatch.setattr(mw_mod, "tr", lambda key, *a, **kw: 'It\'s "on"')
+        html = MapWidget._render_map_html(55.0, 12.0, single_cache_button=True)
+        control = html[html.index("L.Control.SingleCache = "):]
+        line = next(l for l in control.splitlines() if " btn.title = " in l)
+        assert json.loads(line.split("btn.title = ", 1)[1].rstrip().rstrip(";")) == 'It\'s "on"'
+
+    def test_main_window_options(self, qtbot, fake_settings):
+        fake_settings.map_single_cache = True
+        w = MapWidget(single_cache_button=True)
+        qtbot.addWidget(w)
+        opts = w._html_options()
+        assert opts["single_cache_button"] is True
+        assert opts["single_cache"] is True
+
+    def test_other_maps_have_no_button(self, qtbot, fake_settings):
+        fake_settings.map_single_cache = True
+        w = MapWidget()
+        qtbot.addWidget(w)
+        opts = w._html_options()
+        assert opts["single_cache_button"] is False
+        assert opts["single_cache"] is False
+
+    def test_toggle_is_remembered_and_signalled(self, qtbot, fake_settings):
+        w = MapWidget(single_cache_button=True)
+        qtbot.addWidget(w)
+        with qtbot.waitSignal(w.single_cache_toggled) as blocker:
+            w._bridge.on_single_cache_toggled(True)
+        assert blocker.args == [True]
+        assert fake_settings.map_single_cache is True
+        w._bridge.on_single_cache_toggled(False)
+        assert fake_settings.map_single_cache is False
+
+    def test_shows_only_the_cache_and_its_waypoints(self, w):
+        cache = _cache(gc_code="GCSEL", waypoints=[
+            _wp("PK", 55.01, 12.01), _wp("FN", None, None)])
+        w.show_single_cache(cache)
+        js = next(j for j in w._page.js if j.startswith("showSingleCache("))
+        args = json.loads("[" + js[len("showSingleCache("):-1] + "]")
+        markers, gc_code, wps = args
+        assert [m["gc_code"] for m in markers] == ["GCSEL"]
+        assert gc_code == "GCSEL"
+        # Waypoints without coordinates never reach the map.
+        assert [wp["prefix"] for wp in wps] == ["PK"]
+        assert w._shown_caches == [cache]
+        assert not any("loadNearbyCaches" in j for j in w._page.js)
+
+    def test_cache_without_waypoints(self, w):
+        w.show_single_cache(_cache(gc_code="GCSEL"))
+        js = next(j for j in w._page.js if j.startswith("showSingleCache("))
+        assert js.endswith(", [])")
+
+    def test_not_ready_does_nothing(self, qtbot, fake_settings):
+        w = MapWidget(single_cache_button=True)
+        qtbot.addWidget(w)
+        w._page = FakePage()
+        w.show_single_cache(_cache())
+        assert w._page.js == []
+
+    def test_waypoints_stay_when_waypoints_tab_is_left(self, w):
+        w.show_single_cache(_cache(waypoints=[_wp("PK", 55.01, 12.01)]))
+        w._page.js.clear()
+        w.clear_waypoint_markers()
+        assert w._page.js == []
+
+    def test_other_caches_take_the_waypoints_away(self, w):
+        w.show_single_cache(_cache(waypoints=[_wp("PK", 55.01, 12.01)]))
+        w._page.js.clear()
+        w.show_nearby_for_selection(_cache(gc_code="GCN"), [_cache(gc_code="GCN")], 2.0, "")
+        assert w._page.js[0] == "clearWaypointMarkers()"
+        w._page.js.clear()
+        w.load_caches([_cache()])
+        assert "clearWaypointMarkers()" not in w._page.js   # already gone
+
+    def test_waypoints_tab_keeps_its_markers(self, w):
+        # The Waypoints tab is open: leaving the single cache view must not
+        # remove the waypoint markers the tab shows.
+        w.show_waypoint_markers("[]")
+        w.show_single_cache(_cache(waypoints=[_wp("PK", 55.01, 12.01)]))
+        w._page.js.clear()
+        w.load_caches([_cache()])
+        assert "clearWaypointMarkers()" not in w._page.js
+        w.clear_waypoint_markers()
+        assert "clearWaypointMarkers()" in w._page.js
+
+    def test_js_waypoints_before_the_cache(self):
+        # The cache marker may be added (and the view fitted) synchronously,
+        # so the waypoints must already be on the map by then.
+        body = self._fn_body("showSingleCache")
+        assert body.index("showWaypointMarkers(wps, true)") < body.index("loadCaches(caches, gcCode)")
+        assert "!noFit" in self._fn_body("showWaypointMarkers")
+
+    def test_js_fits_cache_and_waypoints(self):
+        body = self._fn_body("afterCachesLoaded")
+        assert "showFocusedCache(focus)" in body
+        assert body.index("showFocusedCache(focus)") < body.index("fitBounds")
+        # Consumed once, so the next plain loadCaches() fits all again.
+        assert "focusAfterLoad = null;" in body
+        assert "focusAfterLoad = focusGcCode || null;" in self._fn_body("loadCaches")
+        focused = self._fn_body("showFocusedCache")
+        assert "waypointMarkers.concat([marker])" in focused
+        assert "panToCache(gcCode)" in focused
 
 
 # ── Separation circles (issue #1087) ──────────────────────────────────────────

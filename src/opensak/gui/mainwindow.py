@@ -368,8 +368,9 @@ class MainWindow(QMainWindow):
 
         # Map widget
         from opensak.gui.map_widget import MapWidget
-        self._map_widget = MapWidget(draw_button=True)
+        self._map_widget = MapWidget(draw_button=True, single_cache_button=True)
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
+        self._map_widget.single_cache_toggled.connect(self._on_map_single_cache_toggled)
         self._map_widget.filter_by_shape_requested.connect(self._filter_by_map_shape)
         self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
         self._map_widget.maximize_requested.connect(self._toggle_maximize_map)
@@ -2130,6 +2131,22 @@ class MainWindow(QMainWindow):
             return
         self._detail_panel.show_cache(full)
         self._map_widget.set_active_cache(full.gc_code)
+        self._show_selection_on_map(full)
+        self._act_wp_edit.setEnabled(True)
+        self._act_wp_delete.setEnabled(True)
+        if full.latitude and full.longitude:
+            coords = format_coords(full.latitude, full.longitude, get_settings().coord_format)
+            self._statusbar.showMessage(
+                f"{full.gc_code} — {full.name} ({coords})"
+            )
+
+    def _show_selection_on_map(self, full: Cache) -> None:
+        """Show the selected cache on the map: its surroundings (nearby
+        view, #718), or — with "selected cache only" switched on with the
+        map button (#1328) — just the cache and its own waypoints."""
+        if get_settings().map_single_cache:
+            self._map_widget.show_single_cache(full)
+            return
         center_lat, center_lon = effective_coords(full)
         if center_lat is not None and center_lon is not None:
             # Issue #718: split-screen map shows the selected cache's own
@@ -2165,13 +2182,14 @@ class MainWindow(QMainWindow):
             # the old behaviour (pan only works if the cache happens to
             # already be in the currently-loaded overview marker set).
             self._map_widget.pan_to_cache(full.gc_code)
-        self._act_wp_edit.setEnabled(True)
-        self._act_wp_delete.setEnabled(True)
-        if full.latitude and full.longitude:
-            coords = format_coords(full.latitude, full.longitude, get_settings().coord_format)
-            self._statusbar.showMessage(
-                f"{full.gc_code} — {full.name} ({coords})"
-            )
+
+    def _on_map_single_cache_toggled(self, on: bool) -> None:
+        """Issue #1328: the map button switched between the selected
+        cache alone and the caches around it — redraw the selection."""
+        gc_code = self._detail_panel.current_gc_code
+        full = self._load_full_cache(gc_code) if gc_code else None
+        if full is not None:
+            self._show_selection_on_map(full)
 
     def _on_map_cache_selected(self, gc_code: GcCode) -> None:
         """Kaldes når brugeren klikker på en pin på kortet."""

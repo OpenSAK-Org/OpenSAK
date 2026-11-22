@@ -36,6 +36,7 @@ def fake_settings(monkeypatch):
     s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
                         use_miles=False, map_draw_dialog_geometry=None,
                         map_clustering=True, map_cluster_radius=40,
+                        map_single_cache=False,
                         map_labels="off",
                         map_separation_radius_km=0.161, map_separation_circles=False,
                         map_base_layers=["osm"], map_base_layer="osm",

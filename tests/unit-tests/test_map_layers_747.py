@@ -106,6 +106,7 @@ class TestOfflineRouting:
         w = MapWidget.__new__(MapWidget)
         w._map_actions = True
         w._draw_button = False
+        w._single_cache_button = False
         w._auto_fit_caches = True
         html = MapWidget._render_map_html(46.9, 7.4, **w._html_options())
         assert len(_layers_in_html(html)) == len(LAYERS)
@@ -219,6 +220,7 @@ class TestMapPage:
         w = MapWidget.__new__(MapWidget)
         w._map_actions = True
         w._draw_button = False
+        w._single_cache_button = False
         w._auto_fit_caches = True
         html = MapWidget._render_map_html(46.9, 7.4, **w._html_options())
         layers = _layers_in_html(html)

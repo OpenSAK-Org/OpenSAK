@@ -239,6 +239,18 @@ class TestDisplay:
         get_store().set("display.map_clustering", "false")
         assert s.map_clustering is False
 
+    def test_map_single_cache_off_by_default(self, s):
+        # #1328: off by default, so selecting a cache shows its surroundings
+        # as before; the map button switches it.
+        assert s.map_single_cache is False
+        s.map_single_cache = True
+        assert s.map_single_cache is True
+
+    def test_map_single_cache_string_value(self, s):
+        from opensak.settings_store import get_store
+        get_store().set("display.map_single_cache", "true")
+        assert s.map_single_cache is True
+
     def test_map_labels_default_off_and_roundtrip(self, s):
         assert s.map_labels == "off"
         s.map_labels = "gc_code"
