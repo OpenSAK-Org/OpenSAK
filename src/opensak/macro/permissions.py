@@ -121,9 +121,14 @@ def expand_path(path: str | Path) -> Path:
     platform (os.path.expandvars only does that on Windows), so a path such
     as "%APPDATA%/gsak" works wherever the variable is set; unknown
     variables are left as they are."""
+    return Path(_expand_text(path))
+
+
+def _expand_text(path: str | Path) -> str:
+    """expand_path() as text, before Path() normalises it (PosixPath turns
+    "//./COM3" into "//COM3")."""
     text = os.path.expandvars(os.path.expanduser(str(path)))
-    text = _WINDOWS_VAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), text)
-    return Path(text)
+    return _WINDOWS_VAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), text)
 
 
 def resolve_path(path: str | Path) -> Path:
@@ -529,7 +534,7 @@ def resolve_macro_path(path: str | Path, kind: str = "use") -> Path:
     when the path cannot be resolved.
     """
     if _WINDOWS:
-        reason = windows_path_reason(expand_path(path))
+        reason = windows_path_reason(_expand_text(path))
         if reason is not None:
             raise FolderAccessDenied(f"macros may not {kind} {path} — {reason}")
     try:
