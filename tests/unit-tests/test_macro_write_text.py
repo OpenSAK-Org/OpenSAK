@@ -74,7 +74,8 @@ def _rw(path):
 
 @pytest.mark.parametrize("name", ["a.bat", "a.PS1", "a.lua", "a.exe", "a", "a.html.", "a.html:x"])
 def test_suffix_outside_allow_list_is_refused(tmp_path, name):
-    with pytest.raises(FolderAccessDenied, match="only these file types"):
+    # On Windows a ":" is refused first, as an alternate data stream.
+    with pytest.raises(FolderAccessDenied, match="only these file types|alternate data stream"):
         check_access(tmp_path / name, write=True, permissions=_rw(tmp_path),
                      allowed_suffixes=(".html", ".txt"))
 

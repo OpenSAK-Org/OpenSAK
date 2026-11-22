@@ -23,6 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from opensak.utils.file_names import is_reserved_device_name
+
 from opensak.export.gpx_content import (
     CHILDREN_CHOICES, GPX_VERSIONS, MAX_COUNTS_CHOICES, GpxContent,
 )
@@ -221,7 +223,8 @@ def expand_file_name(
     ``"{database}_{date}"``. Supported variables are FILE_NAME_VARIABLES;
     unknown ones are kept as typed. Characters that are not allowed in a
     file name are replaced with "_". A trailing ".<fmt>" is dropped, since
-    the extension is added by the export. Falls back to DEFAULT_FILE_NAME
+    the extension is added by the export. A Windows device name ("COM3",
+    "NUL") gets a leading "_". Falls back to DEFAULT_FILE_NAME
     when nothing usable is left.
     """
     if now is None:
@@ -252,6 +255,10 @@ def expand_file_name(
         name = name[: -len(fmt) - 1]
     # Windows drops trailing dots and spaces from file names.
     name = name.strip().rstrip(". ")
+    # "COM3" (e.g. a filter label) would make "COM3.gpx", which Windows
+    # opens as a serial device, not a file.
+    if is_reserved_device_name(name):
+        name = f"_{name}"
     return name or DEFAULT_FILE_NAME
 
 

@@ -47,7 +47,16 @@ Geocaching.com token, the data and database folders (except the macros
 folder inside the data folder) and SQLite files (.db, .db3, .sqlite,
 .sqlite3 and their -wal/-shm/-journal files) anywhere — except the macro's
 own database (opensak.macro_db()), which still needs write access to its
-folder like any other file.
+folder like any other file. These checks ignore upper/lower case, since
+resolve() does not fix the case on macOS, and also compare existing files
+and folders by identity (device and inode), so a differently spelled path
+to the same place is refused too.
+
+On Windows, check_access() also refuses paths that do not name a plain
+file (see windows_path_reason()): device names such as COM3 or NUL (also
+"COM3.gpx"), alternate data streams ("a.gpx:x") and the \\\\.\\ and \\\\?\\
+prefixes, which resolve() leaves in place and which the folder checks
+would therefore not match.
 """
 
 from __future__ import annotations
@@ -55,12 +64,19 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sys
 import tempfile
+import unicodedata
 from dataclasses import dataclass
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import IO, Any, Callable, Iterable, Optional, TypeVar
 
+from opensak.utils.file_names import is_reserved_device_name
+
 T = TypeVar("T")
+
+# Windows-only path checks (windows_path_reason()) apply in check_access().
+_WINDOWS = sys.platform == "win32"
 
 STORE_KEY = "macros.folder_permissions"
 
@@ -266,6 +282,54 @@ def _protected_locations() -> tuple[list[Path], list[Path]]:
     return folders, files
 
 
+def _identity(path: Path) -> Optional[tuple[int, int]]:
+    """(device, inode) of an existing *path*, or None. A file system that
+    reports no inode (0) gives None, so it never matches anything."""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return (st.st_dev, st.st_ino) if st.st_ino else None
+
+
+class _Location:
+    """A resolved path as the deny list compares it: by its case-folded
+    spelling, and where it exists, by the identity of the path itself and
+    of its parents. macOS (and Windows) file systems ignore case, and
+    resolve() does not fix the case on macOS, so "…/OPENSAK/bootstrap.json"
+    reaches the same file as "…/opensak/bootstrap.json"."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.folded = _folded(path)
+        self._own: Optional[tuple[int, int]] = None
+        self._chain: Optional[set[tuple[int, int]]] = None
+
+    def _ids(self) -> set[tuple[int, int]]:
+        if self._chain is None:
+            self._own = _identity(self.path)
+            chain = {self._own} if self._own else set()
+            for parent in self.path.parents:
+                ident = _identity(parent)
+                if ident:
+                    chain.add(ident)
+            self._chain = chain
+        return self._chain
+
+    def is_same(self, other: Path) -> bool:
+        if self.folded == _folded(other):
+            return True
+        self._ids()
+        return self._own is not None and self._own == _identity(other)
+
+    def is_inside(self, folder: Path) -> bool:
+        """*folder* is this path or one of its parents."""
+        if self.folded.is_relative_to(_folded(folder)):
+            return True
+        ident = _identity(folder)
+        return ident is not None and ident in self._ids()
+
+
 def protected_reason(target: Path, allow_database: bool = False) -> Optional[str]:
     """Why the resolved *target* is off limits to macros, or None.
 
@@ -274,13 +338,20 @@ def protected_reason(target: Path, allow_database: bool = False) -> Optional[str
     *allow_database*: *target* is the macro's own database
     (opensak.macro_db()), which may be an SQLite file; everything else
     still applies, OpenSAK's data folders included.
+
+    Upper/lower case does not matter, and an existing file or folder is
+    also matched by identity (see _Location), so another spelling of a
+    protected path, or a hard link to a protected file, is refused too.
+    On Linux this may also refuse a folder that differs from OpenSAK's own
+    only in case — the safe direction.
     """
     if _is_sqlite_file(target) and not allow_database:
         return "it is a database file"
-    if target.name.lower().startswith("opensak.json"):
+    if target.name.casefold().startswith("opensak.json"):
         return "it is OpenSAK's settings file"
+    location = _Location(target)
     folders, files = _protected_locations()
-    if target in files:
+    if any(location.is_same(f) for f in files):
         return "it is one of OpenSAK's own files"
     try:
         macros = macros_dir()
@@ -289,21 +360,52 @@ def protected_reason(target: Path, allow_database: bool = False) -> Optional[str
     # Each macro reads its own saved settings through opensak.settings only,
     # never another macro's through the file functions (#983).
     from opensak.macro.settings import SETTINGS_DIRNAME
-    if macros is not None and target.is_relative_to(macros / SETTINGS_DIRNAME):
+    if macros is not None and location.is_inside(macros / SETTINGS_DIRNAME):
         return "it holds the saved settings of macros — use opensak.settings"
+    macros_location = _Location(macros) if macros is not None else None
     for folder in folders:
-        if not target.is_relative_to(folder):
+        if not location.is_inside(folder):
             continue
         # The macros folder normally lives inside the data folder (which is
         # also the default database folder) and stays usable.
         if (
             macros is not None
-            and macros != folder
-            and macros.is_relative_to(folder)
-            and target.is_relative_to(macros)
+            and macros_location is not None
+            and not macros_location.is_same(folder)
+            and macros_location.is_inside(folder)
+            and location.is_inside(macros)
         ):
             continue
         return f"it is inside OpenSAK's data folder {folder}"
+    return None
+
+
+# ── Windows: names that are not plain files ─────────────────────────────────
+
+# \\.\ (device namespace) and \\?\ (no normalisation, e.g. \\?\GLOBALROOT),
+# with either slash, and the NT object namespace \??\.
+_DEVICE_PREFIX = re.compile(r"^(?:[\\/]{2}[?.]|[\\/]\?\?)(?:[\\/]|$)")
+
+
+def windows_path_reason(path: str | PurePath) -> Optional[str]:
+    """Why the Windows *path* does not name a plain file, or None.
+
+    Refused: a \\\\.\\, \\\\?\\ or \\??\\ prefix (resolve() keeps
+    "\\\\?\\C:\\…", so no folder check would match it); a ":" after the
+    drive, which names an NTFS alternate data stream ("data.db:x"); and a
+    device name such as CON, NUL, COM3 or LPT1 in any part of the path,
+    also with an extension ("COM3.gpx" writes to the serial port). No macro
+    needs any of these.
+    """
+    text = str(path)
+    if _DEVICE_PREFIX.match(text):
+        return "Windows device paths (\\\\.\\ or \\\\?\\) are not allowed"
+    pure = PureWindowsPath(text)
+    if ":" in text[len(pure.drive):]:
+        return 'a ":" after the drive names an alternate data stream'
+    for part in pure.parts[1 if pure.anchor else 0:]:
+        if is_reserved_device_name(part):
+            return f'"{part}" is a Windows device name, not a file'
     return None
 
 
@@ -339,8 +441,9 @@ def _autostart_locations() -> tuple[list[Path], list[Path]]:
 
 
 def _folded(path: Path) -> PurePath:
-    # Windows and macOS file names are case-insensitive by default.
-    return PurePath(str(path).casefold())
+    # Windows and macOS file names are case-insensitive by default; macOS
+    # also treats composed and decomposed accents ("é" / "e" + "´") alike.
+    return PurePath(unicodedata.normalize("NFC", str(path)).casefold())
 
 
 def write_denied_reason(
@@ -387,11 +490,13 @@ def protected_inside(folder: str | Path) -> list[Path]:
                 pass
     except Exception:
         pass
-    inside_folders = sorted({f for f in folders if f.is_relative_to(root)})
+    # Same comparison as protected_reason(), so the warning matches what
+    # macros are actually refused.
+    inside_folders = sorted({f for f in folders if _Location(f).is_inside(root)})
     inside_files = sorted({
         f for f in files
-        if f.is_relative_to(root)
-        and not any(f.is_relative_to(d) for d in inside_folders)
+        if (location := _Location(f)).is_inside(root)
+        and not any(location.is_inside(d) for d in inside_folders)
     })
     return inside_folders + inside_files
 
@@ -414,6 +519,29 @@ def _matching_entry(
     return best
 
 
+def resolve_macro_path(path: str | Path, kind: str = "use") -> Path:
+    """resolve_path() for a path a macro supplied.
+
+    On Windows a path that does not name a plain file is refused (see
+    windows_path_reason()), both as given — before resolve(), which would
+    open "\\\\.\\COM3" to look at it — and once resolved. Raises
+    FolderAccessDenied (*kind*, e.g. "read", goes into its message), also
+    when the path cannot be resolved.
+    """
+    if _WINDOWS:
+        reason = windows_path_reason(expand_path(path))
+        if reason is not None:
+            raise FolderAccessDenied(f"macros may not {kind} {path} — {reason}")
+    try:
+        target = resolve_path(path)
+    except (OSError, RuntimeError, ValueError) as exc:   # RuntimeError: symlink loop
+        raise FolderAccessDenied(f"cannot resolve {path}: {exc}") from None
+    reason = windows_path_reason(target) if _WINDOWS else None
+    if reason is not None:
+        raise FolderAccessDenied(f"macros may not {kind} {target} — {reason}")
+    return target
+
+
 def check_access(
     path: str | Path,
     write: bool = False,
@@ -427,14 +555,13 @@ def check_access(
     saved list (load_permissions()); *allow_database* as for
     protected_reason(). A write is also refused for an autostart location,
     and for a suffix not in *allowed_suffixes* (see write_denied_reason()).
+    On Windows, a path that does not name a plain file is refused, both as
+    given and once resolved (see windows_path_reason()).
     """
     if permissions is None:
         permissions = load_permissions()
-    try:
-        target = resolve_path(path)
-    except (OSError, RuntimeError) as exc:   # RuntimeError: symlink loop
-        raise FolderAccessDenied(f"cannot resolve {path}: {exc}") from None
     kind = "write" if write else "read"
+    target = resolve_macro_path(path, kind)
     reason = protected_reason(target, allow_database)
     if reason is None and write:
         reason = write_denied_reason(target, allowed_suffixes)

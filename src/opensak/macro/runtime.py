@@ -193,6 +193,7 @@ from opensak.macro.permissions import (
     load_permissions,
     macros_dir,
     protected_reason,
+    resolve_macro_path,
     resolve_path,
     safe_copy,
     safe_delete,
@@ -3565,9 +3566,9 @@ class MacroRuntime:
             file = (self._base_dir or macros_dir()) / file
         # Refused before the user is asked to approve the folder.
         try:
-            reason = write_denied_reason(resolve_path(file), WRITE_TEXT_SUFFIXES)
-        except (OSError, RuntimeError) as exc:
-            raise MacroError(f"cannot resolve {file}: {exc}") from None
+            reason = write_denied_reason(resolve_macro_path(file, "write"), WRITE_TEXT_SUFFIXES)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
         if reason is not None:
             raise MacroError(f"{func}: macros may not write {file} — {reason}")
         target = self._check_access(file, write=True)
@@ -3603,9 +3604,9 @@ class MacroRuntime:
         if not file.is_absolute():
             file = (self._base_dir or macros_dir()) / file
         try:
-            target = resolve_path(file)
-        except (OSError, RuntimeError) as exc:
-            raise MacroError(f"cannot resolve {file}: {exc}") from None
+            target = resolve_macro_path(file, "open")
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
         # A ":" would name an NTFS alternate data stream ("a.html:x.bat").
         if ":" in target.name or target.suffix.lower() not in OPEN_SUFFIXES:
             raise MacroError(f"{func}: only these file types can be opened: "
@@ -4223,9 +4224,9 @@ class MacroRuntime:
         if not path.is_absolute():
             path = (self._base_dir or macros_dir()) / path
         try:
-            resolved = resolve_path(path)
-        except (OSError, RuntimeError) as exc:
-            raise MacroError(f"cannot resolve {path}: {exc}") from None
+            resolved = resolve_macro_path(path, "read")
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
         # Listing a folder reads its entries: the permission (or the user's
         # approval) is for the folder itself, as for a file in it.
         self._check_access(resolved / "_", write=False)
@@ -4280,9 +4281,9 @@ class MacroRuntime:
         safe_write() and friends. A file type or location that is never
         allowed is refused before the user is asked."""
         try:
-            reason = write_denied_reason(resolve_path(file), suffixes)
-        except (OSError, RuntimeError) as exc:
-            raise MacroError(f"cannot resolve {file}: {exc}") from None
+            reason = write_denied_reason(resolve_macro_path(file, kind), suffixes)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
         if reason is not None:
             raise MacroError(f"{func}: macros may not {kind} {file} — {reason}")
         target = self._check_access(file, write=True)

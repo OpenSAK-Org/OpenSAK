@@ -117,7 +117,8 @@ def test_copy_overwrites_or_skips(src, out):
                                   "evil.zip:x.bat"])
 def test_copy_to_a_program_or_script_is_refused_without_asking(src, out, name):
     host = FakeHost(FolderApproval.ONCE)
-    with pytest.raises(MacroError, match="only these file types"):
+    # On Windows a ":" is refused first, as an alternate data stream.
+    with pytest.raises(MacroError, match="only these file types|alternate data stream"):
         _run(f'opensak.copy_file("{_p(src / "pq.zip")}", "{_p(out / name)}")',
              _perms(src, out), host)
     assert host.asked == [] and list(out.iterdir()) == []
