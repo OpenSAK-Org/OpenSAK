@@ -781,6 +781,8 @@ class MacroManagerDialog(QDialog):
         self._append_output(tr("macro_repo_removed", name=name))
         for kept in result.kept:
             self._append_output(tr("macro_repo_kept", file=str(kept)))
+        for kept in result.kept_data:
+            self._append_output(tr("macro_repo_kept_data", file=str(kept)))
         self.reload()
         return True
 

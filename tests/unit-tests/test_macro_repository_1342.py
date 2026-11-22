@@ -249,7 +249,8 @@ def test_remove_keeps_companion_data_unless_asked(macros_dir, index):
     lua = folder / "roadsheet.lua"
     data = _put(folder / "roadsheet.db3", b"user data")
     result = repo.remove(lua)
-    assert data in result.kept and data.exists() and not lua.exists()
+    assert result.kept_data == (data,) and result.kept == ()
+    assert data.exists() and not lua.exists()
     assert not (folder / "README.md").exists() and repo.install_records() == {}
     assert sorted(p.name for p in folder.rglob("*")) == ["roadsheet.db3"]
     repo.remove(lua, delete_data=True)
@@ -262,7 +263,40 @@ def test_remove_keeps_edited_extra_files(macros_dir, index):
     readme = macros_dir / "roadsheet" / "README.md"
     readme.write_bytes(b"my notes")
     result = repo.remove(macros_dir / "roadsheet" / "roadsheet.lua")
-    assert readme in result.kept and readme.exists()
+    assert result.kept == (readme,) and result.kept_data == () and readme.exists()
+
+
+def _saved(macros_dir: Path) -> tuple[Path, Path]:
+    """The saved settings and remembered form values of roadsheet/roadsheet.lua."""
+    settings = macros_dir / "settings"
+    return (_put(settings / "roadsheet" / "roadsheet.json", b"{}"),
+            _put(settings / ".forms" / "roadsheet" / "roadsheet.json", b"{}"))
+
+
+def test_remove_deletes_saved_settings_with_the_data(macros_dir, index):
+    # The macro's opensak.settings and remembered form values were left
+    # behind after a remove, even with "also delete its data" ticked.
+    macro = index.macros["roadsheet"]
+    repo.install(macro, repo.download_files(macro, fetch=FakeFetch(_index_data())))
+    lua = macros_dir / "roadsheet" / "roadsheet.lua"
+    saved, form = _saved(macros_dir)
+    other = _put(macros_dir / "settings" / "other.json", b"{}")
+    assert repo.data_files(lua) == [saved, form]
+    result = repo.remove(lua, delete_data=True)
+    assert saved in result.removed and form in result.removed and result.kept_data == ()
+    assert not (macros_dir / "roadsheet").exists()
+    # The emptied folders go, the settings of other macros stay.
+    assert not saved.parent.exists() and not form.parent.exists()
+    assert other.exists()
+
+
+def test_remove_reports_saved_settings_it_keeps(macros_dir, index):
+    macro = index.macros["roadsheet"]
+    repo.install(macro, repo.download_files(macro, fetch=FakeFetch(_index_data())))
+    saved, form = _saved(macros_dir)
+    result = repo.remove(macros_dir / "roadsheet" / "roadsheet.lua")
+    assert result.kept_data == (saved, form) and result.kept == ()
+    assert saved.exists() and form.exists()
 
 
 def test_installed_files_become_tracked_again(macros_dir, index):

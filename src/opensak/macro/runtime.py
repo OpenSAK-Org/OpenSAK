@@ -240,10 +240,8 @@ MAX_UI_TEXT = 100_000
 MAX_CLIPBOARD_TEXT = 10_000_000
 # A form image (file or base64 data)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
-# Where opensak.form{ remember = true } keeps the last values: a folder of
-# the macros' settings folder. normalize_name() strips leading dots, so no
-# macro subfolder can have this name.
-FORM_MEMORY_DIRNAME = ".forms"
+# Where opensak.form{ remember = true } keeps the last values.
+FORM_MEMORY_DIRNAME = macro_settings.FORM_MEMORY_DIRNAME
 # opensak.read_csv() refuses larger files — it is meant for small lists
 # (solved puzzles, corrections), not for bulk imports.
 MAX_CSV_BYTES = 10 * 1024 * 1024
