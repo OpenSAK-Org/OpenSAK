@@ -356,6 +356,13 @@ def main() -> None:
     from opensak.lang import load_language, tr as _tr
     _install_qt_translator(app, bootstrap.load_language())
 
+    # #1361: Offline mode applies from the first request of the session on.
+    from opensak import net
+    from opensak.gui.settings import get_settings as _get_settings
+    net.set_offline_mode(_get_settings().offline_mode)
+    if net.offline_mode():
+        logger.info("startup: offline mode is on")
+
     # Vis velkomst-wizard ved første opstart (issue #210)
     if is_first_run():
         splash.hide()

@@ -3655,6 +3655,11 @@ class MacroRuntime:
             target = net_access.check_url(url)
         except net_access.NetError as exc:
             raise MacroError(f"{func}: {exc}") from None
+        # #1361: fail at once, without asking the user to approve the host.
+        from opensak import net
+        if net.offline_mode():
+            raise MacroError(f"{func}: Offline mode is on (Settings → General), "
+                             f"{target.url} was not requested")
         if self._requests >= net_access.MAX_REQUESTS_PER_RUN:
             raise MacroError(f"{func}: at most {net_access.MAX_REQUESTS_PER_RUN} "
                              "requests per run")
@@ -7279,7 +7284,9 @@ API: tuple[ApiFunction, ...] = (
                     "the header approves nothing by itself. An HTTP error "
                     "status (404, 500) is no error: check `info.status`. A "
                     "failed request (no answer, too large, refused) raises "
-                    "an error, which `pcall` catches. At most "
+                    "an error, which `pcall` catches, and so does every "
+                    "request while Offline mode is on (Settings → General), "
+                    "without asking the user. At most "
                     f"{net_access.MAX_REQUESTS_PER_RUN} requests per run, "
                     f"and at least {net_access.MIN_INTERVAL_S:g} s between "
                     "two requests to the same host.",

@@ -880,6 +880,22 @@ class AppSettings:
     def last_import_dir(self, value: str) -> None:
         get_store().set("paths.last_import_dir", value)
 
+    # ── Offline mode (#1361) ──────────────────────────────────────────────────
+
+    @property
+    def offline_mode(self) -> bool:
+        """Settings → General → Offline mode: no automatic requests."""
+        val = get_store().get("network.offline_mode", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @offline_mode.setter
+    def offline_mode(self, value: bool) -> None:
+        get_store().set("network.offline_mode", bool(value))
+        from opensak import net
+        net.set_offline_mode(bool(value))
+
     # ── Updates ───────────────────────────────────────────────────────────────
 
     @property

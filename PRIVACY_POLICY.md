@@ -111,6 +111,8 @@ https://www.geocaching.com/account/documents/privacypolicy
 
 OpenSAK does not log, cache on any server, or share any data returned from the Geocaching.com API.
 
+With Offline mode on (see 5.7), OpenSAK does not contact the Geocaching.com API at all.
+
 ---
 
 ## 5. Third-Party Services
@@ -134,23 +136,27 @@ When you export caches to a connected Garmin device, OpenSAK writes a GPX file d
 
 ### 5.3 Update check and in-app updates (GitHub)
 
-Unless you turn it off (**Settings → Advanced → Check for updates automatically**), OpenSAK asks GitHub's public API at startup which OpenSAK release is the newest. The request contains no personal data beyond what any web request includes, such as your IP address. The Microsoft Store version skips this check, because the Store updates OpenSAK itself.
+Unless you turn it off (**Settings → Advanced → Check for updates automatically**) or Offline mode is on (see 5.7), OpenSAK asks GitHub's public API at startup which OpenSAK release is the newest. The request contains no personal data beyond what any web request includes, such as your IP address. The Microsoft Store version skips this check, because the Store updates OpenSAK itself. With Offline mode on, **Help → Check for updates** asks before it connects.
 
 When you click **Download & Install** or **Upgrade now**, the new version and its checksum file are downloaded from OpenSAK's release page on GitHub. GitHub's privacy statement applies:
 https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement
 
 ### 5.4 Boundary data (OpenSAK-Data)
 
-Country, state and county lookup works offline. Only when you choose to download boundary packs or check for boundary data updates does OpenSAK fetch files from the OpenSAK-Data release page on GitHub.
+Country, state and county lookup works offline once the boundary data it needs is on your computer. OpenSAK fetches files from the OpenSAK-Data release page on GitHub when you download boundary packs or check for boundary data updates, and during an import or **Update waypoint locations**, for the county packs those caches need that are not on your computer yet. These are plain downloads: no cache data or coordinates are sent. With Offline mode on (see 5.7), nothing is downloaded during an import or **Update waypoint locations**; caches whose county pack is missing get their location once you run **Update waypoint locations** online again.
 
 ### 5.5 Lua macros contacting web sites
 
-A Lua macro can download web pages or files (`opensak.get_url()`). A macro only contacts a web site after you allowed that site for that macro, when OpenSAK asks. Such a request goes from your device directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in **Settings → Folder permissions**, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com).
+A Lua macro can download web pages or files (`opensak.get_url()`). A macro only contacts a web site after you allowed that site for that macro, when OpenSAK asks. Such a request goes from your device directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in **Settings → Folder permissions**, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com). With Offline mode on (see 5.7), every such request fails at once, without asking you.
 
 ### 5.6 Macros from OpenSAK-Macros
 
-OpenSAK checks the shared macro repository, OpenSAK-Macros on GitHub, for new versions of the macros you installed from it. It downloads the repository's macro list, `index.json` (from `raw.githubusercontent.com/OpenSAK-Org/OpenSAK-Macros`), at most once a day at startup, and whenever you click **Check for updates** or open **Browse** in the Macro manager. This is a plain download: nothing about your local macros is sent; OpenSAK compares the list with your macros on your own device. The request includes what any web request does, such as your IP address. Nothing is installed without asking: only when you click **Install** or **Update** does OpenSAK download that macro's files from the same repository, and checks each against the size and checksum in the list before saving it. To turn the startup check off, clear **Settings → Advanced → Check for macro updates at startup (once a day)**; the Macro manager then only checks when you click **Check for updates**. GitHub's privacy statement applies:
+OpenSAK checks the shared macro repository, OpenSAK-Macros on GitHub, for new versions of the macros you installed from it. It downloads the repository's macro list, `index.json` (from `raw.githubusercontent.com/OpenSAK-Org/OpenSAK-Macros`), at most once a day at startup, and whenever you click **Check for updates** or open **Browse** in the Macro manager. This is a plain download: nothing about your local macros is sent; OpenSAK compares the list with your macros on your own device. The request includes what any web request does, such as your IP address. Nothing is installed without asking: only when you click **Install** or **Update** does OpenSAK download that macro's files from the same repository, and checks each against the size and checksum in the list before saving it. To turn the startup check off, clear **Settings → Advanced → Check for macro updates at startup (once a day)**; the Macro manager then only checks when you click **Check for updates**. With Offline mode on (see 5.7), the startup check is skipped too. GitHub's privacy statement applies:
 https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement
+
+### 5.7 Offline mode
+
+Under **Settings → General → Offline mode** you can tell OpenSAK not to go online by itself. While it is on, OpenSAK makes no automatic internet requests: no update check or macro update check at startup, no boundary data downloads during an import, and no Geocaching.com profile lookup when you open Settings. The Geocaching.com API, the Pocket Query e-mail check and Lua macros' web requests are refused with a message, and **Help → Check for updates** asks first. Downloads you start yourself in the Boundary packs dialog or the Macro manager still go out.
 
 ---
 

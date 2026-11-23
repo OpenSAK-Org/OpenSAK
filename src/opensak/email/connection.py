@@ -18,7 +18,7 @@ import socket
 import ssl
 from dataclasses import dataclass
 
-from opensak.net import SSL_CONTEXT
+from opensak.net import SSL_CONTEXT, ensure_online
 
 # Standard IMAP ports — used both as sensible dialog defaults and by
 # the Settings dialog's "flip default port when SSL is toggled" logic.
@@ -81,7 +81,11 @@ def connect(config: ImapConfig, password: str, timeout: float = 10.0) -> imaplib
     en kontekst UDEN verifikation, så kodeordet kunne opsnappes af en
     man-in-the-middle. Der er bevidst ingen undtagelse for selvsignerede
     servere (løsning A i #902).
+
+    #1361: with Offline mode on, raises opensak.net.OfflineModeError before
+    any connection is attempted.
     """
+    ensure_online()
     try:
         if config.use_ssl:
             conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(

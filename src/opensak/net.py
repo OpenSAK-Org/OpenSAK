@@ -24,11 +24,19 @@ import) springes derefter over i stedet for at vente en fuld timeout hver.
 Kald brugeren selv starter prøver altid, og ethvert vellykket kald nulstiller
 flaget. Efter OFFLINE_RETRY_SECONDS må et automatisk kald prøve igen, så en
 forbindelse der kommer tilbage midt i sessionen bliver opdaget.
+
+Offline mode (#1361): the user can switch automatic requests off for good
+(Settings → General → Offline mode, or OPENSAK_OFFLINE=1 for testing). While
+it is on, offline_detected() is always True, so every automatic request is
+skipped from the start instead of after a first timeout. Requests the user
+starts that need the network by design (the Geocaching.com API, the PQ
+e-mail check) call ensure_online() and fail at once with OfflineModeError.
 """
 
 from __future__ import annotations
 
 import errno
+import os
 import socket
 import ssl
 import threading
@@ -120,16 +128,63 @@ def note_success() -> None:
 
 
 def offline_detected() -> bool:
-    """True while automatic requests should be skipped: a connectivity
-    failure happened less than OFFLINE_RETRY_SECONDS ago and nothing has
-    succeeded since."""
+    """True while automatic requests should be skipped: Offline mode is on,
+    or a connectivity failure happened less than OFFLINE_RETRY_SECONDS ago
+    and nothing has succeeded since."""
+    if offline_mode():
+        return True
     with _offline_lock:
         return (_offline_since is not None
                 and time.monotonic() - _offline_since < OFFLINE_RETRY_SECONDS)
 
 
 def reset_offline() -> None:
-    """Forget an earlier connectivity failure (tests)."""
-    global _offline_since
+    """Forget an earlier connectivity failure and Offline mode (tests)."""
+    global _offline_since, _offline_mode
     with _offline_lock:
         _offline_since = None
+    _offline_mode = False
+
+
+# ── Offline mode (#1361) ──────────────────────────────────────────────────────
+
+# OPENSAK_OFFLINE=1 turns Offline mode on for one session, whatever the
+# setting says (for testing).
+OFFLINE_ENV = "OPENSAK_OFFLINE"
+
+_offline_mode = False
+
+
+def env_offline_mode() -> bool:
+    """True if the OPENSAK_OFFLINE environment variable turns Offline mode on."""
+    return os.environ.get(OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def set_offline_mode(enabled: bool) -> None:
+    """Apply the Offline mode setting (at startup, and when it is changed)."""
+    global _offline_mode
+    enabled = bool(enabled)
+    if enabled != _offline_mode:
+        log.info("offline mode %s", "on" if enabled else "off")
+    _offline_mode = enabled
+
+
+def offline_mode() -> bool:
+    """True while the user has switched Offline mode on (setting or env var)."""
+    return _offline_mode or env_offline_mode()
+
+
+class OfflineModeError(RuntimeError):
+    """A request that was not made because Offline mode is on. Its message
+    is the translated text to show the user."""
+
+    def __init__(self) -> None:
+        from opensak.lang import tr
+        super().__init__(tr("offline_mode_blocked"))
+
+
+def ensure_online() -> None:
+    """Raise OfflineModeError if Offline mode is on. For requests the user
+    starts that cannot work without the network."""
+    if offline_mode():
+        raise OfflineModeError()
