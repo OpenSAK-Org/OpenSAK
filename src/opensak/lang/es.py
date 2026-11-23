@@ -216,7 +216,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Busca en OpenSAK-Macros versiones nuevas de las macros instaladas desde allí. No se instala nada sin preguntar. Desactivado: solo cuando pulse Buscar actualizaciones en el Gestor de macros.",
     "settings_group_offline": "Uso sin internet",
     "settings_offline_mode_label": "Modo sin conexión (sin peticiones automáticas a internet)",
-    "settings_offline_mode_hint": "Sin búsqueda de actualizaciones ni de actualizaciones de macros al iniciar, y sin descarga de datos de fronteras durante una importación: ejecute Actualizar ubicaciones de waypoints cuando vuelva a tener conexión. La API de Geocaching.com, la comprobación de correos de PQ y las peticiones web de las macros siguen desactivadas. Ayuda → Buscar actualizaciones sigue funcionando y pregunta antes.",
+    "settings_offline_mode_hint": "Sin búsqueda de actualizaciones ni de actualizaciones de macros al iniciar, y sin descarga de datos de fronteras durante una importación: ejecute Actualizar ubicaciones de waypoints cuando vuelva a tener conexión. El mapa solo muestra las teselas de su caché, y las descripciones de los cachés solo cargan sus imágenes cuando pulse Cargar imágenes. La API de Geocaching.com, la comprobación de correos de PQ y las peticiones web de las macros siguen desactivadas. Ayuda → Buscar actualizaciones sigue funcionando y pregunta antes.",
     "settings_offline_mode_env_hint": "Activado en esta sesión: la variable de entorno {name} está definida.",
     "offline_mode_title": "Modo sin conexión",
     "offline_mode_blocked": "El modo sin conexión está activado, así que OpenSAK no se ha conectado. Desactívelo en Ajustes → General para conectarse.",
@@ -1515,6 +1515,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Publicada por: {name}",
     "detail_hidden_date":           "Fecha: {date}",
     "detail_no_description":        "(Sin descripción)",
+    "detail_images_blocked": "El modo sin conexión está activado: las imágenes de esta descripción no se han cargado.",
+    "detail_load_images": "Cargar imágenes",
     "detail_no_hint":               "(Sin pista)",
     "detail_no_logs":               "(Sin registros)",
 

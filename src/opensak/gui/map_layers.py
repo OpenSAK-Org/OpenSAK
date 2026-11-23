@@ -16,18 +16,18 @@ Only sources whose terms allow use in an app like OpenSAK are listed:
 Google and Bing tiles are deliberately absent — their terms forbid direct
 tile access outside their own SDKs/APIs.
 
-Offline (#1111): tiles normally go through the shared map profile's disk
-HTTP cache (map_profile.py), which follows each provider's own cache headers.
-A layer with offline=False comes from a provider whose terms do not allow
-keeping tiles on the device (Esri: caching only while connected). Its tiles
-are fetched through opensak://tiles/<id>/z/x/y (web_assets.py) instead —
-Chromium keeps custom-scheme responses out of its HTTP cache, so they never
-reach the disk.
+Tiles (#1361): the page loads every layer through the tile proxy,
+opensak://tiles/<id>/z/x/y (web_assets.py); Chromium never fetches a tile
+itself. The proxy keeps the tiles it may keep in its own disk cache
+(gui/tile_disk_cache.py), for as long as each provider's cache headers allow,
+and with Offline mode on serves from that cache only. Chromium's own HTTP
+cache could not do that: the request interceptor runs before it, so blocking
+a request there also hides the cached copy.
 
-API keys: every keyed layer goes through opensak://tiles/ too, and the proxy
-adds the key. The key is thus never in the page, in Leaflet's tile URLs or in
-Chromium's cache. A keyed layer whose tiles may be kept (offline=True) is
-cached by the proxy itself (gui/tile_disk_cache.py), keyed by layer/z/x/y.
+A layer with offline=False comes from a provider whose terms do not allow
+keeping tiles on the device (Esri: caching only while connected); the proxy
+never writes its tiles to disk. API keys are added by the proxy, so a key is
+never in the page or in Leaflet's tile URLs.
 """
 
 from __future__ import annotations
@@ -105,20 +105,11 @@ class MapLayer:
         """name plus the region code, e.g. "swisstopo – Aerial imagery (CH)"."""
         return f"{self.name} ({self.region})" if self.region else self.name
 
-    @property
-    def proxied(self) -> bool:
-        """Whether the page loads this layer's tiles through opensak://tiles/
-        (web_assets.py): layers whose tiles must not be kept on the device,
-        and every keyed layer, so its key stays out of the page."""
-        return not self.offline or self.key_provider is not None
-
     def tile_url(self) -> str:
-        """The URL template the page loads tiles from. Never holds an API
-        key — a keyed layer's tiles come through the proxy, which adds it."""
-        if self.proxied:
-            from opensak.gui.web_assets import TILE_BASE
-            return f"{TILE_BASE}{self.id}/{{z}}/{{x}}/{{y}}"
-        return self.url
+        """The URL template the page loads tiles from: always the tile proxy
+        (#1361), which adds an API key where one is needed."""
+        from opensak.gui.web_assets import TILE_BASE
+        return f"{TILE_BASE}{self.id}/{{z}}/{{x}}/{{y}}"
 
     def upstream_url(self, z: int, x: int, y: int, api_key: str = "") -> str:
         """The provider's URL of one tile (used by the tile proxy)."""

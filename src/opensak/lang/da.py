@@ -214,7 +214,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Søger i OpenSAK-Macros efter nye versioner af de makroer, der er installeret derfra. Intet installeres uden at spørge. Fra: kun når du klikker Søg efter opdateringer i Makrohåndtering.",
     "settings_group_offline": "Brug uden internet",
     "settings_offline_mode_label": "Offlinetilstand (ingen automatiske internetforespørgsler)",
-    "settings_offline_mode_hint": "Intet tjek for opdateringer eller makroopdateringer ved opstart, og ingen download af grænsedata under en import: kør Update waypoint locations, når du er online igen. Geocaching.com-API'et, PQ-mailtjekket og makroers webforespørgsler forbliver slået fra. Hjælp → Tjek for opdateringer virker stadig og spørger først.",
+    "settings_offline_mode_hint": "Intet tjek for opdateringer eller makroopdateringer ved opstart, og ingen download af grænsedata under en import: kør Update waypoint locations, når du er online igen. Kortet viser kun de felter, der ligger i kortcachen, og cachebeskrivelser henter kun deres billeder, når du klikker Hent billeder. Geocaching.com-API'et, PQ-mailtjekket og makroers webforespørgsler forbliver slået fra. Hjælp → Tjek for opdateringer virker stadig og spørger først.",
     "settings_offline_mode_env_hint": "Slået til for denne session: miljøvariablen {name} er sat.",
     "offline_mode_title": "Offlinetilstand",
     "offline_mode_blocked": "Offlinetilstand er slået til, så OpenSAK oprettede ikke forbindelse. Slå den fra under Indstillinger → Generelt for at gå online.",
@@ -1514,6 +1514,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Udlagt af: {name}",
     "detail_hidden_date":           "Dato: {date}",
     "detail_no_description":        "(Ingen beskrivelse)",
+    "detail_images_blocked": "Offlinetilstand er slået til: billederne i denne beskrivelse blev ikke hentet.",
+    "detail_load_images": "Hent billeder",
     "detail_no_hint":               "(Intet hint)",
     "detail_no_logs":               "(Ingen logs)",
 

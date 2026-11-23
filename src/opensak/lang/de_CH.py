@@ -215,7 +215,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Sucht in OpenSAK-Macros nach neuen Versionen der daraus installierten Makros. Ohne Nachfrage wird nichts installiert. Aus: nur wenn du in der Makro-Verwaltung auf «Nach Updates suchen» klickst.",
     "settings_group_offline": "Nutzung ohne Internet",
     "settings_offline_mode_label": "Offline-Modus (keine automatischen Internetanfragen)",
-    "settings_offline_mode_hint": "Beim Start keine Suche nach Updates oder Makro-Updates und beim Import kein Download von Grenzdaten: Führe Standortdaten der Wegpunkte aktualisieren aus, sobald du wieder online bist. Die Geocaching.com-API, die PQ-E-Mail-Abfrage und Webanfragen von Makros bleiben aus. Hilfe → Nach Updates suchen funktioniert weiterhin und fragt zuerst nach.",
+    "settings_offline_mode_hint": "Beim Start keine Suche nach Updates oder Makro-Updates und beim Import kein Download von Grenzdaten: Führe Standortdaten der Wegpunkte aktualisieren aus, sobald du wieder online bist. Die Karte zeigt nur die Kacheln aus ihrem Kachel-Cache, und Cache-Beschreibungen laden ihre Bilder erst, wenn du auf Bilder laden klickst. Die Geocaching.com-API, die PQ-E-Mail-Abfrage und Webanfragen von Makros bleiben aus. Hilfe → Nach Updates suchen funktioniert weiterhin und fragt zuerst nach.",
     "settings_offline_mode_env_hint": "Für diese Sitzung eingeschaltet: Die Umgebungsvariable {name} ist gesetzt.",
     "offline_mode_title": "Offline-Modus",
     "offline_mode_blocked": "Der Offline-Modus ist eingeschaltet, deshalb hat OpenSAK keine Verbindung aufgebaut. Schalte ihn unter Einstellungen → Allgemein aus, um online zu gehen.",
@@ -1516,6 +1516,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Versteckt von: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Keine Beschreibung)",
+    "detail_images_blocked": "Der Offline-Modus ist eingeschaltet: Die Bilder in dieser Beschreibung wurden nicht geladen.",
+    "detail_load_images": "Bilder laden",
     "detail_no_hint":               "(Kein Hinweis)",
     "detail_no_logs":               "(Keine Logs)",
 

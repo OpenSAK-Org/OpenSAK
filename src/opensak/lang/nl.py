@@ -217,7 +217,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Controleert OpenSAK-Macros op nieuwe versies van de macro's die daaruit zijn geïnstalleerd. Er wordt niets geïnstalleerd zonder te vragen. Uit: alleen wanneer je in Macrobeheer op Controleren op updates klikt.",
     "settings_group_offline": "Gebruik zonder internet",
     "settings_offline_mode_label": "Offlinemodus (geen automatische internetverzoeken)",
-    "settings_offline_mode_hint": "Bij het starten geen controle op updates of macro-updates, en tijdens een import geen download van grensgegevens: voer Waypointlocaties bijwerken uit zodra je weer online bent. De Geocaching.com-API, de PQ-e-mailcontrole en webverzoeken van macro's blijven uit. Help → Controleren op updates werkt nog steeds en vraagt eerst.",
+    "settings_offline_mode_hint": "Bij het starten geen controle op updates of macro-updates, en tijdens een import geen download van grensgegevens: voer Waypointlocaties bijwerken uit zodra je weer online bent. De kaart toont alleen de tegels uit de tegelcache, en cachebeschrijvingen laden hun afbeeldingen pas als je op Afbeeldingen laden klikt. De Geocaching.com-API, de PQ-e-mailcontrole en webverzoeken van macro's blijven uit. Help → Controleren op updates werkt nog steeds en vraagt eerst.",
     "settings_offline_mode_env_hint": "Aan voor deze sessie: de omgevingsvariabele {name} is ingesteld.",
     "offline_mode_title": "Offlinemodus",
     "offline_mode_blocked": "De offlinemodus staat aan, dus OpenSAK heeft geen verbinding gemaakt. Zet hem uit onder Instellingen → Algemeen om online te gaan.",
@@ -1518,6 +1518,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Geplaatst door: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Geen beschrijving)",
+    "detail_images_blocked": "De offlinemodus staat aan: de afbeeldingen in deze beschrijving zijn niet geladen.",
+    "detail_load_images": "Afbeeldingen laden",
     "detail_no_hint":               "(Geen hint)",
     "detail_no_logs":               "(Geen logs)",
 

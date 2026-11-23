@@ -214,7 +214,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Procura no OpenSAK-Macros novas versões das macros instaladas a partir dele. Nada é instalado sem perguntar. Desligado: só quando clicar em Verificar atualizações no Gestor de macros.",
     "settings_group_offline": "Utilização sem internet",
     "settings_offline_mode_label": "Modo offline (sem pedidos automáticos à internet)",
-    "settings_offline_mode_hint": "Sem verificação de atualizações nem de atualizações de macros no arranque, e sem transferência de dados de fronteiras durante uma importação: execute Update waypoint locations quando voltar a estar online. A API do Geocaching.com, a verificação de e-mails de PQ e os pedidos web das macros ficam desligados. Ajuda → Verificar atualizações continua a funcionar e pergunta primeiro.",
+    "settings_offline_mode_hint": "Sem verificação de atualizações nem de atualizações de macros no arranque, e sem transferência de dados de fronteiras durante uma importação: execute Update waypoint locations quando voltar a estar online. O mapa mostra apenas os mosaicos que estão na sua cache, e as descrições das caches só carregam as imagens quando clicar em Carregar imagens. A API do Geocaching.com, a verificação de e-mails de PQ e os pedidos web das macros ficam desligados. Ajuda → Verificar atualizações continua a funcionar e pergunta primeiro.",
     "settings_offline_mode_env_hint": "Ligado nesta sessão: a variável de ambiente {name} está definida.",
     "offline_mode_title": "Modo offline",
     "offline_mode_blocked": "O modo offline está ligado, por isso o OpenSAK não estabeleceu ligação. Desligue-o em Configurações → Geral para ficar online.",
@@ -1515,6 +1515,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Colocada por: {name}",
     "detail_hidden_date":           "Data: {date}",
     "detail_no_description":        "(Sem descrição)",
+    "detail_images_blocked": "O modo offline está ligado: as imagens desta descrição não foram carregadas.",
+    "detail_load_images": "Carregar imagens",
     "detail_no_hint":               "(Sem dica)",
     "detail_no_logs":               "(Sem logs)",
 

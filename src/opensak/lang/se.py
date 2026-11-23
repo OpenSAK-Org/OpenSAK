@@ -214,7 +214,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Söker i OpenSAK-Macros efter nya versioner av makron som installerats därifrån. Inget installeras utan att fråga. Av: bara när du klickar på Sök efter uppdateringar i Makrohanteraren.",
     "settings_group_offline": "Användning utan internet",
     "settings_offline_mode_label": "Offlineläge (inga automatiska förfrågningar till internet)",
-    "settings_offline_mode_hint": "Ingen sökning efter uppdateringar eller makrouppdateringar vid start, och ingen nedladdning av gränsdata under en import: kör Update waypoint locations när du är online igen. Geocaching.com-API:et, PQ-e-postkontrollen och makrons webbförfrågningar förblir avstängda. Hjälp → Sök efter uppdateringar fungerar fortfarande och frågar först.",
+    "settings_offline_mode_hint": "Ingen sökning efter uppdateringar eller makrouppdateringar vid start, och ingen nedladdning av gränsdata under en import: kör Update waypoint locations när du är online igen. Kartan visar bara rutorna i kartcachen, och cachebeskrivningar hämtar sina bilder först när du klickar på Hämta bilder. Geocaching.com-API:et, PQ-e-postkontrollen och makrons webbförfrågningar förblir avstängda. Hjälp → Sök efter uppdateringar fungerar fortfarande och frågar först.",
     "settings_offline_mode_env_hint": "På för den här sessionen: miljövariabeln {name} är satt.",
     "offline_mode_title": "Offlineläge",
     "offline_mode_blocked": "Offlineläget är på, så OpenSAK anslöt inte. Stäng av det under Inställningar → Allmänt för att gå online.",
@@ -1514,6 +1514,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Utlagd av: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Ingen beskrivning)",
+    "detail_images_blocked": "Offlineläget är på: bilderna i den här beskrivningen har inte hämtats.",
+    "detail_load_images": "Hämta bilder",
     "detail_no_hint":               "(Ingen ledtråd)",
     "detail_no_logs":               "(Inga loggar)",
 

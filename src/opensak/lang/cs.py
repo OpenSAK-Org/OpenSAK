@@ -214,7 +214,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Hledá v OpenSAK-Macros nové verze maker, která z něj byla nainstalována. Nic se neinstaluje bez dotazu. Vypnuto: jen když ve Správci maker kliknete na Zkontrolovat aktualizace.",
     "settings_group_offline": "Použití bez internetu",
     "settings_offline_mode_label": "Režim offline (žádné automatické požadavky na internet)",
-    "settings_offline_mode_hint": "Při spuštění se nehledají aktualizace programu ani maker a při importu se nestahují data hranic: jakmile budete znovu online, spusťte Update waypoint locations. API Geocaching.com, kontrola e-mailů s PQ a webové požadavky maker zůstávají vypnuté. Nápověda → Zkontrolovat aktualizace stále funguje a nejprve se zeptá.",
+    "settings_offline_mode_hint": "Při spuštění se nehledají aktualizace programu ani maker a při importu se nestahují data hranic: jakmile budete znovu online, spusťte Update waypoint locations. Mapa zobrazuje jen dlaždice ze své mezipaměti a popisy keší načtou obrázky, až když kliknete na Načíst obrázky. API Geocaching.com, kontrola e-mailů s PQ a webové požadavky maker zůstávají vypnuté. Nápověda → Zkontrolovat aktualizace stále funguje a nejprve se zeptá.",
     "settings_offline_mode_env_hint": "Zapnuto pro tuto relaci: je nastavena proměnná prostředí {name}.",
     "offline_mode_title": "Režim offline",
     "offline_mode_blocked": "Režim offline je zapnutý, a proto se OpenSAK nepřipojil. Chcete-li být online, vypněte jej v Nastavení → Obecné.",
@@ -1515,6 +1515,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Umístil: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Bez popisu)",
+    "detail_images_blocked": "Režim offline je zapnutý: obrázky v tomto popisu nebyly načteny.",
+    "detail_load_images": "Načíst obrázky",
     "detail_no_hint":               "(Bez nápovědy)",
     "detail_no_logs":               "(Žádné logy)",
 

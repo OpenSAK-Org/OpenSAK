@@ -72,7 +72,7 @@ class TestSharedProfile:
         assert p.calls["setHttpCacheType"] == (QWebEngineProfile.HttpCacheType.MemoryHttpCache,)
         assert "setHttpCacheMaximumSize" not in p.calls
 
-    def test_tile_referer_interceptor_installed(self):
+    def test_tile_interceptor_installed(self):
         p = _acquire()
         (interceptor,) = p.calls["setUrlRequestInterceptor"]
         assert isinstance(interceptor, map_profile.TileInterceptor)

@@ -214,7 +214,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Checks OpenSAK-Macros for new versions of the macros installed from it. Nothing is installed without asking. Off: only when you click Check for updates in the Macro manager.",
     "settings_group_offline": "Offline use",
     "settings_offline_mode_label": "Offline mode (no automatic internet requests)",
-    "settings_offline_mode_hint": "No update or macro update check at startup, and no boundary data downloads during an import: run Update waypoint locations once you are online again. The Geocaching.com API, the PQ e-mail check and macros' web requests stay off. Help → Check for updates still works, and asks first.",
+    "settings_offline_mode_hint": "No update or macro update check at startup, and no boundary data downloads during an import: run Update waypoint locations once you are online again. The map shows only the tiles in its tile cache, and cache descriptions load their images only when you click Load images. The Geocaching.com API, the PQ e-mail check and macros' web requests stay off. Help → Check for updates still works, and asks first.",
     "settings_offline_mode_env_hint": "On for this session: the {name} environment variable is set.",
     "offline_mode_title": "Offline mode",
     "offline_mode_blocked": "Offline mode is on, so OpenSAK did not connect. Turn it off under Settings → General to go online.",
@@ -1513,6 +1513,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Placed by: {name}",
     "detail_hidden_date":           "Date: {date}",
     "detail_no_description":        "(No description)",
+    "detail_images_blocked": "Offline mode is on: the images in this description were not loaded.",
+    "detail_load_images": "Load images",
     "detail_no_hint":               "(No hint)",
     "detail_no_logs":               "(No logs)",
 

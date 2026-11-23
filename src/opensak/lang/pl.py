@@ -216,7 +216,7 @@ STRINGS: dict[str, str] = {
     "settings_macro_update_check_tip": "Sprawdza w OpenSAK-Macros nowe wersje makr zainstalowanych z tego repozytorium. Nic nie jest instalowane bez pytania. Wyłączone: tylko po kliknięciu Sprawdź aktualizacje w Menedżerze makr.",
     "settings_group_offline": "Praca bez internetu",
     "settings_offline_mode_label": "Tryb offline (bez automatycznych zapytań do internetu)",
-    "settings_offline_mode_hint": "Przy starcie bez sprawdzania aktualizacji programu i makr, a podczas importu bez pobierania danych granic: uruchom Zaktualizuj lokalizacje waypointów, gdy znów będziesz online. API Geocaching.com, sprawdzanie e-maili z PQ i zapytania sieciowe makr pozostają wyłączone. Pomoc → Sprawdź aktualizacje nadal działa i najpierw pyta.",
+    "settings_offline_mode_hint": "Przy starcie bez sprawdzania aktualizacji programu i makr, a podczas importu bez pobierania danych granic: uruchom Zaktualizuj lokalizacje waypointów, gdy znów będziesz online. Mapa pokazuje tylko kafelki ze swojej pamięci podręcznej, a opisy skrzynek wczytują obrazy dopiero po kliknięciu Wczytaj obrazy. API Geocaching.com, sprawdzanie e-maili z PQ i zapytania sieciowe makr pozostają wyłączone. Pomoc → Sprawdź aktualizacje nadal działa i najpierw pyta.",
     "settings_offline_mode_env_hint": "Włączony w tej sesji: ustawiono zmienną środowiskową {name}.",
     "offline_mode_title": "Tryb offline",
     "offline_mode_blocked": "Tryb offline jest włączony, więc OpenSAK nie nawiązał połączenia. Wyłącz go w Ustawienia → Ogólne, aby przejść do trybu online.",
@@ -1515,6 +1515,8 @@ STRINGS: dict[str, str] = {
     "detail_placed_by":             "Umieszczona przez: {name}",
     "detail_hidden_date":           "Data: {date}",
     "detail_no_description":        "(Brak opisu)",
+    "detail_images_blocked": "Tryb offline jest włączony: obrazy w tym opisie nie zostały wczytane.",
+    "detail_load_images": "Wczytaj obrazy",
     "detail_no_hint":               "(Brak podpowiedzi)",
     "detail_no_logs":               "(Brak logów)",
 
