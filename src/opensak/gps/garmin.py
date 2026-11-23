@@ -33,8 +33,11 @@ from opensak.export.gpx_content import (
 from opensak.export.special_tags import ExportTemplates
 from opensak.lang import tr
 from opensak.utils.constants import CUSTOM_WP_TYPES
+from opensak.utils.timestamps import utc_to_local
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from opensak.gps.mtp import MTPDevice, MTPPath
 
 logger = logging.getLogger(__name__)
@@ -849,6 +852,12 @@ def _gsak_date(value: Any) -> str:
     return value.strftime("%Y-%m-%d")
 
 
+def _gsak_local_date(value: datetime) -> str:
+    """_gsak_date for a timestamp stored as UTC (last_gpx_update): GSAK's
+    field holds the local calendar date (#1362)."""
+    return _gsak_date(utc_to_local(value))
+
+
 def _custom_value(value: Any) -> str:
     """A custom field value as GSAK writes it in CustomData: as stored
     (0/1 for a boolean, 0.0 for a real), empty for no value."""
@@ -933,7 +942,7 @@ def _gsak_cache_extension(
     _add("SmartName", "")
     last_gpx = getattr(cache, "last_gpx_update", None)
     if last_gpx:
-        _add("LastGpxDate", _gsak_date(last_gpx))
+        _add("LastGpxDate", _gsak_local_date(last_gpx))
     _add("Code", cache.gc_code or "")
     _add("Resolution", "")
     _add("IsPremium", _gsak_bool(getattr(cache, "premium_only", False)))
@@ -962,7 +971,7 @@ def _gsak_child_extension(cwpt, child_wp, cache, code: str) -> None:
     SubElement(ext, "gsak:SmartName").text = ""
     last_gpx = getattr(cache, "last_gpx_update", None)
     if last_gpx:
-        SubElement(ext, "gsak:LastGpxDate").text = _gsak_date(last_gpx)
+        SubElement(ext, "gsak:LastGpxDate").text = _gsak_local_date(last_gpx)
     SubElement(ext, "gsak:Code").text = code
 
 
