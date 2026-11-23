@@ -4,6 +4,110 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.7] — Unreleased
+
+> Headline: **Repair a database, more base maps and shared macros.**
+> Repair… checks a database like GSAK's Repair/Defrag and fixes only what
+> you tick, after a backup. The map gets aerial imagery and national
+> topographic maps, the Macro manager can install and update macros from
+> OpenSAK-Macros, and the ◎ button shows only the selected cache. Plus
+> fixes for GSAK dates, MTP exports on Windows and the macro sandbox.
+>
+> New texts in the user interface are machine-translated for all
+> languages except English and Danish. Corrections are welcome.
+
+### Added
+
+- **Repair the database's data (#1051)** — File → Manage databases… →
+  Maintenance… → Repair… checks the data in a database without changing
+  it, like GSAK's Repair/Defrag. It lists what it found, with examples,
+  and fixes only the problems you tick, after a backup that is ticked by
+  default. For example, it deletes rows whose cache no longer exists and
+  fixes broken waypoint links. It then optimizes the database and
+  compacts it when it is worth it. Contributed by nagisml.
+
+- **Repair dates (#1051)** — Repair… also finds dates in a format OpenSAK
+  doesn't use and converts them, and clears GSAK's 1970-01-01 "no date"
+  placeholder. It can also clear dates that can't be read (which stopped
+  a cache from loading); that fix is not ticked by default. Contributed
+  by nagisml.
+
+- **Repair log totals and the found mark (#1051)** — Repair…
+  recalculates each cache's log, waypoint and trackable counts and last
+  log dates from what is in the database, showing old → new. It also
+  marks caches as found when they have one of your own found logs. A
+  found mark is never removed. Contributed by nagisml.
+
+- **More base maps, including aerial imagery (#747)** — a layer switcher
+  on the map, and Settings → Map → Base maps to switch each map on or
+  off. No key is needed for OpenTopoMap, CyclOSM, OSM Humanitarian and
+  the national maps of Switzerland, Austria, France, the Netherlands,
+  Germany and the USA. Esri, MapTiler and Thunderforest maps work with
+  your own API key, which is kept in the system keyring, not in the
+  settings file or a backup. Google and Bing are not included because
+  their terms don't allow it. Contributed by nagisml.
+
+- **Install and update macros from OpenSAK-Macros (#1342)** — the Macro
+  manager's OpenSAK-Macros button can browse and install the shared
+  macros, check for updates and update them all. A new column shows
+  each macro's state (up to date, update available, changed locally,
+  withdrawn). Settings → Advanced can check for updates at startup, at
+  most once a day. Nothing is installed, updated or removed without
+  asking. Contributed by nagisml.
+
+- **`opensak.macro_info()` (API 5)** — a macro can read its own header
+  (Name, Author, Version, Requires-API, Description, Headless,
+  Permissions, Network) instead of repeating the values in its code.
+  Contributed by nagisml.
+
+- **Show only the selected cache on the map (#1328)** — the ◎ button on
+  the main map switches between the caches around the selected cache and
+  only that cache with its waypoints, fitted to the map. Until now this
+  needed a split-screen cache limit of 1 in Settings. The choice is
+  remembered and is off by default. Contributed by nagisml.
+
+### Changed
+
+- **Macros can contact web sites in stable releases too (#1195)** —
+  `opensak.get_url()` is no longer beta-only. Each web site still needs
+  your approval per macro. Macro API 5 is the API of OpenSAK 1.23.0:
+  a macro written for API 5 keeps working in later releases.
+
+- **Macro sandbox: Windows device paths and case-insensitive protected
+  paths (#1359)** — on Windows, macros can no longer use device names
+  such as `CON`, `NUL` or `COM3.gpx`, alternate data streams or `\\.\`
+  paths. An export file name that is a device name becomes `_COM3`. The
+  protected OpenSAK files are matched in any letter case and through
+  hard links, so on macOS, for example, `…/OPENSAK/bootstrap.json` is
+  refused too. Contributed by nagisml.
+
+### Fixed
+
+- **GSAK import: 1970-01-01 is read as "no date" (#1349)** — GSAK writes
+  that date into empty date fields. The import stored it as a real date,
+  which brought back the dates a database repair had cleared.
+  Contributed by nagisml.
+
+- **GPX/GGZ export to a phone or GPS over MTP failed on Windows
+  (#1346)** — it stopped with "'MTPPath' object has no attribute
+  'with_name'". The export is now written to a local folder first and
+  copied to the device once it is complete. Contributed by nagisml.
+
+- **Removing a macro left its saved settings behind (#1342)** — with
+  "Also delete its data" ticked, its saved settings and remembered form
+  values are now deleted too, so a macro installed later at the same
+  place no longer picks them up. Contributed by nagisml.
+
+- **GSAK's LastGpxDate one day early in the GPX export (#1362)** — east
+  of UTC, every cache and child waypoint got the day before the date
+  GSAK shows. The user-note log now has the note's local date at 08:00,
+  as GSAK writes it. Contributed by nagisml.
+
+- **GSAK filters with LastGPXDate, Created or LastUserDate compared
+  dates one day early (#1363)** — an imported filter now compares these
+  columns as GSAK's local dates. Before, for example, a FavPoints-per-day
+  filter also let in caches that GSAK leaves out. Contributed by nagisml.
+
 ## [1.23.0-beta.6] — 2026-11-19
 
 > Headline: **GSAK habits in the cache list and filters.** An optional
