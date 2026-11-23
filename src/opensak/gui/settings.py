@@ -509,6 +509,21 @@ class AppSettings:
         get_store().set("display.map_clustering", bool(value))
 
     @property
+    def map_single_cache(self) -> bool:
+        """Issue #1328: whether the main map shows only the selected cache
+        and its own waypoints instead of the caches around it
+        (map_nearby_radius_km / map_nearby_max_caches). Switched with the
+        button on the map; off by default, so the map behaves as before."""
+        val = get_store().get("display.map_single_cache", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @map_single_cache.setter
+    def map_single_cache(self, value: bool) -> None:
+        get_store().set("display.map_single_cache", bool(value))
+
+    @property
     def map_labels(self) -> str:
         """Issue #1087: permanent label under each cache pin on the map —
         one of MAP_LABEL_MODES ("off", "name", "gc_code"). Default "off",

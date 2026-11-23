@@ -286,3 +286,77 @@ class TestOnCacheSelectedNearbyArguments:
         assert len(calls) == 1
         passed_fs = calls[0]
         assert passed_fs is None or len(passed_fs) == 0
+
+
+# ── Issue #1328: only the selected cache, switched with the map button ───────
+
+class TestSingleCacheToggle1328:
+    """With "selected cache only" on, selecting a cache shows just that
+    cache (and its waypoints) instead of its surroundings; the button
+    redraws the current selection either way. Off is the default."""
+
+    @staticmethod
+    def _make_cache(gc_code="GCSEL1328"):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+        with get_session() as s:
+            s.add(Cache(gc_code=gc_code, name="Selected", cache_type="Traditional Cache",
+                        latitude=51.5074, longitude=-0.1278))
+        return gc_code
+
+    @staticmethod
+    def _record(monkeypatch, window):
+        calls: dict[str, list] = {"nearby": [], "single": [], "pan": []}
+        mw = window._map_widget
+        monkeypatch.setattr(mw, "show_nearby_for_selection",
+                            lambda *a, **k: calls["nearby"].append(a))
+        monkeypatch.setattr(mw, "show_single_cache", lambda *a, **k: calls["single"].append(a))
+        monkeypatch.setattr(mw, "pan_to_cache", lambda *a, **k: calls["pan"].append(a))
+        return calls
+
+    def test_main_map_has_the_button(self, window):
+        assert window._map_widget._single_cache_button is True
+
+    def test_selection_shows_surroundings_by_default(self, window, monkeypatch):
+        gc_code = self._make_cache()
+        calls = self._record(monkeypatch, window)
+        window._on_cache_selected(window._load_full_cache(gc_code))
+        assert len(calls["nearby"]) == 1
+        assert calls["single"] == [] and calls["pan"] == []
+
+    def test_selection_shows_only_the_cache_when_on(self, window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_single_cache = True
+        gc_code = self._make_cache()
+        calls = self._record(monkeypatch, window)
+        window._on_cache_selected(window._load_full_cache(gc_code))
+        assert calls["nearby"] == []
+        assert [a[0].gc_code for a in calls["single"]] == [gc_code]
+
+    def test_switching_on_redraws_the_selection(self, window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        gc_code = self._make_cache()
+        window._on_cache_selected(window._load_full_cache(gc_code))
+        calls = self._record(monkeypatch, window)
+        window._map_widget._bridge.on_single_cache_toggled(True)
+        assert get_settings().map_single_cache is True
+        assert [a[0].gc_code for a in calls["single"]] == [gc_code]
+        assert calls["nearby"] == []
+
+    def test_switching_off_shows_surroundings_again(self, window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_single_cache = True
+        gc_code = self._make_cache()
+        window._on_cache_selected(window._load_full_cache(gc_code))
+        calls = self._record(monkeypatch, window)
+        window._map_widget._bridge.on_single_cache_toggled(False)
+        assert get_settings().map_single_cache is False
+        assert len(calls["nearby"]) == 1
+        assert calls["nearby"][0][0].gc_code == gc_code
+        assert calls["single"] == []
+
+    def test_switching_without_selection(self, window, monkeypatch):
+        calls = self._record(monkeypatch, window)
+        window._map_widget._bridge.on_single_cache_toggled(True)
+        window._map_widget._bridge.on_single_cache_toggled(False)
+        assert calls == {"nearby": [], "single": [], "pan": []}

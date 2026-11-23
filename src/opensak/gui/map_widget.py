@@ -72,6 +72,18 @@ def _geoman_lang() -> str:
     return _GEOMAN_LANGS.get(current_language(), "en")
 
 
+def waypoint_marker_data(waypoints) -> list[dict]:
+    """Waypoint marker payload for showWaypointMarkers(): the waypoints
+    with coordinates, as the Waypoints tab sends them (#1328)."""
+    return [
+        {"lat": wp.latitude, "lon": wp.longitude,
+         "prefix": wp.prefix or "", "wp_type": wp.wp_type or "",
+         "name": wp.name or ""}
+        for wp in waypoints
+        if wp.latitude is not None and wp.longitude is not None
+    ]
+
+
 def _parse_shape_json(shape_json: str) -> Optional[tuple[str, list[Point]]]:
     """(mode, points) from the JS draw layer's on_shape_changed() payload, or
     None for anything malformed."""
@@ -109,6 +121,8 @@ class MapBridge(QObject):
     base_layer_changed = Signal(str)
     # Separation circles switched on/off with the map button (#1087)
     separation_toggled = Signal(bool)
+    # Selected cache only (no caches around it) switched on/off (#1328)
+    single_cache_toggled = Signal(bool)
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
@@ -149,6 +163,11 @@ class MapBridge(QObject):
     def on_separation_toggled(self, on: bool) -> None:
         """Called from JavaScript when the separation circles button is clicked."""
         self.separation_toggled.emit(on)
+
+    @Slot(bool)
+    def on_single_cache_toggled(self, on: bool) -> None:
+        """Called from JavaScript when the single cache button is clicked (#1328)."""
+        self.single_cache_toggled.emit(on)
 
     @Slot(str)
     def on_base_layer_changed(self, layer_id: str) -> None:
@@ -253,7 +272,8 @@ MAP_HTML = """<!DOCTYPE html>
     font-family: sans-serif;
     white-space: nowrap;
   }
-  .leaflet-control-mapactions a.clustering-on {
+  .leaflet-control-mapactions a.clustering-on,
+  .leaflet-control-mapactions a.singlecache-on {
     background: #ffe0b2;
     color: #e65100;
   }
@@ -464,6 +484,7 @@ var waypointMarkers = [];
 var panRequestSeq = 0;     // issue #718 — see panToCache()
 var nearbyCircle = null;   // issue #718 — split-screen map radius overlay
 var nearbyLabelControl = null;   // issue #718 — "showing nearest X of Y" label
+var focusAfterLoad = null;   // issue #1328 — see showSingleCache()
 
 // ── WebChannel setup ──────────────────────────────────────────────────────────
 new QWebChannel(qt.webChannelTransport, function(channel) {
@@ -529,6 +550,40 @@ if (MAP_ACTIONS_ENABLED) {
     new L.Control.MapActions().addTo(map);
 }
 new L.Control.Clustering().addTo(map);   // issue #1087, below the actions
+
+// ── Issue #1328: selected cache only on/off ──────────────────────────────────
+// On: selecting a cache shows only that cache and its own waypoints (Python
+// sends them with showSingleCache). Off: the caches around it, as before
+// (loadNearbyCaches). Only the button state lives here — Python reloads the
+// markers.
+var singleCacheOn = MAP_SINGLE_CACHE_ON;
+
+L.Control.SingleCache = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function(map) {
+        var container = L.DomUtil.create('div', 'leaflet-control-mapactions leaflet-bar');
+        var btn = L.DomUtil.create('a', singleCacheOn ? 'singlecache-on' : '', container);
+        btn.innerHTML = '◎';
+        btn.title = MAP_TIP_SINGLE_CACHE;
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function(e) {
+            L.DomEvent.preventDefault(e);
+            singleCacheOn = !singleCacheOn;
+            if (singleCacheOn) {
+                L.DomUtil.addClass(btn, 'singlecache-on');
+            } else {
+                L.DomUtil.removeClass(btn, 'singlecache-on');
+            }
+            if (bridge) bridge.on_single_cache_toggled(singleCacheOn);
+        });
+        return container;
+    }
+});
+if (MAP_SINGLE_CACHE_BUTTON) {
+    new L.Control.SingleCache().addTo(map);
+}
 
 // ── Issue #1087: separation circles ──────────────────────────────────────────
 //
@@ -842,7 +897,11 @@ function cachePopupHtml(c) {
 
 // Data arguments arrive as plain JS literals (json.dumps() on the Python
 // side), never as strings spliced into template literals — see _js_arg().
-function loadCaches(caches) {
+// *focusGcCode* (optional, #1328): show that cache (and the waypoint
+// markers already drawn) once the markers are on the map, instead of
+// fitting the map to all markers.
+function loadCaches(caches, focusGcCode) {
+    focusAfterLoad = focusGcCode || null;
     // Issue #718: any call to the general load path (filter change, table
     // refresh, etc.) means we're back in overview mode — clear any
     // leftover nearby-selection circle/label from loadNearbyCaches() below,
@@ -912,9 +971,13 @@ function loadCaches(caches) {
 
 function afterCachesLoaded() {
     // Pan/zoom once every marker has actually been added to the map.
+    var focus = focusAfterLoad;
+    focusAfterLoad = null;
     if (window._panHomeAfterLoad) {
         window._panHomeAfterLoad = false;
         panToHome();
+    } else if (focus && markers[focus]) {
+        showFocusedCache(focus);
     } else if (AUTO_FIT_CACHES && Object.keys(markers).length > 0) {
         try {
             var bounds = clusterGroup.getBounds();
@@ -1048,6 +1111,29 @@ function selectMarker(gcCode) {
     selectedGcCode = gcCode;
 }
 
+// ── Issue #1328: only the selected cache and its own waypoints ───────────────
+// The waypoint markers go on the map first, so the view can be fitted to the
+// cache and its waypoints together once the cache marker has been added.
+function showSingleCache(caches, gcCode, wps) {
+    showWaypointMarkers(wps, true);
+    loadCaches(caches, gcCode);
+}
+
+function showFocusedCache(gcCode) {
+    var marker = markers[gcCode];
+    if (waypointMarkers.length === 0) {
+        panToCache(gcCode);
+        return;
+    }
+    selectMarker(gcCode);
+    try {
+        var group = L.featureGroup(waypointMarkers.concat([marker]));
+        map.fitBounds(group.getBounds().pad(0.2), {maxZoom: 17});
+    } catch (e) {
+        panToCache(gcCode);
+    }
+}
+
 // ── Issue #718: split-screen "nearby caches" view ────────────────────────────
 //
 // Called when a cache is selected in the table/detail panel — replaces
@@ -1137,7 +1223,9 @@ function clearWaypointMarkers() {
     waypointMarkers = [];
 }
 
-function showWaypointMarkers(wps) {
+// *noFit* (#1328): leave the view alone — showSingleCache() fits it to the
+// cache and its waypoints together.
+function showWaypointMarkers(wps, noFit) {
     clearWaypointMarkers();
     wps.forEach(function(wp) {
         // Issue #546: hidden/unset coordinates come through as 0/0 (e.g.
@@ -1161,7 +1249,7 @@ function showWaypointMarkers(wps) {
         m.addTo(map);
         waypointMarkers.push(m);
     });
-    if (waypointMarkers.length > 0) {
+    if (waypointMarkers.length > 0 && !noFit) {
         try {
             var group = L.featureGroup(waypointMarkers);
             map.fitBounds(group.getBounds().pad(0.5));
@@ -1226,14 +1314,17 @@ class MapWidget(QWidget):
     shape_changed = Signal(str, object)
     # "Filter by this shape" in the draw/right-click menu: mode, points
     filter_by_shape_requested = Signal(str, object)
+    # The single cache button was clicked (#1328); already saved in settings
+    single_cache_toggled = Signal(bool)
 
     def __init__(self, parent=None, *, map_actions: bool = True,
                  draw_button: bool = False, auto_fit_caches: bool = True,
-                 center: Optional[Point] = None):
+                 center: Optional[Point] = None, single_cache_button: bool = False):
         """*map_actions* shows the maximize/pop-out (and draw) buttons;
         *draw_button* adds the draw button with its menu (the main map);
         *auto_fit_caches* zooms to the caches after every load; *center*
-        is where the map opens instead of Home."""
+        is where the map opens instead of Home; *single_cache_button* adds
+        the "selected cache only" on/off button (the main map, #1328)."""
         super().__init__(parent)
         self._caches: list[Cache] = []
         # The caches last sent to the page — load_caches()' set, or the
@@ -1248,6 +1339,11 @@ class MapWidget(QWidget):
         self._last_selected_gc: str = ""   # senest valgte cache via pin-klik
         self._map_actions = map_actions
         self._draw_button = draw_button
+        self._single_cache_button = single_cache_button
+        # #1328: waypoints of the cache shown by show_single_cache() — they
+        # stay on the map when the Waypoints tab is left. None otherwise.
+        self._single_cache_wps: Optional[list[dict]] = None
+        self._waypoints_tab_open = False
         self._auto_fit_caches = auto_fit_caches
         self._center = center
         # The drawn shape, kept here so it survives reload_map() (re-sent in
@@ -1286,6 +1382,7 @@ class MapWidget(QWidget):
             self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
             self._bridge.separation_toggled.connect(self._on_separation_toggled)
             self._bridge.base_layer_changed.connect(self._on_base_layer_changed)
+            self._bridge.single_cache_toggled.connect(self._on_single_cache_toggled)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
@@ -1314,6 +1411,7 @@ class MapWidget(QWidget):
         self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
         self._bridge.separation_toggled.connect(self._on_separation_toggled)
         self._bridge.base_layer_changed.connect(self._on_base_layer_changed)
+        self._bridge.single_cache_toggled.connect(self._on_single_cache_toggled)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -1401,7 +1499,9 @@ class MapWidget(QWidget):
                 "auto_fit_caches": self._auto_fit_caches,
                 "clustering": s.map_clustering, "cluster_radius": s.map_cluster_radius,
                 "label_mode": s.map_labels,
-                "base_layers": layers, "active_base_layer": s.map_base_layer}
+                "base_layers": layers, "active_base_layer": s.map_base_layer,
+                "single_cache_button": self._single_cache_button,
+                "single_cache": self._single_cache_button and s.map_single_cache}
 
     @staticmethod
     def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
@@ -1409,7 +1509,9 @@ class MapWidget(QWidget):
                          clustering: bool = True, cluster_radius: int = 40,
                          label_mode: str = "off",
                          base_layers: Optional[list[dict]] = None,
-                         active_base_layer: str = "") -> str:
+                         active_base_layer: str = "",
+                         single_cache_button: bool = False,
+                         single_cache: bool = False) -> str:
         """Render MAP_HTML template with dynamic values and localized tooltips.
 
         *base_layers* are map_layers.layer_js_defs() entries (default:
@@ -1430,6 +1532,8 @@ class MapWidget(QWidget):
         html = html.replace("MAP_CLUSTERING_ON", "true" if clustering else "false")
         html = html.replace("MAP_CLUSTER_RADIUS", str(max(1, int(cluster_radius))))
         html = html.replace("MAP_LABEL_MODE", _js_inline_arg(label_mode))
+        html = html.replace("MAP_SINGLE_CACHE_BUTTON", "true" if single_cache_button else "false")
+        html = html.replace("MAP_SINGLE_CACHE_ON", "true" if single_cache else "false")
         html = html.replace("GEOMAN_LANG", _js_inline_arg(_geoman_lang()))
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before
@@ -1456,6 +1560,9 @@ class MapWidget(QWidget):
         )
         html = html.replace(
             "MAP_TIP_SEPARATION", _js_inline_arg(tr("map_separation_tooltip"))
+        )
+        html = html.replace(
+            "MAP_TIP_SINGLE_CACHE", _js_inline_arg(tr("map_single_cache_tooltip"))
         )
         # #747: layer names hold translated text too — substituted last.
         html = html.replace("MAP_ACTIVE_BASE_LAYER", _js_inline_arg(active_base_layer))
@@ -1511,6 +1618,7 @@ class MapWidget(QWidget):
         return data
 
     def _do_load_caches(self, caches: list[Cache]) -> None:
+        self._leave_single_cache()
         data = self._build_marker_data(caches)
         self._run_js(f"loadCaches({_js_arg(data)})")
         self._shown_caches = caches
@@ -1580,6 +1688,7 @@ class MapWidget(QWidget):
         center_lat, center_lon = effective_coords(cache)
         if center_lat is None or center_lon is None:
             return
+        self._leave_single_cache()
         data = self._build_marker_data(nearby_caches)
         self._run_js(
             f"loadNearbyCaches({_js_arg(data)}, {center_lat}, {center_lon}, "
@@ -1587,6 +1696,31 @@ class MapWidget(QWidget):
         )
         self._shown_caches = nearby_caches
         self._send_separation_waypoints()
+
+    def show_single_cache(self, cache: Cache) -> None:
+        """Issue #1328: show only *cache* and its own waypoints — no other
+        caches, no radius circle — and fit the map to them. Like
+        show_nearby_for_selection(), it does nothing before the map is ready.
+        The waypoints stay on the map when the Waypoints tab is left."""
+        if not self._ready:
+            return
+        wps = waypoint_marker_data(getattr(cache, "waypoints", None) or [])
+        data = self._build_marker_data([cache])
+        self._single_cache_wps = wps
+        self._run_js(
+            f"showSingleCache({_js_arg(data)}, {_js_arg(cache.gc_code)}, {_js_arg(wps)})"
+        )
+        self._shown_caches = [cache]
+        self._send_separation_waypoints()
+
+    def _leave_single_cache(self) -> None:
+        """Other caches replace the single cache view: its waypoints go
+        too, unless the Waypoints tab shows them anyway."""
+        if self._single_cache_wps is None:
+            return
+        self._single_cache_wps = None
+        if not self._waypoints_tab_open:
+            self._run_js("clearWaypointMarkers()")
 
     def pan_to_cache(self, gc_code: GcCode) -> None:
         """Centrér kortet på en bestemt cache."""
@@ -1597,6 +1731,7 @@ class MapWidget(QWidget):
 
     def show_waypoint_markers(self, waypoints_json: str) -> None:
         """Render child waypoint markers on the map (called when Waypoints tab is activated)."""
+        self._waypoints_tab_open = True
         if not self._ready:
             return
         # Round-trip through json so only well-formed JSON reaches the page.
@@ -1604,6 +1739,9 @@ class MapWidget(QWidget):
 
     def clear_waypoint_markers(self) -> None:
         """Remove all waypoint markers (called when Waypoints tab is left)."""
+        self._waypoints_tab_open = False
+        if self._single_cache_wps is not None:
+            return   # #1328: the single cache view keeps its waypoints
         if self._ready:
             self._run_js("clearWaypointMarkers()")
 
@@ -1779,6 +1917,13 @@ class MapWidget(QWidget):
         for the next map load (#1087)."""
         from opensak.gui.settings import get_settings
         get_settings().map_clustering = on
+
+    def _on_single_cache_toggled(self, on: bool) -> None:
+        """The map button switched "selected cache only" (#1328): remember
+        it and let the main window reload the map for the current selection."""
+        from opensak.gui.settings import get_settings
+        get_settings().map_single_cache = on
+        self.single_cache_toggled.emit(on)
 
     def _on_shape_changed(self, shape_json: str) -> None:
         parsed = _parse_shape_json(shape_json)
