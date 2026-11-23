@@ -1082,6 +1082,15 @@ class MainWindow(QMainWindow):
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
         self._statusbar.showMessage(tr("status_ready"))
+        # #1361: always in view while Offline mode is on.
+        self._offline_label = QLabel(tr("offline_mode_title"))
+        self._offline_label.setToolTip(tr("status_offline_mode_tip"))
+        self._statusbar.addPermanentWidget(self._offline_label)
+        self._update_offline_indicator()
+
+    def _update_offline_indicator(self) -> None:
+        from opensak import net
+        self._offline_label.setVisible(net.offline_mode())
 
     # ── State save/restore ────────────────────────────────────────────────────
 
@@ -2531,6 +2540,7 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
         if dlg.exec():
+            self._update_offline_indicator()
             prev_cache = self._cache_table.selected_cache()
             self._reload_home_combo()
             # Issue #522: editing the active home point's own coordinates (or
@@ -4715,8 +4725,17 @@ class MainWindow(QMainWindow):
 
     def _check_update_manual(self) -> None:
         """Kald fra menuen — viser resultat uanset om der er opdatering."""
-        from opensak import __version__
+        from opensak import __version__, net
         from opensak.gui.settings import get_settings
+        # #1361: in Offline mode the check still works, but asks first.
+        if net.offline_mode():
+            answer = QMessageBox.question(
+                self, tr("offline_mode_title"), tr("offline_mode_update_check_confirm"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self._manual_update_worker = UpdateCheckWorker(
             __version__, parent=self,
             include_prereleases=get_settings().notify_about_betas,

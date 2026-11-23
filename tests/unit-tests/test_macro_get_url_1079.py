@@ -243,6 +243,19 @@ def test_macro_errors_name_the_url(server, public):
     assert host.asked == []
 
 
+def test_offline_mode_fails_at_once_without_asking(server, public):
+    # #1361: no question about the host, no request, an error pcall catches.
+    from opensak import net
+    net.set_offline_mode(True)
+    host = Host()
+    out = run(host, f'print(pcall(opensak.get_url, "{url(server, "/")}"))')
+    assert out[0].startswith("false") and "Offline mode is on" in out[0]
+    assert host.asked == []
+    # An invalid URL still gets its own error first.
+    with pytest.raises(MacroError, match="only http and https"):
+        run(host, 'opensak.get_url("ftp://x.example.com/")')
+
+
 def test_without_the_flag_get_url_is_not_registered(monkeypatch):
     monkeypatch.setattr(flags, "lua_macro_net", False)
     assert run(Host(), "print(opensak.get_url == nil)") == ["true"]
