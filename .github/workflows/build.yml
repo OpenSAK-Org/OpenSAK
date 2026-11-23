@@ -444,13 +444,17 @@ jobs:
 
             | Platform | File | Instructions |
             |----------|------|--------------|
-            | 🪟 Windows | `OpenSAK-${{ steps.version.outputs.VERSION }}-Windows.zip` | Unzip and double-click `OpenSAK.exe` |
+            | 🪟 Windows | `OpenSAK-${{ steps.version.outputs.VERSION }}-Windows.zip` | Portable: unzip and double-click `OpenSAK.exe` (see below) |
             | 🐧 Linux | `OpenSAK-${{ steps.version.outputs.VERSION }}-Linux-x86_64.AppImage` | See instructions below |
             | 🍎 macOS Apple Silicon (M1/M2/M3/M4) | `OpenSAK-${{ steps.version.outputs.VERSION }}-macOS-arm64.dmg` | Open and drag OpenSAK to Applications |
             | 🍎 macOS Intel | `OpenSAK-${{ steps.version.outputs.VERSION }}-macOS-x86_64.dmg` | Open and drag OpenSAK to Applications |
 
             > **Not sure which Mac you have?** Click the Apple menu () → "About This Mac".
             > If it says "Apple M1/M2/M3/M4" choose **arm64**. If it says "Intel" choose **x86_64**.
+
+            ### Windows (portable ZIP)
+
+            The ZIP is portable: there is no installer. Unzip the folder anywhere you like (it does not need to be in Program Files), and OpenSAK will not appear in Apps & Features. To uninstall, delete the folder. Your settings and databases are kept in `%APPDATA%\opensak` (or the folders you chose in the Welcome Wizard); **Help → OpenSAK File Locations…** shows them all. For a regular install with automatic updates, use the Microsoft Store version.
 
             ### Linux
 

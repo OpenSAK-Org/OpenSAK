@@ -87,8 +87,11 @@ clutter and are safe to delete if you want a clean system.
 - **Microsoft Store:** Windows **Settings → Apps → Installed apps**, find
   OpenSAK, and choose **Uninstall**. Windows removes the program. To find
   your data before uninstalling, use **Help → OpenSAK File Locations…**.
-- **Direct download:** delete the folder you unzipped OpenSAK into (and any
-  shortcut you pinned yourself — OpenSAK doesn't create these).
+- **Direct download:** the ZIP is portable, so there is no installer and
+  OpenSAK does not appear in **Apps & Features** or in uninstall tools. Delete
+  the folder you unzipped OpenSAK into (and any shortcut you pinned yourself —
+  OpenSAK doesn't create these). Your data is not in that folder, so deleting
+  it leaves your settings and databases in place (see *Find your data* below).
 
 ### 2. Find your data
 
