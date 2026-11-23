@@ -1,11 +1,11 @@
 """
 tile_disk_cache.py — disk cache for tiles fetched through the tile proxy (#747).
 
-Keyed layers (MapTiler, Thunderforest) are loaded through opensak://tiles/
-(web_assets.py) so their API key never reaches the page. Chromium does not
-cache custom-scheme responses, so without this cache those layers would lose
-the offline map of #1111. Layers whose tiles must not be kept on the device
-(MapLayer.offline is False) never come here.
+Every layer is loaded through opensak://tiles/ (web_assets.py, #1361), and
+Chromium does not cache custom-scheme responses: this cache is what keeps the
+map working offline (#1111), and what Offline mode serves from. Layers whose
+tiles must not be kept on the device (MapLayer.offline is False) never come
+here.
 
 Tiles are filed by layer id and z/x/y — never by the provider's URL, which
 holds the key:
@@ -14,12 +14,13 @@ holds the key:
 
 Each file is one JSON header line ({"mime", "expires", "stale_until"}) and
 the tile bytes. Freshness follows the provider's Cache-Control header the way
-Chromium's cache does for the other layers: a tile is served without asking
-the provider until max-age runs out, and after that only when the provider
-cannot be reached, for as long as stale-while-revalidate / stale-if-error
-allow. "no-store" is never written. The folder is kept under the same size
-cap as the HTTP cache (Settings → Map → tile cache); the tiles used least
-recently go first.
+Chromium's cache does: a tile is served without asking the provider until
+max-age runs out, and after that only when the provider cannot be reached
+(or Offline mode is on), for as long as stale-while-revalidate /
+stale-if-error allow. "no-store" is never written. The folder is kept under
+the size cap set in Settings → Map → tile cache; the tiles used least
+recently go first. The cache keeps count of the bytes it holds, so the
+folder is only walked once it may be over the cap.
 """
 
 from __future__ import annotations
@@ -79,6 +80,8 @@ class TileDiskCache:
         self.root = root
         self.max_bytes = max_bytes
         self._writes = 0
+        # Bytes in the folder, once counted (None: not counted yet).
+        self._size: int | None = None
 
     @property
     def enabled(self) -> bool:
@@ -104,6 +107,8 @@ class TileDiskCache:
         now = time.time() if now is None else now
         if now > stale_until:
             path.unlink(missing_ok=True)
+            if self._size is not None:
+                self._size -= len(raw)
             return None
         try:
             path.touch()   # least recently used goes first when pruning
@@ -122,14 +127,18 @@ class TileDiskCache:
         expires = now + policy.max_age
         meta = {"mime": mime, "expires": expires, "stale_until": expires + policy.stale}
         path = self._path(layer_id, z, x, y)
+        raw = json.dumps(meta).encode() + b"\n" + data
         try:
+            old = path.stat().st_size if path.is_file() else 0
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")
-            tmp.write_bytes(json.dumps(meta).encode() + b"\n" + data)
+            tmp.write_bytes(raw)
             tmp.replace(path)
         except OSError as exc:
             log.debug("tile not cached: %s", exc)
             return
+        if self._size is not None:
+            self._size += len(raw) - old
         self._writes += 1
         if self._writes % _PRUNE_EVERY == 0:
             self.prune()
@@ -139,8 +148,11 @@ class TileDiskCache:
 
     def prune(self) -> None:
         """Remove the least recently used tiles until under the cap."""
+        if self._size is not None and self._size <= self.max_bytes:
+            return
         files = self._files()
         total = sum(size for _, size, _ in files)
+        self._size = total
         if total <= self.max_bytes:
             return
         target = self.max_bytes * _PRUNE_TO
@@ -149,9 +161,11 @@ class TileDiskCache:
             total -= size
             if total <= target:
                 break
+        self._size = total
 
     def clear(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
+        self._size = 0
 
     def _files(self) -> list[tuple[Path, int, float]]:
         out: list[tuple[Path, int, float]] = []

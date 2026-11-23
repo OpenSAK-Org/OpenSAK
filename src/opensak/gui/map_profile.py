@@ -9,20 +9,21 @@ headers of tile.openstreetmap.org (max-age ≈ 1 day, stale-while-revalidate
 was last loaded. Only tiles the user actually viewed are cached — no
 prefetching, as the OSM tile usage policy requires.
 
-#747: the other base maps (map_layers.py) share this cache, each for as long
-as its provider's cache headers allow. Layers whose provider does not allow
-tiles on the device are fetched through opensak://tiles/ (web_assets.py),
-which Chromium never writes to this cache. So are the layers that need an API
-key, so the key stays out of the page; when their tiles may be kept, the
-proxy caches them in <data dir>/map_cache/proxy_tiles (tile_disk_cache.py),
-under the same size cap. cache_size_bytes() and clear_cache() cover both.
+#1361: tiles no longer go through this HTTP cache. Every layer is fetched
+through the tile proxy, opensak://tiles/ (web_assets.py), which keeps the
+tiles a provider allows in <data dir>/map_cache/proxy_tiles
+(tile_disk_cache.py), under the same size cap, and serves from there only
+in Offline mode. The request interceptor below can block a request but not
+send it to Chromium's cache instead, so a cache Chromium kept could not
+show offline-only tiles. The HTTP cache stays for whatever else the page
+loads; cache_size_bytes() and clear_cache() cover both.
 
 Why one shared profile: two profiles with the same storage name in one
 process hang QtWebEngine (both open the same on-disk cache), and the main
 map, the split-screen map, the pop-out and the draw dialog can all be open
-at once. The shared profile also carries the TileInterceptor (OSM
-Referer) and the opensak:// handler for the bundled Leaflet assets
-(web_assets.py).
+at once. The shared profile also carries the TileInterceptor (no http(s)
+in Offline mode) and the opensak:// handler for the bundled Leaflet assets
+and the tile proxy (web_assets.py).
 
 Teardown order matters (see MapWidget._cleanup_webengine): a profile must
 outlive its pages. Each MapWidget acquire()s the profile and release()s it
@@ -56,12 +57,14 @@ _quitting = False
 
 
 class TileInterceptor(QWebEngineUrlRequestInterceptor):
-    """Sets the Referer header the OSM tile servers ask for."""
+    """Blocks every http(s) request of the map pages while Offline mode is
+    on (#1361). Tiles come through the tile proxy, so the map has none to
+    make; this keeps it that way for anything else a page might load."""
 
     def interceptRequest(self, info) -> None:
-        url = info.requestUrl().toString()
-        if "tile.openstreetmap.org" in url:
-            info.setHttpHeader(b"Referer", b"https://www.openstreetmap.org/")
+        from opensak import net
+        if info.requestUrl().scheme() in ("http", "https") and net.offline_mode():
+            info.block(True)
 
 
 def map_cache_dir() -> Path:

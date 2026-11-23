@@ -35,6 +35,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, List
 from enum import IntEnum
+from opensak import net
 from opensak.net import SSL_CONTEXT
 from opensak.utils.types import GcCode, LogType
 from opensak.utils.utils import validate_gc_code
@@ -183,6 +184,7 @@ def start_oauth_flow() -> Optional[dict]:
 
     Raises:
         RuntimeError: Hvis flow fejler med en specifik fejl.
+        opensak.net.OfflineModeError: Offline mode is on (#1361).
     """
     if not GC_CLIENT_ID:
         logger.warning(
@@ -190,6 +192,7 @@ def start_oauth_flow() -> Optional[dict]:
             "Fill in GC_CLIENT_ID in api/geocaching.py once API access is approved."
         )
         return None
+    net.ensure_online()
 
     import webbrowser
 
@@ -337,7 +340,11 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
 
     Returns:
         Parsed JSON response som dict, eller None ved fejl.
+
+    Raises opensak.net.OfflineModeError while Offline mode is on (#1361),
+    before the token is refreshed or anything is sent.
     """
+    net.ensure_online()
     access_token = get_valid_token()
     if not access_token:
         logger.warning("Not logged in — cannot call the API.")

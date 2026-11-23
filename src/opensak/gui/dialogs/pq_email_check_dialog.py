@@ -46,6 +46,7 @@ class PQEmailCheckWorker(QThread):
             ImapAuthError, ImapCertificateError, ImapNetworkError,
         )
         from opensak.email.service import scan_and_import
+        from opensak.net import OfflineModeError
         try:
             result = scan_and_import(
                 self._config, self._password,
@@ -53,6 +54,8 @@ class PQEmailCheckWorker(QThread):
                 only_unseen=self._only_unseen,
             )
             self.result_ready.emit(result)
+        except OfflineModeError as exc:   # #1361
+            self.error.emit("offline", str(exc))
         except ImapAuthError as exc:
             self.error.emit("auth", str(exc))
         except ImapCertificateError as exc:   # #902 — før ImapNetworkError (subklasse)
@@ -216,7 +219,9 @@ class PQEmailCheckDialog(WorkerGuardMixin, QDialog):
             self.import_completed.emit()
 
     def _on_error(self, kind: str, detail: str) -> None:
-        if kind == "auth":
+        if kind == "offline":
+            msg = "✗ " + detail
+        elif kind == "auth":
             msg = tr("pq_check_error_auth", detail=detail)
         elif kind == "certificate":
             msg = tr("pq_check_error_certificate", detail=detail)

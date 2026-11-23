@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineUrlRequestInterceptor,
+)
 
 import logging
 
@@ -91,6 +93,39 @@ def _open_http_link(url: QUrl) -> None:
     """
     if url.scheme() in ("http", "https"):
         webbrowser.open(url.toString())
+
+
+# #1361: what in a description makes the browser fetch something from the web
+# (images, backgrounds, style sheets) — not links, which only open on a click.
+_REMOTE_CONTENT_RE = re.compile(
+    r"""(?:\b(?:src|srcset|background|poster|data)\s*=\s*["']?"""
+    r"""|url\(\s*["']?"""
+    r"""|<link\b[^>]*\bhref\s*=\s*["']?)"""
+    r"""\s*(?:https?:)?//""",
+    re.IGNORECASE,
+)
+
+
+def has_remote_content(body: str) -> bool:
+    """True if the description *body* loads anything from the web."""
+    return _REMOTE_CONTENT_RE.search(body) is not None
+
+
+class _DescInterceptor(QWebEngineUrlRequestInterceptor):
+    """#1361: the description's own request interceptor. While Offline mode is
+    on it blocks every http(s) request — the images on the cache owner's
+    image hosts — unless the user clicked Load images for this cache
+    (*allow_remote*)."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.allow_remote = False
+
+    def interceptRequest(self, info) -> None:
+        from opensak import net
+        if (info.requestUrl().scheme() in ("http", "https")
+                and not self.allow_remote and net.offline_mode()):
+            info.block(True)
 
 
 class _DescWebPage(QWebEnginePage):
@@ -335,12 +370,20 @@ class CacheDetailPanel(QWidget):
         # så ingen Chromium startes — setHtml()-API'et er identisk.
         from opensak.gui._headless import webengine_disabled
         self._desc_view: QWebEngineView | QTextBrowser
+        self._desc_profile: QWebEngineProfile | None = None
+        self._desc_interceptor: _DescInterceptor | None = None
         if webengine_disabled():
             self._desc_view = QTextBrowser()
             self._desc_page = None
         else:
             self._desc_view = QWebEngineView()
-            self._desc_page = _DescWebPage()
+            # #1361: an off-the-record profile of its own (like the default
+            # profile it replaces), so the description has a request
+            # interceptor that the map's profile doesn't share.
+            self._desc_profile = QWebEngineProfile()
+            self._desc_interceptor = _DescInterceptor(self._desc_profile)
+            self._desc_profile.setUrlRequestInterceptor(self._desc_interceptor)
+            self._desc_page = _DescWebPage(self._desc_profile)
             self._desc_view.setPage(self._desc_page)
 
             # Issue #742 — forsvar i dybden: cache-beskrivelser er tredjeparts-HTML
@@ -356,7 +399,29 @@ class CacheDetailPanel(QWidget):
             app = QApplication.instance()
             if app is not None:
                 app.aboutToQuit.connect(self._cleanup_webengine)
-        self._tabs.addTab(self._desc_view, tr("detail_tab_desc"))
+        # #1361: in Offline mode the description's images are not loaded
+        # until the user asks for them, for one cache at a time.
+        desc_widget = QWidget()
+        desc_layout = QVBoxLayout(desc_widget)
+        desc_layout.setContentsMargins(0, 0, 0, 0)
+        desc_layout.setSpacing(4)
+        self._images_bar = QWidget()
+        images_row = QHBoxLayout(self._images_bar)
+        images_row.setContentsMargins(4, 4, 4, 0)
+        self._images_lbl = QLabel(tr("detail_images_blocked"))
+        self._images_lbl.setStyleSheet(hint_style())
+        self._images_lbl.setWordWrap(True)
+        images_row.addWidget(self._images_lbl, 1)
+        self._load_images_btn = QPushButton(tr("detail_load_images"))
+        self._load_images_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._load_images_btn.clicked.connect(self._load_images)
+        images_row.addWidget(self._load_images_btn)
+        self._images_bar.setVisible(False)
+        desc_layout.addWidget(self._images_bar)
+        desc_layout.addWidget(self._desc_view, 1)
+        self._desc_body = ""
+        self._images_allowed_for: str | None = None
+        self._tabs.addTab(desc_widget, tr("detail_tab_desc"))
 
         hint_widget = QWidget()
         hint_layout = QVBoxLayout(hint_widget)
@@ -643,6 +708,9 @@ class CacheDetailPanel(QWidget):
         self._coords_lbl.setText("—")
         self._placed_lbl.setText("")
         self._desc_view.setHtml("")
+        self._desc_body = ""
+        self._images_allowed_for = None
+        self._images_bar.setVisible(False)
         self._hint_browser.setPlainText("")
         self._log_browser.setHtml("")
         self._wp_browser.setPlainText("")
@@ -735,28 +803,28 @@ class CacheDetailPanel(QWidget):
         # Description — renderes via QWebEngineView så billeder og CJK-fonte virker
         if cache.long_description:
             if cache.long_desc_html:
-                self._desc_view.setHtml(_wrap_html(cache.long_description))
+                self._set_description(cache.long_description)
             else:
                 # Issue #803: plain-text descriptions must be HTML-escaped
                 # before being embedded in <pre> — an unescaped stray '<',
                 # '>' or '&' (e.g. "N < 5 caches", "R&D") is otherwise
                 # misinterpreted as markup instead of being shown literally.
-                self._desc_view.setHtml(_wrap_html(
+                self._set_description(
                     f"<pre style='white-space:pre-wrap;font-family:sans-serif'>"
                     f"{html.escape(cache.long_description)}</pre>"
-                ))
+                )
         elif cache.short_description:
             if cache.short_desc_html:
-                self._desc_view.setHtml(_wrap_html(cache.short_description))
+                self._set_description(cache.short_description)
             else:
-                self._desc_view.setHtml(_wrap_html(
+                self._set_description(
                     f"<pre style='white-space:pre-wrap;font-family:sans-serif'>"
                     f"{html.escape(cache.short_description)}</pre>"
-                ))
+                )
         else:
-            self._desc_view.setHtml(_wrap_html(
+            self._set_description(
                 f"<p style='color:{hint_text_color()}'>{tr('detail_no_description')}</p>"
-            ))
+            )
 
         # Hint — issue #329: geocaching.com leverer hints i klartekst i
         # moderne PQ'er, men ældre GSAK-eksporter kan stadig indeholde ægte
@@ -999,6 +1067,28 @@ class CacheDetailPanel(QWidget):
         ]
         self.waypoints_tab_shown.emit(json.dumps(data))
 
+    def _set_description(self, body: str) -> None:
+        """Show *body* in the Description tab. #1361: in Offline mode its
+        remote content stays blocked, and the Load images bar is shown,
+        unless the user already loaded the images of this cache."""
+        from opensak import net
+        if self._images_allowed_for != self._current_gc_code:
+            self._images_allowed_for = None
+        allowed = self._images_allowed_for is not None
+        if self._desc_interceptor is not None:
+            self._desc_interceptor.allow_remote = allowed
+        self._desc_body = body
+        self._images_bar.setVisible(
+            net.offline_mode() and not allowed and has_remote_content(body))
+        self._desc_view.setHtml(_wrap_html(body))
+
+    def _load_images(self) -> None:
+        """Load images: show this cache's description with its images."""
+        if self._current_gc_code is None:
+            return
+        self._images_allowed_for = self._current_gc_code
+        self._set_description(self._desc_body)
+
     def _cleanup_webengine(self) -> None:
         """Slet QWebEnginePage før Qt rydder defaultProfile op.
         Kaldes via QApplication.aboutToQuit signalet — skal køre BEFORE
@@ -1008,6 +1098,9 @@ class CacheDetailPanel(QWidget):
         try:
             self._desc_view.setPage(None)  # type: ignore[arg-type]
             self._desc_page.deleteLater()
+            # #1361: after the page — deleteLater() events run in order.
+            if self._desc_profile is not None:
+                self._desc_profile.deleteLater()
         except RuntimeError:
             # Widget er allerede slettet af Qt — intet at gøre
             pass

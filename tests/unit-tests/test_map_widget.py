@@ -60,32 +60,36 @@ def fake_settings(monkeypatch):
 # ── TileInterceptor ───────────────────────────────────────────────────────────
 
 class TestTileInterceptor:
-    def test_sets_referer_for_osm(self):
-        captured = []
+    # #1361: tiles come through the proxy; in Offline mode the map pages may
+    # make no http(s) request at all.
+
+    @staticmethod
+    def _blocked(url: str) -> bool:
+        blocked: list = []
 
         class Info:
             def requestUrl(self):
-                return SimpleNamespace(
-                    toString=lambda: "https://tile.openstreetmap.org/1/2/3.png")
+                return SimpleNamespace(scheme=lambda: url.split(":", 1)[0])
+
+            def block(self, on):
+                blocked.append(on)
 
             def setHttpHeader(self, k, v):
-                captured.append((k, v))
+                raise AssertionError("no header may be set")
 
         TileInterceptor().interceptRequest(Info())
-        assert captured == [(b"Referer", b"https://www.openstreetmap.org/")]
+        return blocked == [True]
 
-    def test_ignores_other_urls(self):
-        captured = []
+    def test_nothing_blocked_online(self):
+        assert not self._blocked("https://tile.openstreetmap.org/1/2/3.png")
 
-        class Info:
-            def requestUrl(self):
-                return SimpleNamespace(toString=lambda: "https://example.com/x.png")
-
-            def setHttpHeader(self, k, v):
-                captured.append((k, v))
-
-        TileInterceptor().interceptRequest(Info())
-        assert captured == []
+    def test_http_blocked_in_offline_mode(self):
+        from opensak import net
+        net.set_offline_mode(True)
+        assert self._blocked("https://tile.openstreetmap.org/1/2/3.png")
+        assert self._blocked("http://example.com/x.png")
+        assert not self._blocked("opensak://tiles/osm/1/0/0")
+        assert not self._blocked("qrc:///map.html")
 
 
 # ── module helpers ────────────────────────────────────────────────────────────

@@ -16,17 +16,19 @@ The scheme must be registered before the QApplication is created
 (register_scheme(), called from app.main()); the handler is installed on the
 shared map profile (install_handler(), called from map_profile.py).
 
-#747: the same scheme also proxies the tiles of map layers whose provider
-does not allow keeping tiles on the device (MapLayer.offline is False), and
-of every layer that needs an API key (MapLayer.proxied):
+#747, #1361: the same scheme proxies the tiles of every map layer:
 
     opensak://tiles/esri_aerial/12/2145/1434  →  the provider's tile URL
 
-The API key is added here, so it never appears in the page, in Leaflet's tile
-URLs or in Chromium's cache. Chromium never writes custom-scheme responses to
-its HTTP cache, and the QNetworkAccessManager used here has no cache, so
-offline=False tiles stay off the disk. Keyed layers that may be kept offline
-are cached by TileDiskCache (tile_disk_cache.py), filed by layer/z/x/y.
+The API key is added here, so it never appears in the page or in Leaflet's
+tile URLs. Chromium never writes custom-scheme responses to its HTTP cache,
+and the QNetworkAccessManager used here has no cache: the tiles a layer may
+keep (MapLayer.offline) are cached by TileDiskCache (tile_disk_cache.py),
+filed by layer/z/x/y, and offline=False tiles stay off the disk.
+
+With Offline mode on (#1361) the proxy serves tiles from that cache only
+and never goes online; a tile that isn't cached fails, and the map shows
+its offline notice.
 """
 
 from __future__ import annotations
@@ -56,6 +58,12 @@ WEB_DIR = Path(__file__).parent.parent / "assets" / "web"
 if TYPE_CHECKING:
     from opensak.gui.map_layers import MapLayer
     from opensak.gui.tile_disk_cache import TileDiskCache
+
+# The Referer some tile servers ask for (the OSM tile usage policy). Set by
+# the map profile's request interceptor while Chromium fetched OSM itself.
+_REFERERS = {
+    "tile.openstreetmap.org": b"https://www.openstreetmap.org/",
+}
 
 _MIME_TYPES = {
     ".js": b"text/javascript",
@@ -103,16 +111,13 @@ def resolve_asset(host: str, path: str) -> Path | None:
 
 def parse_tile_path(path: str) -> tuple[MapLayer, int, int, int] | None:
     """Split an opensak://tiles/ path ("/<layer>/<z>/<x>/<y>") into the
-    layer and tile numbers, or None.
-
-    Only proxied layers (MapLayer.proxied) are accepted — every other layer
-    loads straight from its provider."""
+    layer and tile numbers, or None."""
     from opensak.gui.map_layers import get_layer
     parts = path.strip("/").split("/")
     if len(parts) != 4 or not all(p.isdigit() for p in parts[1:]):
         return None
     layer = get_layer(parts[0])
-    if layer is None or not layer.proxied:
+    if layer is None:
         return None
     z, x, y = (int(p) for p in parts[1:])
     if z > 30 or x >= 2 ** z or y >= 2 ** z:
@@ -184,14 +189,22 @@ class AssetSchemeHandler(QWebEngineUrlSchemeHandler):
         # Only layers whose tiles may be kept use the disk cache (#1111).
         cache = self._tile_cache() if layer.offline else None
         cached = cache.get(layer.id, z, x, y) if cache is not None else None
-        if cached is not None and cached.fresh:
+        from opensak import net
+        if cached is not None and (cached.fresh or net.offline_mode()):
             _reply_bytes(job, cached.mime.encode(), cached.data)
+            return
+        if net.offline_mode():
+            # #1361: cached tiles only — the map shows its offline notice.
+            job.fail(QWebEngineUrlRequestJob.Error.RequestFailed)
             return
         if self._nam is None:
             # No cache set on the manager: nothing it fetches is stored.
             self._nam = QNetworkAccessManager(self)
         request = QNetworkRequest(QUrl(upstream))
         request.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader, _user_agent())
+        referer = _REFERERS.get(QUrl(upstream).host())
+        if referer:
+            request.setRawHeader(b"Referer", referer)
         reply = self._nam.get(request)
         # The page may cancel the tile (panned away) before the reply ends:
         # the job is then deleted, and the reply is aborted with it.

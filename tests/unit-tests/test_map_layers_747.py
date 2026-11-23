@@ -1,9 +1,9 @@
 # tests/unit-tests/test_map_layers_747.py — #747: more base maps. Every map
 # can be switched on/off in Settings → Map, keyed maps appear only with the
 # user's API key, the map offers the switched-on ones in a layer switcher and
-# remembers the choice, and maps whose provider forbids keeping tiles on the
-# device are fetched through opensak://tiles/ (never the disk cache). So are
-# all keyed maps, so the API key never reaches the page.
+# remembers the choice. Every map is fetched through opensak://tiles/ (#1361);
+# maps whose provider forbids keeping tiles on the device never reach the
+# disk cache, and the API key of a keyed map never reaches the page.
 
 from __future__ import annotations
 
@@ -79,9 +79,13 @@ class TestAvailableLayers:
 
 
 class TestOfflineRouting:
-    def test_keyless_layer_loads_from_provider(self):
-        defs = layer_js_defs([get_layer("opentopomap")])
-        assert defs[0]["url"] == get_layer("opentopomap").url
+    @pytest.mark.parametrize("layer", LAYERS, ids=lambda layer: layer.id)
+    def test_every_layer_goes_through_proxy(self, layer):
+        # #1361: Chromium never fetches a tile itself, so Offline mode can
+        # serve cached tiles only, and keyless layers are no exception.
+        defs = layer_js_defs([layer])
+        assert defs[0]["url"] == f"{TILE_BASE}{layer.id}/{{z}}/{{x}}/{{y}}"
+        assert "http" not in defs[0]["url"]
 
     def test_no_offline_layer_goes_through_proxy(self):
         # Esri allows caching only while connected: its tiles must not reach
@@ -94,7 +98,6 @@ class TestOfflineRouting:
     def test_keyed_layer_goes_through_proxy(self, layer):
         # The key is added by the proxy: never in the page, Leaflet's tile
         # URLs or Chromium's cache — also for layers that may be cached.
-        assert layer.proxied
         defs = layer_js_defs([layer])
         assert defs[0]["url"] == f"{TILE_BASE}{layer.id}/{{z}}/{{x}}/{{y}}"
         assert "{key}" not in json.dumps(defs)
@@ -112,6 +115,10 @@ class TestOfflineRouting:
         assert len(_layers_in_html(html)) == len(LAYERS)
         assert "SECRET" not in html
 
+    def test_resolve_keyless_tile(self):
+        assert resolve_tile("/osm/12/2145/1434") == (
+            "https://tile.openstreetmap.org/12/2145/1434.png")
+
     def test_resolve_cacheable_keyed_tile(self):
         get_settings().map_api_keys = {"maptiler": "MYKEY"}
         assert resolve_tile("/maptiler_aerial/3/1/2") == (
@@ -127,7 +134,6 @@ class TestOfflineRouting:
     @pytest.mark.parametrize("path", [
         "/esri_aerial/12/2145/1434",   # no key entered
         "/maptiler_aerial/3/1/2",      # no key entered
-        "/osm/12/2145/1434",           # keyless cacheable layer: never proxied
         "/nope/12/2145/1434",          # unknown layer
         "/esri_aerial/12/2145",        # too short
         "/esri_aerial/12/x/1434",      # not a number
@@ -210,7 +216,7 @@ class TestMapPage:
         html = MapWidget._render_map_html(55.0, 10.0)
         layers = _layers_in_html(html)
         assert [d["id"] for d in layers] == ["osm"]
-        assert layers[0]["url"] == "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        assert layers[0]["url"] == TILE_BASE + "osm/{z}/{x}/{y}"   # #1361
         assert "MAP_BASE_LAYERS" not in html and "MAP_ACTIVE_BASE_LAYER" not in html
 
     def test_switched_on_layers_and_choice_reach_the_page(self):

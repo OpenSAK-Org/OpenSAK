@@ -80,9 +80,12 @@ class _ImapTestWorker(QThread):
         from opensak.email.connection import (
             ImapAuthError, ImapCertificateError, ImapNetworkError, check_connection,
         )
+        from opensak.net import OfflineModeError
         try:
             check_connection(self._config, self._password)
             self.success.emit()
+        except OfflineModeError as exc:   # #1361
+            self.error.emit("offline", str(exc))
         except ImapAuthError as exc:
             self.error.emit("auth", str(exc))
         except ImapCertificateError as exc:   # #902 — før ImapNetworkError (subklasse)
@@ -401,6 +404,17 @@ class SettingsDialog(QDialog):
         user_layout.addLayout(home_loc_btn_row)
 
         layout.addWidget(user_group)
+
+        # ── Offline mode (#1361) ──────────────────────────────────────────────
+        offline_group = QGroupBox(tr("settings_group_offline"))
+        offline_layout = QVBoxLayout(offline_group)
+        self._offline_mode_cb = QCheckBox(tr("settings_offline_mode_label"))
+        offline_layout.addWidget(self._offline_mode_cb)
+        self._offline_mode_hint = QLabel(tr("settings_offline_mode_hint"))
+        self._offline_mode_hint.setStyleSheet(hint_style())
+        self._offline_mode_hint.setWordWrap(True)
+        offline_layout.addWidget(self._offline_mode_hint)
+        layout.addWidget(offline_group)
 
         layout.addStretch()
 
@@ -1576,7 +1590,9 @@ class SettingsDialog(QDialog):
 
     def _on_pq_email_test_error(self, kind: str, detail: str) -> None:
         self._pq_email_test_btn.setEnabled(True)
-        if kind == "auth":
+        if kind == "offline":
+            msg = "✗ " + detail
+        elif kind == "auth":
             msg = tr("pq_email_test_error_auth", detail=detail)
         elif kind == "certificate":
             msg = tr("pq_email_test_error_certificate", detail=detail)
@@ -1688,6 +1704,12 @@ class SettingsDialog(QDialog):
             self._gc_login_btn.setEnabled(False)
             self._gc_logout_btn.setEnabled(True)
             self._gc_refresh_btn.setEnabled(True)
+            # #1361: opening Settings is no reason to go online in Offline mode.
+            from opensak import net
+            if net.offline_mode():
+                self._gc_status_label.setText(tr("gc_status_offline_mode"))
+                self._gc_status_label.setStyleSheet(hint_style())
+                return
             self._gc_status_label.setText(tr("gc_status_fetching"))
             self._on_gc_refresh_profile()
         else:
@@ -1986,6 +2008,15 @@ class SettingsDialog(QDialog):
         self._notify_betas_cb.setChecked(s.notify_about_betas)
         from opensak.macro import repository as macro_repo
         self._macro_update_cb.setChecked(macro_repo.check_at_startup())
+        # #1361: OPENSAK_OFFLINE=1 overrides the setting for this session.
+        from opensak import net
+        if net.env_offline_mode():
+            self._offline_mode_cb.setChecked(True)
+            self._offline_mode_cb.setEnabled(False)
+            self._offline_mode_hint.setText(
+                tr("settings_offline_mode_env_hint", name=net.OFFLINE_ENV))
+        else:
+            self._offline_mode_cb.setChecked(s.offline_mode)
         from opensak.backup import exit_state
         from opensak.backup.backupset import get_compress, get_keep_auto
         idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
@@ -2102,6 +2133,8 @@ class SettingsDialog(QDialog):
                 apply_theme(cast(QApplication, app), new_theme)
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
+        if self._offline_mode_cb.isEnabled():   # not while OPENSAK_OFFLINE decides
+            s.offline_mode = self._offline_mode_cb.isChecked()
         from opensak.macro import repository as macro_repo
         macro_repo.set_check_at_startup(self._macro_update_cb.isChecked())
         s.distance_method = self._distance_method_combo.currentData()

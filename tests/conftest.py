@@ -30,11 +30,13 @@ def _clear_premigration_notices():
 
 
 @pytest.fixture(autouse=True)
-def _reset_offline_flag():
+def _reset_offline_flag(monkeypatch):
     """#1111: a test whose fake urlopen fails with a connectivity error sets
     the session-wide "offline detected" flag; reset it so later tests'
-    automatic requests are not skipped."""
+    automatic requests are not skipped. #1361: the same for Offline mode,
+    and an OPENSAK_OFFLINE set in the developer's shell is ignored."""
     from opensak import net
+    monkeypatch.delenv(net.OFFLINE_ENV, raising=False)
     net.reset_offline()
     yield
     net.reset_offline()
