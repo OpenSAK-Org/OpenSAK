@@ -4,12 +4,22 @@ KML export for Google Maps / Google My Maps.
 Produces a two-layer KML file:
   Layer 1 – Geocaches  (colour-coded by cache type)
   Layer 2 – Custom waypoints attached to those caches
+
+A plain KML links Google's paddle icons on maps.google.com, so a viewer
+needs the internet to show them. #1361: with kmz=True the export is a KMZ
+instead — a zip holding the KML (doc.kml, first, as viewers expect) and its
+icons under files/ — so the icons show in a viewer used offline. The icons
+are OpenSAK's own cache-type and waypoint icons (gui/icon_provider.py,
+including the user's own icons), rendered to PNG: Google's icons are not
+ours to copy, and most KML viewers don't show SVG icons.
 """
 
 from __future__ import annotations
 
+import io
 import shutil
 import tempfile
+import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import IO, Iterable, Optional, Sized
@@ -25,43 +35,105 @@ from opensak.lang import tr
 # ---------------------------------------------------------------------------
 
 _TYPE_ICONS: dict[str, str] = {
-    "Traditional Cache":      "http://maps.google.com/mapfiles/kml/paddle/grn-circle.png",
-    "Multi-cache":            "http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png",
-    "Mystery Cache":          "http://maps.google.com/mapfiles/kml/paddle/purple-circle.png",
-    "Unknown Cache":          "http://maps.google.com/mapfiles/kml/paddle/purple-circle.png",
-    "EarthCache":             "http://maps.google.com/mapfiles/kml/paddle/grn-diamond.png",
-    "Virtual Cache":          "http://maps.google.com/mapfiles/kml/paddle/blu-diamond.png",
-    "Letterbox Hybrid":       "http://maps.google.com/mapfiles/kml/paddle/org-circle.png",
-    "Wherigo Cache":          "http://maps.google.com/mapfiles/kml/paddle/ltblu-circle.png",
-    "Event Cache":            "http://maps.google.com/mapfiles/kml/paddle/red-circle.png",
-    "Cache In Trash Out Event": "http://maps.google.com/mapfiles/kml/paddle/red-circle.png",
-    "Mega-Event Cache":       "http://maps.google.com/mapfiles/kml/paddle/red-stars.png",
-    "Giga-Event Cache":       "http://maps.google.com/mapfiles/kml/paddle/red-stars.png",
+    "Traditional Cache":      "https://maps.google.com/mapfiles/kml/paddle/grn-circle.png",
+    "Multi-cache":            "https://maps.google.com/mapfiles/kml/paddle/ylw-circle.png",
+    "Mystery Cache":          "https://maps.google.com/mapfiles/kml/paddle/purple-circle.png",
+    "Unknown Cache":          "https://maps.google.com/mapfiles/kml/paddle/purple-circle.png",
+    "EarthCache":             "https://maps.google.com/mapfiles/kml/paddle/grn-diamond.png",
+    "Virtual Cache":          "https://maps.google.com/mapfiles/kml/paddle/blu-diamond.png",
+    "Letterbox Hybrid":       "https://maps.google.com/mapfiles/kml/paddle/org-circle.png",
+    "Wherigo Cache":          "https://maps.google.com/mapfiles/kml/paddle/ltblu-circle.png",
+    "Event Cache":            "https://maps.google.com/mapfiles/kml/paddle/red-circle.png",
+    "Cache In Trash Out Event": "https://maps.google.com/mapfiles/kml/paddle/red-circle.png",
+    "Mega-Event Cache":       "https://maps.google.com/mapfiles/kml/paddle/red-stars.png",
+    "Giga-Event Cache":       "https://maps.google.com/mapfiles/kml/paddle/red-stars.png",
 }
-_DEFAULT_ICON  = "http://maps.google.com/mapfiles/kml/paddle/wht-circle.png"
-_FOUND_ICON    = "http://maps.google.com/mapfiles/kml/paddle/go.png"
-_WPT_ICON      = "http://maps.google.com/mapfiles/kml/shapes/placemark_square.png"
+_DEFAULT_ICON  = "https://maps.google.com/mapfiles/kml/paddle/wht-circle.png"
+_FOUND_ICON    = "https://maps.google.com/mapfiles/kml/paddle/go.png"
+_WPT_ICON      = "https://maps.google.com/mapfiles/kml/shapes/placemark_square.png"
 
 # Waypoint type → icon  (covers all types from CUSTOM_WP_TYPES + KNOWN_PREFIXES)
 _WPT_TYPE_ICONS: dict[str, str] = {
-    "Parking Area":           "http://maps.google.com/mapfiles/kml/shapes/parking_lot.png",
-    "Parking":                "http://maps.google.com/mapfiles/kml/shapes/parking_lot.png",
-    "Trailhead":              "http://maps.google.com/mapfiles/kml/shapes/hiker.png",
-    "Final Location":         "http://maps.google.com/mapfiles/kml/paddle/red-stars.png",
-    "Reference Point":        "http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png",
-    "Stages of a Multicache": "http://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
-    "Stage":                  "http://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
-    "Stage Point":            "http://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
-    "Physical Stage":         "http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png",
-    "Virtual Stage":          "http://maps.google.com/mapfiles/kml/paddle/blu-circle.png",
-    "Question to Answer":     "http://maps.google.com/mapfiles/kml/shapes/question.png",
-    "Hotel/POI":              "http://maps.google.com/mapfiles/kml/shapes/lodging.png",
-    "Waypoint":               "http://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
-    "Custom":                 "http://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
-    "Additional Waypoint":    "http://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
-    "Listed Coordinates":     "http://maps.google.com/mapfiles/kml/shapes/target.png",
-    "Point":                  "http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png",
+    "Parking Area":           "https://maps.google.com/mapfiles/kml/shapes/parking_lot.png",
+    "Parking":                "https://maps.google.com/mapfiles/kml/shapes/parking_lot.png",
+    "Trailhead":              "https://maps.google.com/mapfiles/kml/shapes/hiker.png",
+    "Final Location":         "https://maps.google.com/mapfiles/kml/paddle/red-stars.png",
+    "Reference Point":        "https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png",
+    "Stages of a Multicache": "https://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
+    "Stage":                  "https://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
+    "Stage Point":            "https://maps.google.com/mapfiles/kml/paddle/ylw-blank.png",
+    "Physical Stage":         "https://maps.google.com/mapfiles/kml/paddle/ylw-circle.png",
+    "Virtual Stage":          "https://maps.google.com/mapfiles/kml/paddle/blu-circle.png",
+    "Question to Answer":     "https://maps.google.com/mapfiles/kml/shapes/question.png",
+    "Hotel/POI":              "https://maps.google.com/mapfiles/kml/shapes/lodging.png",
+    "Waypoint":               "https://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
+    "Custom":                 "https://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
+    "Additional Waypoint":    "https://maps.google.com/mapfiles/kml/shapes/placemark_square.png",
+    "Listed Coordinates":     "https://maps.google.com/mapfiles/kml/shapes/target.png",
+    "Point":                  "https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png",
 }
+
+
+# ---------------------------------------------------------------------------
+# KMZ icons (#1361): OpenSAK's own, rendered to PNG inside the file
+# ---------------------------------------------------------------------------
+
+# Pixel size of the rendered icons (viewers scale them down).
+KMZ_ICON_SIZE = 64
+# Folder inside the KMZ for the icons (the usual name).
+KMZ_FILES_DIR = "files"
+
+# Waypoint types _WPT_TYPE_ICONS lists whose names don't match one of
+# OpenSAK's waypoint icons; every other unknown type gets "waypoint".
+_KMZ_WPT_KEYS: dict[str, str] = {
+    "Parking":                "parking_area",
+    "Stages of a Multicache": "stage",
+    "Stage Point":            "stage",
+    "Physical Stage":         "stage",
+    "Virtual Stage":          "stage",
+    "Listed Coordinates":     "reference_point",
+}
+
+
+def _kmz_cache_key(cache_type: str | None) -> str:
+    from opensak.gui.icon_provider import CACHE_TYPE_KEYS, cache_type_key
+    key = cache_type_key(cache_type or "")
+    return key if key in CACHE_TYPE_KEYS else "unknown"
+
+
+def _kmz_waypoint_key(wp_type: str | None) -> str:
+    from opensak.gui.icon_provider import WAYPOINT_TYPE_KEYS, cache_type_key
+    if wp_type in _KMZ_WPT_KEYS:
+        return _KMZ_WPT_KEYS[wp_type]
+    key = cache_type_key(wp_type or "")
+    return key if key in WAYPOINT_TYPE_KEYS else "waypoint"
+
+
+def _kmz_styles() -> tuple[list[ET.Element], dict[str, bytes]]:
+    """The <Style> elements of a KMZ, and the icon files they refer to
+    (path in the KMZ → PNG bytes): every cache type, plain and found (with
+    the gold smiley, as on the map), and every waypoint type."""
+    from opensak.gui.icon_provider import CACHE_TYPE_KEYS, WAYPOINT_TYPE_KEYS, render_icon_png
+    holder = ET.Element("Document")
+    files: dict[str, bytes] = {}
+    size = KMZ_ICON_SIZE
+    # The found icon's canvas grows by half a smiley up and to the right;
+    # the hot spot keeps the type icon's centre on the cache.
+    half = max(8, size // 2) // 2
+    found_spot = (size / 2) / (size + half)
+    for key in CACHE_TYPE_KEYS:
+        href = f"{KMZ_FILES_DIR}/{key}.png"
+        files[href] = render_icon_png(key, size)
+        _make_style(holder, f"style_{key}", href)
+        href = f"{KMZ_FILES_DIR}/{key}_found.png"
+        files[href] = render_icon_png(key, size, found=True)
+        _make_style(holder, f"style_found_{key}", href, scale=1.2,
+                    hot_spot=(found_spot, found_spot))
+    for key in WAYPOINT_TYPE_KEYS:
+        href = f"{KMZ_FILES_DIR}/wpt_{key}.png"
+        files[href] = render_icon_png(key, size)
+        _make_style(holder, f"style_wpt_{key}", href, scale=0.9)
+    return list(holder), files
 
 
 # ---------------------------------------------------------------------------
@@ -120,24 +192,33 @@ def _waypoint_description(wpt: Waypoint, gc_code: str) -> str:
 # Style builders
 # ---------------------------------------------------------------------------
 
-def _make_style(parent: ET.Element, style_id: str, icon_url: str, scale: float = 1.1) -> None:
+def _make_style(parent: ET.Element, style_id: str, icon_url: str, scale: float = 1.1,
+                hot_spot: tuple[float, float] | None = None) -> None:
     style = ET.SubElement(parent, "Style", id=style_id)
     icon_style = ET.SubElement(style, "IconStyle")
     ET.SubElement(icon_style, "scale").text = str(scale)
     icon = ET.SubElement(icon_style, "Icon")
     ET.SubElement(icon, "href").text = icon_url
+    if hot_spot is not None:
+        ET.SubElement(icon_style, "hotSpot", x=f"{hot_spot[0]:.3f}", y=f"{hot_spot[1]:.3f}",
+                      xunits="fraction", yunits="fraction")
     label_style = ET.SubElement(style, "LabelStyle")
     ET.SubElement(label_style, "scale").text = "0.8"
 
 
-def _style_id_for_cache(cache: Cache) -> str:
+def _style_id_for_cache(cache: Cache, kmz: bool = False) -> str:
+    if kmz:
+        key = _kmz_cache_key(cache.cache_type)
+        return f"style_found_{key}" if cache.found else f"style_{key}"
     if cache.found:
         return "style_found"
     ctype = (cache.cache_type or "").replace(" ", "_").replace("-", "_")
     return f"style_{ctype}" if ctype else "style_default"
 
 
-def _style_id_for_waypoint(wpt: Waypoint) -> str:
+def _style_id_for_waypoint(wpt: Waypoint, kmz: bool = False) -> str:
+    if kmz:
+        return f"style_wpt_{_kmz_waypoint_key(wpt.wp_type)}"
     wtype = (wpt.wp_type or "").replace(" ", "_").replace("-", "_")
     return f"style_wpt_{wtype}" if wtype else "style_wpt_default"
 
@@ -208,9 +289,12 @@ def export_kml(
     save: Saver = save_file,
     total: Optional[int] = None,
     count: Optional[int] = None,
+    kmz: bool = False,
 ) -> int:
     """
-    Write a KML file to *output_path* (with *save*, see Saver).
+    Write a KML file to *output_path* (with *save*, see Saver), or with
+    *kmz* a KMZ that holds the KML and OpenSAK's icons (#1361; rendering
+    them needs a QGuiApplication).
 
     Returns the number of caches exported: those left after *include_found*,
     including caches without coordinates (which get no placemark).
@@ -242,12 +326,12 @@ def export_kml(
     elif total is None and isinstance(caches, Sized):
         total = len(caches)
 
-    def _write(out: IO[str]) -> int:
+    def _write(out: IO[str], styles: list[ET.Element]) -> int:
         out.write(_KML_HEADER)
         out.write("\n    " + _xml_chunk(_text_element("name", "OpenSAK geocaches"), 2))
         out.write("\n    " + _xml_chunk(
             _text_element("description", tr("kml_export_description", count=count)), 2))
-        for style in _style_elements():
+        for style in styles:
             out.write("\n    " + _xml_chunk(style, 2))
 
         # -------------------------------------------------------------------
@@ -280,7 +364,7 @@ def export_kml(
                 out.write("\n      " + _xml_chunk(_placemark(
                     f"{'✓ ' if cache.found else ''}{_esc(cache.gc_code)} {text.name(cache)}",
                     text.description(cache) or _cache_description(cache),
-                    _style_id_for_cache(cache), lon, lat,
+                    _style_id_for_cache(cache, kmz), lon, lat,
                 ), 3))
 
                 # Waypoints for folder 2: only their finished placemarks are
@@ -294,7 +378,7 @@ def export_kml(
                         wpt_file.write("\n      " + _xml_chunk(_placemark(
                             f"{_esc(label)} ({_esc(cache.gc_code)})",
                             _waypoint_description(wpt, cache.gc_code),
-                            _style_id_for_waypoint(wpt),
+                            _style_id_for_waypoint(wpt, kmz),
                             wpt.longitude, wpt.latitude,
                         ), 3))
             out.write("\n    </Folder>")
@@ -311,4 +395,20 @@ def export_kml(
         out.write(_KML_FOOTER)
         return exported
 
-    return save(Path(output_path), _write, False)
+    if not kmz:
+        return save(Path(output_path), lambda out: _write(out, _style_elements()), False)
+
+    def _write_kmz(out: IO[bytes]) -> int:
+        styles, icons = _kmz_styles()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            # doc.kml first: viewers open the first .kml in the archive.
+            with zf.open("doc.kml", "w", force_zip64=True) as raw:
+                text = io.TextIOWrapper(raw, encoding="utf-8", newline="\n")
+                exported = _write(text, styles)
+                text.flush()
+                text.detach()
+            for href, png in icons.items():
+                zf.writestr(href, png)
+        return exported
+
+    return save(Path(output_path), _write_kmz, True)
