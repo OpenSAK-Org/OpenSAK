@@ -75,6 +75,34 @@ Please keep pull requests focused — one feature or fix per PR makes review muc
 
 ---
 
+## Changelog
+
+Please **don't edit `CHANGELOG.md`** in your pull request: every open PR would
+conflict with the others. Instead, put the entry in your PR description under a
+`## CHANGELOG` heading (the pull request template already has it). The
+maintainer copies these entries into `CHANGELOG.md` when preparing the next
+beta.
+
+- Format: `- **Short title (#issue)** — what changed, written for users.
+  Contributed by <your GitHub name>.`
+- Say whether it belongs under **Added**, **Changed** or **Fixed**.
+- Write for users: what they can now do, or what went wrong before and works
+  now. Leave out implementation details.
+- Pure refactorings, tests, CI and documentation changes need no entry; write
+  `None` under the heading.
+
+Example:
+
+```markdown
+## CHANGELOG
+Fixed:
+- **GPX/GGZ export to a phone or GPS over MTP failed on Windows (#1346)** —
+  the export is now written to a local folder first and copied to the device
+  once it is complete. Contributed by nagisml.
+```
+
+---
+
 ## Development Setup
 
 ```bash
