@@ -166,6 +166,20 @@ class TestExpandFileName:
         assert self._expand("{database}", database="") == "opensak_export"
         assert self._expand(" .. ") == "opensak_export"
 
+    @pytest.mark.parametrize("template, expected", [
+        ("{filter}", "_COM3"),        # a filter labelled "COM3"
+        ("nul", "_nul"),
+        ("COM3.gpx", "_COM3"),        # extension dropped, then still a device
+        ("Con.backup", "_Con.backup"),
+        ("LPT¹", "_LPT¹"),
+        ("COM30", "COM30"),
+        ("CONSOLE", "CONSOLE"),
+        ("my_COM3", "my_COM3"),
+    ])
+    def test_windows_device_names_get_a_prefix(self, template, expected):
+        # "COM3.gpx" would be opened as the serial port on Windows.
+        assert self._expand(template, filter_name="COM3", fmt="gpx") == expected
+
     def test_uses_current_time_by_default(self):
         assert expand_file_name("{year}") == datetime.now().strftime("%Y")
 
