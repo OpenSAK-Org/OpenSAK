@@ -1692,6 +1692,101 @@ def test_gsak_dummy_log_id_is_left_alone(db_session, tmp_path):
 
     assert {lg.log_id for lg in db_session.query(Log).all()} == {"GC1TEST_-2", "2"}
 
+
+# ── Issue #1373: GPX export writes the plain gc.com log id ───────────────────
+# The GSAK importer's "<GC code>_<lLogId>" key and the GPX importer's
+# gen_<GC code>_<n> ids are internal; an export writes what GSAK writes.
+
+
+@pytest.mark.parametrize("stored, expected", [
+    ("GC19FJ0_1394478404", "1394478404"),  # GSAK database import
+    ("GC19FJ0_-2", "-2"),                  # GSAK's own note, as GSAK writes it
+    ("1394478404", "1394478404"),          # GPX import: unchanged
+    ("gen_GC19FJ0_3", "0"),                # dummy id in its GPX file
+    (None, "0"),
+    ("", "0"),
+    ("GC2OTHER_1394478404", "GC2OTHER_1394478404"),  # not this cache's prefix
+    ("GC19FJ0_abc", "GC19FJ0_abc"),        # prefix, but no number after it
+])
+def test_export_log_id(stored, expected):
+    from opensak.export.gpx_content import export_log_id
+    assert export_log_id(stored, "GC19FJ0") == expected
+
+
+def _export_and_reimport(db_session, tmp_path) -> str:
+    from opensak.db.database import reload_caches_full
+    from opensak.gps.garmin import generate_gpx
+    from opensak.importer import import_gpx
+    caches = reload_caches_full(db_session.query(Cache).all())
+    gpx = generate_gpx(caches, "export")
+    out = tmp_path / "export.gpx"
+    out.write_text(gpx, encoding="utf-8")
+    import_gpx(out, db_session)
+    db_session.commit()
+    return gpx
+
+
+def test_gpx_export_writes_plain_log_id_after_gsak_import(db_session, tmp_path):
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        logs=[_gsak_log("GC1TEST", 1394478404),
+              _gsak_log("GC1TEST", -2, lType="Write note", lBy="GSAK",
+                        lDate="2025-01-02", lTime="08:00:00")],
+        logmemos=[{"lParent": "GC1TEST", "lLogId": 1394478404, "lText": "TFTC\r\nline 2"},
+                  {"lParent": "GC1TEST", "lLogId": -2, "lText": "Solved"}],
+    )
+    import_gsak_db(db, db_session)
+    db_session.commit()
+
+    gpx = _export_and_reimport(db_session, tmp_path)
+
+    assert 'groundspeak:log id="1394478404"' in gpx
+    assert 'groundspeak:log id="-2"' in gpx
+    assert "GC1TEST_" not in gpx
+    # The re-import matches both logs again: no second copy of either.
+    assert sorted(lg.log_id for lg in db_session.query(Log).all()) == [
+        "GC1TEST_-2", "GC1TEST_1394478404"]
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.log_count == 2
+
+
+def test_gpx_export_writes_zero_for_generated_log_id(db_session, tmp_path):
+    from opensak.importer import import_gpx
+    logs = [
+        {"id": "0", "type": "Write note", "date": "2025-01-02T08:00:00Z",
+         "finder": "Someone", "finder_id": "5", "text": "First note"},
+        {"id": "-3", "type": "Write note", "date": "2025-01-03T08:00:00Z",
+         "finder": "Someone", "finder_id": "5", "text": "Second note"},
+        _gpx_log("777"),
+    ]
+    import_gpx(_gpx_for(tmp_path, "pq.gpx", "GC1TEST", logs), db_session)
+    db_session.commit()
+    before = sorted(lg.log_id for lg in db_session.query(Log).all())
+    assert before == ["777", "gen_GC1TEST_0", "gen_GC1TEST_1"]
+
+    gpx = _export_and_reimport(db_session, tmp_path)
+
+    assert "gen_" not in gpx
+    assert gpx.count('groundspeak:log id="0"') == 2
+    assert 'groundspeak:log id="777"' in gpx
+    assert sorted(lg.log_id for lg in db_session.query(Log).all()) == before
+
+
+def test_generated_log_id_does_not_take_a_matched_row(db_session, tmp_path):
+    # A new dummy-id log whose gen_ id is that of a stored log matched by its
+    # content later in the file gets an id of its own; both logs are kept.
+    from opensak.importer import import_gpx
+    note = {"id": "0", "type": "Write note", "date": "2025-01-02T08:00:00Z",
+            "finder": "Someone", "finder_id": "5", "text": "Old note"}
+    import_gpx(_gpx_for(tmp_path, "a.gpx", "GC1TEST", [note]), db_session)
+    db_session.commit()
+    new = {**note, "date": "2025-02-02T08:00:00Z", "text": "New note"}
+    import_gpx(_gpx_for(tmp_path, "b.gpx", "GC1TEST", [new, note]), db_session)
+    db_session.commit()
+
+    texts = {lg.log_id: lg.text for lg in db_session.query(Log).all()}
+    assert texts == {"gen_GC1TEST_0": "Old note", "gen_GC1TEST_0_1": "New note"}
+
 # ── Issue #1231: bulk writes, date fast path, GC switched off ────────────────
 
 

@@ -118,6 +118,29 @@ def is_corrected_final_wp(wp_type: Optional[str], comment: Optional[str]) -> boo
     )
 
 
+def export_log_id(log_id: Optional[str], gc_code: Optional[str]) -> str:
+    """The id a GPX export writes for a stored log (#1373): the
+    geocaching.com log id, as GSAK writes it.
+
+    The GSAK database importer stores ``f"{gc_code}_{lLogId}"`` (GSAK's
+    dummy ids such as -2 repeat across caches, and logs.log_id is UNIQUE),
+    so the prefix is dropped again. A log whose id was a dummy in its GPX
+    file is stored as ``gen_{gc_code}_{n}`` and is written as "0", which
+    the importer reads as a dummy id. Any other id (a GPX import's plain
+    id) is written unchanged."""
+    if not log_id or log_id.startswith("gen_"):
+        return "0"
+    prefix = f"{gc_code}_"
+    if gc_code and log_id.startswith(prefix):
+        rest = log_id[len(prefix):]
+        try:
+            int(rest)
+        except ValueError:
+            return log_id
+        return rest
+    return log_id
+
+
 def is_extra_info_log(log_id: Optional[str], finder: Optional[str]) -> bool:
     """True if a GPX log is the extra-info log of an OpenSAK export (#454),
     which an import skips."""
