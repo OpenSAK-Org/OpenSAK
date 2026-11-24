@@ -88,6 +88,7 @@ CONTAINER_SIZES: list[str] = [
     "Regular",
     "Large",
     "Other",
+    "Virtual",      # Virtual, Webcam and Lab Caches (#1372)
     "Not chosen",
 ]
 

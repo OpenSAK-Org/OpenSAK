@@ -192,12 +192,11 @@ GSAK_CACHE_TYPE_MAP: dict[str, str] = {
 }
 
 # GSAK's Container field already matches OpenSAK's CONTAINER_SIZES strings
-# verbatim (Micro/Small/Regular/Large/Other/Not chosen), except for two
-# placeholder values GSAK uses on caches with no physical container
-# (Virtual/Event/Earthcache types) — both map to OpenSAK's "Not chosen".
+# verbatim (Micro/Small/Regular/Large/Other/Virtual/Not chosen), except for
+# GSAK's "Unknown", which maps to OpenSAK's "Not chosen". "Virtual" is a real
+# geocaching.com size that GPX files carry too, so it is kept as it is (#1372).
 GSAK_CONTAINER_MAP: dict[str, str] = {
     "Unknown": "Not chosen",
-    "Virtual": "Not chosen",
 }
 
 # GSAK Status: 'A' = Active, 'T' = Temporarily disabled, 'X' = Archived.

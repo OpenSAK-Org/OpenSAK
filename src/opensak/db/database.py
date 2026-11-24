@@ -127,7 +127,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 # Steps of opening a database that can take a while, for set_progress_callback().
 PROGRESS_MIGRATING = "migrating"
@@ -1202,6 +1202,21 @@ def _run_migrations(engine: Engine) -> None:
             )
             conn.commit()
             logger.info(f"Migration: removed <br> from {len(cleaned_29)} trackable names")
+
+        # ── Migration 30: container "Virtual" from the GSAK import (#1372) ───
+        logger.debug("[migrations] entering migration 30 (+%.2fs)", time.monotonic() - _mig_t0)
+        # The GSAK import rewrote GSAK's container "Virtual" to "Not chosen",
+        # while the GPX import keeps "Virtual". Give the cache types that
+        # geocaching.com lists as "Virtual" that value back. Only "Not chosen"
+        # rows of those types change, so this is safe to run again.
+        changed_30 = conn.execute(text(
+            "UPDATE caches SET container = 'Virtual' "
+            "WHERE container = 'Not chosen' "
+            "AND cache_type IN ('Virtual Cache', 'Webcam Cache', 'Lab Cache')"
+        )).rowcount
+        if changed_30:
+            conn.commit()
+            logger.info(f"Migration: set container 'Virtual' on {changed_30} caches")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

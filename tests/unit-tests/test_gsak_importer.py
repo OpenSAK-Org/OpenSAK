@@ -518,6 +518,43 @@ def test_container_mapping(db_session, tmp_path, gsak_container, expected):
     assert cache.container == expected
 
 
+# Issue #1372: "Virtual" is a real geocaching.com container size, not a GSAK
+# placeholder, and the GPX import keeps it too.
+def test_container_virtual_is_kept_1372(db_session, tmp_path):
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3", caches=[{"CacheType": "V", "Container": "Virtual"}]
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.container == "Virtual"
+
+
+def test_container_unknown_still_maps_to_not_chosen_1372(db_session, tmp_path):
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"Container": "Unknown"}])
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.container == "Not chosen"
+
+
+def test_container_virtual_gsak_and_gpx_agree_1372(db_session, tmp_path):
+    from opensak.importer import import_gpx
+    from tests.data import build_gpx, cache_wpt, write_gpx
+
+    gsak = _make_gsak_db(
+        tmp_path / "gsak.db3", caches=[{"CacheType": "V", "Container": "Virtual"}]
+    )
+    import_gsak_db(gsak, db_session)
+    gsak_container = db_session.query(Cache).filter_by(gc_code="GC1TEST").one().container
+
+    gpx = write_gpx(tmp_path, "pq.gpx", build_gpx(
+        cache_wpt("GC10FB", cache_type="Virtual Cache", container="Virtual", gs_id=4091)
+    ))
+    import_gpx(gpx, db_session)
+    gpx_container = db_session.query(Cache).filter_by(gc_code="GC10FB").one().container
+
+    assert gsak_container == gpx_container == "Virtual"
+
+
 @pytest.mark.parametrize(
     "status,available,archived",
     [
