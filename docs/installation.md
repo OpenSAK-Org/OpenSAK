@@ -78,6 +78,8 @@ Install OpenSAK from the [Microsoft Store](https://apps.microsoft.com/detail/9p4
 
 Download the latest `OpenSAK-…-Windows.zip` from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases), unzip it to a folder of your choice, and double-click `OpenSAK.exe` — no Python or Git required.
 
+> **This is a portable version.** There is no installer: unzip the folder anywhere you like (Program Files is not needed, and replacing files there requires admin rights). OpenSAK does not appear in **Apps & Features**. To uninstall, delete the folder. Your settings and databases are kept in `%APPDATA%\opensak` (or the folders you chose in the Welcome Wizard); **Help → OpenSAK File Locations…** shows them all. For a regular install with automatic updates, use the Microsoft Store version.
+
 > This download is not code-signed. Windows SmartScreen may warn you on first launch (click **More info → Run anyway**), and on PCs where **Smart App Control** is switched on, Windows may block OpenSAK from starting at all. OpenSAK then explains what happened; install it from the Microsoft Store instead.
 
 ### Windows — Manual install
