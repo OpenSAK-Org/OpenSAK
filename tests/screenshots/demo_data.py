@@ -105,7 +105,7 @@ DEMO_CACHES: list[dict] = [
     ),
     dict(
         gc_code="GC1A010", name="Harbourview Virtual", lat=55.6890, lon=12.5912,
-        cache_type="Virtual Cache", container="Not chosen", difficulty=1.5, terrain=1.0,
+        cache_type="Virtual Cache", container="Virtual", difficulty=1.5, terrain=1.0,
         placed_by="AB_Green", gs_id=100010,
         logs=[
             dict(type="Found it", finder="AB_Green", finder_id=999,

@@ -132,9 +132,8 @@ GSAK_TYPE_LABEL_TO_OSAK: dict[str, Optional[str]] = {
 }
 
 # GSAK container checkbox key → OpenSAK CONTAINER_SIZES value.
-# Virtual/Unknown are GSAK placeholders for "no physical container" and both
-# collapse to "Not chosen" on import (GSAK_CONTAINER_MAP in gsak_importer.py),
-# so selecting either in GSAK cannot be reproduced exactly.
+# GSAK's "Unknown" collapses to "Not chosen" on import (GSAK_CONTAINER_MAP in
+# gsak_importer.py), so selecting it in GSAK cannot be reproduced exactly.
 GSAK_CONTAINER_KEYS: dict[str, str] = {
     "cbxMicro":     "Micro",
     "cbxSmall":     "Small",
@@ -142,10 +141,10 @@ GSAK_CONTAINER_KEYS: dict[str, str] = {
     "cbxLarge":     "Large",
     "cbxOther":     "Other",
     "cbxNotChosen": "Not chosen",
-    "cbxVirtual":   "Not chosen",   # collapses — see above
+    "cbxVirtual":   "Virtual",
     "chkUnknown":   "Not chosen",   # collapses — see above
 }
-_COLLAPSED_CONTAINERS = {"cbxVirtual", "chkUnknown"}
+_COLLAPSED_CONTAINERS = {"chkUnknown"}
 
 # Text-comparison combo (cbxDesc/Geocache-Name, cbxOwnerName/Owner-Name,
 # cbxCountry/Land, …). Item order read off the GSAK dialog (German UI):
