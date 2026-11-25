@@ -72,6 +72,20 @@ row (`region`) → lazily load `<data-dir>/<layer-dir>/<pack>` and take
 `features[feature_index].geometry` (`geometry`). The `<layer-dir>` is the plural
 form: `country→countries`, `state→states`, `county→counties`.
 
+### Parent check (#1379)
+
+The country is resolved first. A state or county whose `parent` code belongs
+only to other countries is skipped, so a neighbour's polygon reaching across
+the border can't give a cache a foreign state or county. Country rows have no
+code, so the link from code to country name comes from
+[`src/opensak/geo/country_parents.py`](../src/opensak/geo/country_parents.py),
+generated from the data by
+[`tools/boundaries/country_parents.py`](../tools/boundaries/country_parents.py).
+**Re-run that script and commit the result whenever a release adds or changes
+countries, states or counties** (e.g. a new country from `osm_extract.py`).
+A code missing from the table is never rejected, so a stale table only means
+the check doesn't cover the new code yet.
+
 ## GeoJSON packs
 
 One `FeatureCollection` per country, each feature carrying a standard `bbox`

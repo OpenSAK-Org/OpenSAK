@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, NamedTuple
 
+from opensak.geo.country_parents import PARENT_COUNTRIES
 from opensak.geo.store import BoundaryStore
 from opensak.logger import get_logger
 from opensak.debug_flags import is_debug_enabled
@@ -24,15 +26,39 @@ class GeoLocation(NamedTuple):
     county: str | None
 
 
+def _parent_code(parent: str | None) -> str | None:
+    """The country part of a region's parent ("aut", or "aut/..." should a
+    parent ever carry a state too), lower-cased."""
+    if not parent:
+        return None
+    return parent.split("/", 1)[0].strip().lower() or None
+
+
 class TerritoryResolver:
     """Resolve (lat, lon) to country/state/county via the two-stage lookup.
 
     Stage 1 is an R-Tree bbox query; a single box hit returns directly, an
     overlap falls through to Stage 2 point-in-polygon on the few candidates.
+
+    The country is resolved first, and a state or county known to belong to
+    another country is skipped (#1379): the layers come from different
+    sources and don't follow exactly the same borders, so a neighbour's state
+    or county can reach across the border. Nothing is skipped when the
+    country is unresolved, and a region whose parent code isn't in
+    *parent_countries* is kept. *parent_countries* (parent code → the
+    countries it lies in) defaults to the table generated from OpenSAK-Data;
+    tests pass their own.
     """
 
-    def __init__(self, store: BoundaryStore) -> None:
+    def __init__(
+        self,
+        store: BoundaryStore,
+        parent_countries: Mapping[str, tuple[str, ...]] | None = None,
+    ) -> None:
         self._store = store
+        self._parent_countries = (
+            PARENT_COUNTRIES if parent_countries is None else parent_countries
+        )
         # Shapely geometry objects cached by (layer, region_id). _shape() is
         # expensive for complex coastlines — construct once, reuse across rows.
         self._shape_cache: dict = {}
@@ -40,16 +66,25 @@ class TerritoryResolver:
             log.debug("TerritoryResolver initialized, shapely=%s", _HAS_SHAPELY)
 
     def resolve(self, lat: float, lon: float) -> GeoLocation:
+        country = self._resolve_layer("country", lat, lon)
         result = GeoLocation(
-            country=self._resolve_layer("country", lat, lon),
-            state=self._resolve_layer("state", lat, lon),
-            county=self._resolve_layer("county", lat, lon),
+            country=country,
+            state=self._resolve_layer("state", lat, lon, country),
+            county=self._resolve_layer("county", lat, lon, country),
         )
         if is_debug_enabled("geo"):
             log.debug("resolve(%.4f, %.4f) -> %s", lat, lon, result)
         return result
 
-    def _resolve_layer(self, layer: str, lat: float, lon: float) -> str | None:
+    def _resolve_layer(
+        self,
+        layer: str,
+        lat: float,
+        lon: float,
+        country: str | None = None,
+    ) -> str | None:
+        """Name of the first *layer* region containing the point, skipping
+        regions that belong to a country other than *country* (if given)."""
         ids = self._store.candidates(layer, lat, lon)
         if is_debug_enabled("geo"):
             log.debug("_resolve_layer(%s, %.4f, %.4f): %d candidates", layer, lat, lon, len(ids))
@@ -58,6 +93,11 @@ class TerritoryResolver:
         for region_id in ids:  # always do polygon check — a single bbox hit is not enough near borders
             region = self._store.region(layer, region_id)
             if region is None:
+                continue
+            if country is not None and self._foreign(region.parent, country):
+                if is_debug_enabled("geo"):
+                    log.debug("_resolve_layer(%s): skipped %s (parent %s, not in %s)",
+                              layer, region.name, region.parent, country)
                 continue
             try:
                 geom = self._store.geometry(layer, region)
@@ -71,6 +111,14 @@ class TerritoryResolver:
                     log.debug("_resolve_layer(%s): matched %s", layer, region.name)
                 return region.name
         return None
+
+    def _foreign(self, parent: str | None, country: str) -> bool:
+        """True if *parent* is known to belong only to other countries than *country*."""
+        code = _parent_code(parent)
+        owners = self._parent_countries.get(code) if code else None
+        if not owners:
+            return False
+        return country not in owners
 
 
 def _point_in_geometry(

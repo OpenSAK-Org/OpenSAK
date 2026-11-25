@@ -83,6 +83,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Location lookup: no state or county from the neighbouring country
+  (#1379)** — near a border, a cache could get the country it lies in
+  but a state or county from the country next door, e.g. Switzerland /
+  Vorarlberg / Bludenz in Graubünden, or Baden-Württemberg for caches in
+  the Rhine. The boundary layers come from different sources and don't
+  follow exactly the same borders. The lookup now skips a state or county
+  that belongs to another country than the one it found, and leaves the
+  field empty if nothing else fits. Run Tools → Update location → Update
+  all waypoints to correct caches that already have such values.
+
 - **GSAK import: 1970-01-01 is read as "no date" (#1349)** — GSAK writes
   that date into empty date fields. The import stored it as a real date,
   which brought back the dates a database repair had cleared.

@@ -442,3 +442,62 @@ def build_boundary_test_data(data_dir: Path) -> None:
     db.execute("INSERT INTO file_version VALUES ('dataset', NULL, NULL, 1)")
     db.commit()
     db.close()
+
+
+# ── Two-country border dataset (#1379) ────────────────────────────────────────
+# Westland covers lon 0..10, Eastland lon 10..20 (lat 0..10). Eastland's state
+# and county reach 1° across the border into Westland — like the Austrian
+# polygons reaching into Switzerland — and East State is listed first in the
+# R-Tree, so without the parent check it wins at lon 9.5. Parent codes:
+# "wst" → Westland, "est" → Eastland, "shr" → both, "unk" → not in the table.
+#   (5, 9.5)  -> Westland / West State / Shared County, not East State / East County
+#   (5, 15)   -> Eastland / East State / East County
+#   (5, 2)    -> Westland / West State / Unknown County (unknown parent kept)
+#   (11, 15)  -> no country / East State (nothing skipped without a country)
+
+BORDER_PARENT_COUNTRIES: dict[str, tuple[str, ...]] = {
+    "wst": ("Westland",),
+    "est": ("Eastland",),
+    "shr": ("Westland", "Eastland"),
+}
+
+
+def _geo_box(min_lon: int, min_lat: int, max_lon: int, max_lat: int) -> list:
+    return [[[min_lon, min_lat], [max_lon, min_lat], [max_lon, max_lat],
+             [min_lon, max_lat], [min_lon, min_lat]]]
+
+
+def build_border_test_data(data_dir: Path) -> None:
+    """Build the two-country border dataset described above."""
+    layers: dict[str, list[tuple[str, str | None, tuple[int, int, int, int]]]] = {
+        # (name, parent, (min_lon, min_lat, max_lon, max_lat)) — R-Tree id = position + 1
+        "country": [("Westland", None, (0, 0, 10, 10)),
+                    ("Eastland", None, (10, 0, 20, 10))],
+        "state": [("East State", "est", (9, 0, 20, 12)),
+                  ("West State", "wst", (0, 0, 10, 10))],
+        "county": [("East County", "est", (9, 0, 20, 10)),
+                   ("Shared County", "shr", (8, 0, 11, 10)),
+                   ("Unknown County", "unk", (0, 0, 4, 10))],
+    }
+    dirs = {"country": "countries", "state": "states", "county": "counties"}
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(data_dir / "boundaries.db")
+    for layer, regions in layers.items():
+        _geo_write_pack(data_dir / dirs[layer] / "border.geojson", [
+            _geo_feature(layer, name, parent, _geo_box(*box), list(box))
+            for name, parent, box in regions
+        ])
+        db.execute(f"CREATE VIRTUAL TABLE rtree_{layer} USING rtree(id, min_lat, max_lat, min_lon, max_lon)")
+        db.execute(f"CREATE TABLE region_{layer} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+                   "parent TEXT, pack TEXT NOT NULL, feature_index INTEGER NOT NULL, "
+                   "poly_version INTEGER NOT NULL, is_bundled INTEGER NOT NULL)")
+        for i, (name, parent, (min_lon, min_lat, max_lon, max_lat)) in enumerate(regions):
+            db.execute(f"INSERT INTO rtree_{layer} VALUES (?, ?, ?, ?, ?)",
+                       (i + 1, min_lat, max_lat, min_lon, max_lon))
+            db.execute(f"INSERT INTO region_{layer} VALUES (?, ?, ?, ?, ?, 1, 1)",
+                       (i + 1, name, parent, "border.geojson", i))
+    db.execute("CREATE TABLE file_version (layer TEXT, country TEXT, state TEXT, version INTEGER)")
+    db.execute("INSERT INTO file_version VALUES ('dataset', NULL, NULL, 1)")
+    db.commit()
+    db.close()
