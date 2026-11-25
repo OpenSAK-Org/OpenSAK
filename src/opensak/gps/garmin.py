@@ -28,7 +28,8 @@ from opensak.export.cache_text import NO_TEXT, ExportText
 from opensak.export.gpx_content import (
     DEFAULT_CONTENT, EXTRA_INFO_LOG_FINDER, EXTRA_INFO_LOG_FINDER_ID, EXTRA_INFO_LOG_ID,
     EXTRA_INFO_LOG_TYPE, USER_NOTE_LOG_FINDER, USER_NOTE_LOG_FINDER_ID, USER_NOTE_LOG_ID,
-    USER_NOTE_LOG_TYPE, GpxContent, my_log_matcher, normalize_note, user_note_log_date,
+    USER_NOTE_LOG_TYPE, GpxContent, export_log_id, my_log_matcher, normalize_note,
+    user_note_log_date,
 )
 from opensak.export.special_tags import ExportTemplates
 from opensak.lang import tr
@@ -1317,7 +1318,9 @@ def _gpx_chunks(
             if cache.logs:
                 for log in content.select_logs(cache.logs, is_mine):
                     gs_log = SubElement(gs_logs, "groundspeak:log")
-                    gs_log.set("id", log.log_id or "0")
+                    # #1373: the plain gc.com log id, not the GSAK
+                    # importer's "<GC code>_<id>" key.
+                    gs_log.set("id", export_log_id(log.log_id, cache.gc_code))
                     gs_date = SubElement(gs_log, "groundspeak:date")
                     gs_date.text = (
                         log.log_date.strftime("%Y-%m-%dT%H:%M:%SZ")

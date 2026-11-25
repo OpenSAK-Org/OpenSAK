@@ -1251,6 +1251,18 @@ def _exit_bulk_import_pragmas(session: Session) -> None:
         pass
 
 
+def _log_content_key(
+    log_date: Optional[datetime], log_type: Optional[str],
+    finder: Optional[str], text: Optional[str],
+) -> tuple:
+    """What identifies a log that has no gc.com id (#1373): its date (as
+    naive UTC, the way SQLite returns it), type, finder and text (with the
+    line ends and whitespace an export and re-import may change)."""
+    if log_date is not None and log_date.tzinfo is not None:
+        log_date = log_date.astimezone(timezone.utc).replace(tzinfo=None)
+    return (log_date, (log_type or "").strip(), (finder or "").strip(), normalize_note(text))
+
+
 def _upsert_cache(
     session: Session,
     data: dict,
@@ -1379,6 +1391,12 @@ def _upsert_cache(
     # it could hit the UNIQUE constraint on logs.log_id, and the next import
     # finds it through this map again either way.
     gsak_logs_by_plain_id: dict[str, Log] = {}
+    # #1373: an export writes a log without a gc.com id (stored as
+    # gen_<GC code>_<n>, or <GC code>_<dummy> by the GSAK importer) with a
+    # dummy id, which gives it a new gen_ id on import. dummy_logs_by_content
+    # finds such a row again by its date, type, finder and text, so a
+    # re-import of the export updates it instead of adding a second copy.
+    dummy_logs_by_content: dict[tuple, Log] = {}
     if existing is not None:
         existing_logs_by_id = {
             lg.log_id: lg
@@ -1405,9 +1423,16 @@ def _upsert_cache(
             )
             session.delete(lg)
             del existing_logs_by_id[prefixed_id]
+        for stored_id, lg in existing_logs_by_id.items():
+            if not stored_id:
+                continue
+            rest = stored_id[len(gsak_prefix):] if stored_id.startswith(gsak_prefix) else None
+            if stored_id.startswith("gen_") or (rest is not None and not rest.isdigit()):
+                dummy_logs_by_content.setdefault(_log_content_key(
+                    lg.log_date, lg.log_type, lg.finder, lg.text), lg)
 
     DUMMY_LOG_IDS = {"0", None, ""}
-    seen_log_ids_this_file: set[str] = set()
+    seen_log_ids_this_file: set[Optional[str]] = set()
     # #775: an export with "user note as first log" writes the user note as
     # a synthetic log (id -2 by "GSAK", as GSAK does). It is the user note,
     # not a log: skipped when its text is the note in this file or the one
@@ -1419,21 +1444,44 @@ def _upsert_cache(
     user_notes = {
         normalize_note(t) for t in (data.get("gsak_user_note"), existing_note) if t
     }
-    for idx, lg in enumerate(data.get("logs", [])):
-        if user_notes and is_user_note_log(
+
+    def _is_dummy_id(raw_id: Optional[str]) -> bool:
+        if raw_id in DUMMY_LOG_IDS:
+            return True
+        try:
+            return int(raw_id) < 0  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            return False
+
+    # (index in the file, log): the index makes the gen_ id, as before.
+    file_logs = [
+        (idx, lg) for idx, lg in enumerate(data.get("logs", []))
+        if not (user_notes and is_user_note_log(
             lg["log_id"], lg.get("finder"), lg.get("finder_id"),
             lg.get("log_type"), lg.get("text"), user_notes,
-        ):
-            continue
+        ))
+    ]
+    # #1373: dummy-id logs matched to a stored row first, so a gen_ id made
+    # for another log below can't take over a row that is matched later on.
+    matched_dummies: dict[int, Log] = {}
+    for idx, lg in file_logs:
+        if _is_dummy_id(lg["log_id"]):
+            match = dummy_logs_by_content.pop(_log_content_key(
+                lg["log_date"], lg["log_type"], lg["finder"], lg["text"]), None)
+            if match is not None:
+                matched_dummies[idx] = match
+    claimed_ids = {lg.log_id for lg in matched_dummies.values()}
+
+    for idx, lg in file_logs:
         raw_id = lg["log_id"]
-        is_dummy = raw_id in DUMMY_LOG_IDS
-        if not is_dummy and raw_id is not None:
-            try:
-                is_dummy = int(raw_id) < 0
-            except (ValueError, TypeError):
-                pass
-        if is_dummy:
+        if idx in matched_dummies:
+            log_id = matched_dummies[idx].log_id
+        elif _is_dummy_id(raw_id):
             log_id = f"gen_{data['gc_code']}_{idx}"
+            n = 0
+            while log_id in claimed_ids:
+                n += 1
+                log_id = f"gen_{data['gc_code']}_{idx}_{n}"
         else:
             log_id = raw_id
         if log_id in seen_log_ids_this_file:
