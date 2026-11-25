@@ -106,6 +106,9 @@ File Explorer.
 | Bootstrap pointer (1.14.0+) | `%APPDATA%\opensak\bootstrap.json` |
 | Install folder / `opensak.json` / log (1.14.0+, default) | `%APPDATA%\opensak\` |
 | Database, settings, logs (pre-1.14.0, default) | `%APPDATA%\opensak\` |
+| Install folder / databases (Microsoft Store version, default for new installs) | `Documents\opensak\` |
+
+Older Microsoft Store installs may still keep their data in a virtualized AppData folder. If you are on the Store version, open **Help → OpenSAK File Locations…**, which always shows the real path.
 
 `%APPDATA%` is usually `C:\Users\<your name>\AppData\Roaming`. To get there
 quickly: press **Win + R**, type `%APPDATA%`, press Enter.
