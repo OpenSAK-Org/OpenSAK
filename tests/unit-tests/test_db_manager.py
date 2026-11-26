@@ -262,6 +262,32 @@ class TestNewDatabase:
 # ── rename ────────────────────────────────────────────────────────────────────
 
 class TestRename:
+    @pytest.mark.parametrize(
+        ("custom_parent", "folder_name"),
+        [(False, "Trip"), (True, "Trip"), (False, "OldTrip")],
+    )
+    def test_renames_folder_from_initial_pr_without_ownership_metadata(
+        self, real_manager, tmp_path, custom_parent, folder_name
+    ):
+        from opensak.settings_store import get_store
+
+        base = tmp_path / "custom" if custom_parent else tmp_path
+        path = base / folder_name / "Trip.db"
+        real_manager.new_database("Trip", path)
+        entries = get_store().get("databases.list")
+        next(entry for entry in entries if entry["name"] == "Trip").pop("managed_folder")
+        get_store().set("databases.list", entries)
+        reloaded = DatabaseManager()
+        info = next(db for db in reloaded.databases if db.name == "Trip")
+
+        assert info.managed_folder is None
+        reloaded.rename(info, "Holiday")
+
+        assert info.path == base / "Holiday" / "Holiday.db"
+        assert info.path.is_file()
+        assert not path.parent.exists()
+        assert info.managed_folder is True
+
     def test_renames_managed_folder_and_companion_after_reload(self, real_manager):
         from opensak.db import companion
 
@@ -283,9 +309,12 @@ class TestRename:
 
     def test_renaming_external_database_keeps_its_folder(self, real_manager, tmp_path):
         path = tmp_path / "External" / "External.db"
-        info = real_manager.new_database("External", path)
+        real_manager.new_database("External", path)
+        reloaded = DatabaseManager()
+        info = next(db for db in reloaded.databases if db.name == "External")
 
-        real_manager.rename(info, "Renamed")
+        assert info.managed_folder is False
+        reloaded.rename(info, "Renamed")
 
         assert info.path == path.with_name("Renamed.db")
         assert info.path.is_file()

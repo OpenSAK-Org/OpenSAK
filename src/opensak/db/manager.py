@@ -138,7 +138,8 @@ def _remove_with_sidecars(path: Path) -> None:
 class DatabaseInfo:
     """Metadata om en enkelt database."""
 
-    def __init__(self, name: str, path: Path, *, managed_folder: bool = False):
+    def __init__(self, name: str, path: Path, *, managed_folder: bool | None = False):
+        # None is an older settings entry with no ownership information.
         self.managed_folder = managed_folder
         self.name = name
         self.path = Path(path)
@@ -161,14 +162,15 @@ class DatabaseInfo:
 
     def to_dict(self) -> dict:
         entry: dict[str, str | bool] = {"name": self.name, "path": str(self.path)}
-        if self.managed_folder:
-            entry["managed_folder"] = True
+        if self.managed_folder is not None:
+            entry["managed_folder"] = self.managed_folder
         return entry
 
     @classmethod
     def from_dict(cls, data: dict) -> "DatabaseInfo":
+        managed = data.get("managed_folder")
         return cls(data["name"], Path(data["path"]),
-                   managed_folder=data.get("managed_folder") is True)
+                   managed_folder=managed if isinstance(managed, bool) else None)
 
     def __repr__(self) -> str:
         return f"<DatabaseInfo {self.name!r} @ {self.path}>"
@@ -695,8 +697,11 @@ class DatabaseManager:
         self._seed_db_settings(db_info)
 
         old_folder = old_path.parent
+        managed_folder = db_info.managed_folder
+        if managed_folder is None:
+            managed_folder = self._is_legacy_database_folder(db_info)
         new_path = self.new_database_path(new_name, old_folder.parent)
-        if not db_info.managed_folder:
+        if not managed_folder:
             new_path = old_folder / new_path.name
         if new_path.name != old_path.name or new_path.parent.name != old_folder.name:
             self._rename_database(db_info, new_path, new_name)
@@ -717,7 +722,39 @@ class DatabaseManager:
             )
 
         db_info.name = new_name
+        db_info.managed_folder = managed_folder
         self._save_to_settings()
+
+    def _is_legacy_database_folder(self, db_info: DatabaseInfo) -> bool:
+        """Recognize folders created before the settings recorded ownership."""
+        from opensak.settings_store import get_db_dir
+
+        path = db_info.path
+        folder = path.parent
+        expected = self.new_database_path(db_info.name, folder.parent)
+        if path.name != expected.name or folder.is_symlink() or not path.is_file():
+            return False
+
+        database_files = {path, companion.companion_path(path)}
+        for file in tuple(database_files):
+            database_files.update(Path(str(file) + suffix)
+                                  for suffix in ("-journal", "-wal", "-shm", ".lock"))
+        try:
+            # The original PR also allowed a custom parent. Only adopt its
+            # exact layout when the folder contains just this database's files.
+            if folder.parent.resolve() != get_db_dir().resolve():
+                return path == expected and all(child in database_files for child in folder.iterdir())
+
+            # Under the configured database directory, also recognize runs
+            # of the initial rename code that already renamed just the file.
+            return all(
+                child in database_files
+                or (not child.is_dir()
+                    and child.suffix.lower() not in {".db", ".db3", ".sqlite", ".sqlite3"})
+                for child in folder.iterdir()
+            )
+        except OSError:
+            return False
 
     def _rename_database(self, db_info: DatabaseInfo, new_path: Path, new_name: str) -> None:
         """Move an owned directory with its contents, or rename files in place."""
