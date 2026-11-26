@@ -481,6 +481,18 @@ class TestGenerateGpx:
         assert "<type>Parking Area</type>" in result
         assert "Geocache|Parking Area" not in result
 
+    @pytest.mark.parametrize("container", [None, ""])
+    def test_missing_container_exported_as_not_chosen(self, container):
+        # #1390: a cache without a size (GPX without <groundspeak:container>,
+        # .loc import, macro insert) was exported as a made-up "Regular".
+        result = generate_gpx([_cache(container=container)])
+        assert "<groundspeak:container>Not chosen</groundspeak:container>" in result
+        assert ">Regular<" not in result
+
+    def test_container_kept_when_set(self):
+        result = generate_gpx([_cache(container="Small")])
+        assert "<groundspeak:container>Small</groundspeak:container>" in result
+
     def test_regular_cache_still_gets_groundspeak_cache_block(self):
         # Sanity check: the #660 branch must not affect normal geocaches.
         result = generate_gpx([_cache(cache_type="Traditional Cache")])
@@ -1145,9 +1157,15 @@ class TestGenerateLoc:
                                    difficulty=1.5, terrain=2.0)])
         assert "<![CDATA[My Cache by Bob (1.5/2)]]>" in out
 
-    def test_container_defaults_to_unknown(self):
-        out = generate_loc([_cache(container=None)])
-        assert "<container>Unknown</container>" in out
+    @pytest.mark.parametrize("container", [None, ""])
+    def test_container_defaults_to_not_chosen(self, container):
+        # #1390: same fallback as the GPX export (was "Unknown").
+        out = generate_loc([_cache(container=container)])
+        assert "<container>Not chosen</container>" in out
+
+    def test_container_kept_when_set(self):
+        out = generate_loc([_cache(container="Micro")])
+        assert "<container>Micro</container>" in out
 
     def test_corrected_coords_used(self):
         c = _cache(latitude=55.0, longitude=12.0,

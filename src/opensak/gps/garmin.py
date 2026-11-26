@@ -1221,7 +1221,10 @@ def _gpx_chunks(
             gs_type.text = cache.cache_type or "Traditional Cache"
 
             gs_container = SubElement(gs_cache, "groundspeak:container")
-            gs_container.text = cache.container or "Regular"
+            # No size known (custom data, .loc import, GPX without a
+            # container): geocaching.com's "Not chosen", not a made-up
+            # physical size (#1390).
+            gs_container.text = cache.container or "Not chosen"
 
             # Attributes (issue #656 follow-up — previously not exported at
             # all). Written here, right after container, to match the
@@ -1617,7 +1620,7 @@ def write_loc(
         terr_el.text = str(terr)
 
         container_el = SubElement(wp, "container")
-        container_el.text = cache.container or "Unknown"
+        container_el.text = cache.container or "Not chosen"  # as the GPX export (#1390)
 
         if not count:
             out.write(root_tag + ">")
