@@ -196,6 +196,24 @@ class TestCacheWpt:
                                    difficulty=None, terrain=None)])
         assert "<desc>Ruhebank (1/1)</desc>" in gpx
 
+    @pytest.mark.parametrize("kw, expected", [
+        # A real owner keeps the current output (#695).
+        (dict(owner_name="Valentin", owner_id=6179840, placed_by="Valentin"),
+         '<groundspeak:owner id="6179840">Valentin</groundspeak:owner>'),
+        # #1386: no owner (Adventure Lab) -> placed_by, without an id.
+        (dict(owner_name=None, owner_id=None, placed_by="LabMaker"),
+         "<groundspeak:owner>LabMaker</groundspeak:owner>"),
+        # Owner name without an id is written without the id attribute.
+        (dict(owner_name="Valentin", owner_id=None, placed_by="Other"),
+         "<groundspeak:owner>Valentin</groundspeak:owner>"),
+    ])
+    def test_owner_element(self, kw, expected):
+        assert expected in generate_gpx([_cache(**kw)])
+
+    def test_no_owner_element_without_owner_or_placed_by(self):
+        gpx = generate_gpx([_cache(owner_name=None, owner_id=None, placed_by=None)])
+        assert "groundspeak:owner" not in gpx
+
     def test_urlname_is_name_by_owner(self):
         gpx = generate_gpx([_cache(name="Ruhebank", placed_by="brenzo")])
         assert "<urlname>Ruhebank by brenzo</urlname>" in gpx

@@ -1206,14 +1206,16 @@ def _gpx_chunks(
 
             # Issue #695: groundspeak:owner was missing entirely from the
             # export, even though cache.owner_name/owner_id are already
-            # populated by the importer. Only written when we actually
-            # have an owner id, matching the source GPX's own convention
-            # (the id attribute is how GSAK/geocaching.com distinguish
-            # this from placed_by, which is free text and always present).
-            if cache.owner_id:
+            # populated by the importer. The id attribute is only written
+            # when known. Issue #1386: a record with no owner (e.g. an
+            # Adventure Lab) still gets the element, with placed_by as
+            # its text, so apps reading the GPX show who placed it.
+            owner_text = cache.owner_name or cache.placed_by
+            if owner_text:
                 gs_owner = SubElement(gs_cache, "groundspeak:owner")
-                gs_owner.set("id", str(cache.owner_id))
-                gs_owner.text = cache.owner_name or cache.placed_by or ""
+                if cache.owner_id:
+                    gs_owner.set("id", str(cache.owner_id))
+                gs_owner.text = owner_text
 
             gs_type = SubElement(gs_cache, "groundspeak:type")
             gs_type.text = cache.cache_type or "Traditional Cache"

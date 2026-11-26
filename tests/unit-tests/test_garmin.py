@@ -428,7 +428,8 @@ class TestGenerateGpx:
         )])
         tags = re.findall(r"<groundspeak:(\w+)", result)
         expected_order = [
-            "cache", "name", "placed_by", "type", "container",
+            # owner: placed_by stands in for a missing owner (#1386).
+            "cache", "name", "placed_by", "owner", "type", "container",
             "attributes", "attribute",
             "difficulty", "terrain", "country", "state",
             "short_description", "long_description", "encoded_hints",
@@ -590,7 +591,8 @@ class TestGenerateGpx:
         )])
         tags = re.findall(r"<groundspeak:(\w+)", result)
         expected_order = [
-            "cache", "name", "placed_by", "type", "container",
+            # owner: placed_by stands in for a missing owner (#1386).
+            "cache", "name", "placed_by", "owner", "type", "container",
             "attributes", "attribute",
             "difficulty", "terrain", "country", "state",
             "short_description", "long_description", "encoded_hints",
