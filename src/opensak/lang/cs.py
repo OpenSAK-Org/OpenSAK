@@ -976,6 +976,7 @@ STRINGS: dict[str, str] = {
     "db_move_btn":                  "➜  Přesunout…",
     "db_move_title":                "Přesunout databázi",
     "db_target_file_label":         "Nový soubor:",
+    "db_move_create_subfolder":      "Vytvořit samostatnou podsložku pro databázi",
     "db_move_info":                 "Databáze si ponechá svůj název. Soubor se přesune do zvolené složky a originál se smaže, jakmile je kopie zkontrolována.",
     "db_moved_title":               "Databáze přesunuta",
     "db_moved_msg":                 "'{name}' byla přesunuta do:\n{path}",

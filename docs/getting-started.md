@@ -255,6 +255,8 @@ These are stored inside the database file, so they stay with the database when y
 ### Copying and Moving a Database
 In **File → Manage databases…**, **Copy…** makes a copy under a new name and **Move…** moves a database to another folder under the same name — for example from a USB stick to your internal disk. Both let you choose the folder and never overwrite an existing file. Move only deletes the original once the copy has been checked.
 
+**Move…** creates a separate subfolder for the database by default. Clear **Create a separate subfolder for the database** to move the file directly into the chosen folder. The preview shows the final path before you confirm.
+
 If the database you used last is on a drive that isn't connected when you start OpenSAK, OpenSAK opens another database from your list and tells you which one was missing. The missing one stays in the list, so you can switch back when the drive is connected again.
 
 ### Backing Up

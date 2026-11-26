@@ -977,6 +977,7 @@ STRINGS: dict[str, str] = {
     "db_move_btn":                  "➜  Verschieben…",
     "db_move_title":                "Datenbank verschieben",
     "db_target_file_label":         "Neue Datei:",
+    "db_move_create_subfolder":      "Eigenen Unterordner für die Datenbank anlegen",
     "db_move_info":                 "Die Datenbank behält ihren Namen. Die Datei wird in den gewählten Ordner verschoben, und das Original wird gelöscht, sobald die Kopie geprüft ist.",
     "db_moved_title":               "Datenbank verschoben",
     "db_moved_msg":                 "'{name}' wurde verschoben nach:\n{path}",

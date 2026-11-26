@@ -106,6 +106,34 @@ class TestCopyToFolder:
 # ── Move a single database ────────────────────────────────────────────────────
 
 class TestMoveDatabase:
+    def test_move_into_managed_subfolder_and_rename_it(self, mgr):
+        trip = _db(mgr, "Trip")
+        source = trip.path
+        orig_uuid = _seed_uuid(mgr, "Trip")
+        assert mgr.move_database(trip, source.parent, create_subfolder=True) is None
+
+        assert trip.path == source.parent / "Trip" / "Trip.db"
+        assert trip.managed_folder
+        assert not source.exists()
+        assert _uuid(trip.path) == orig_uuid
+        mgr.rename(trip, "New Trip")
+        assert trip.path == source.parent / "New Trip" / "New Trip.db"
+        assert _uuid(trip.path) == orig_uuid
+
+    def test_move_into_occupied_subfolder_keeps_source(self, mgr):
+        trip = _db(mgr, "Trip")
+        source = trip.path
+        occupied = source.parent / "Trip"
+        occupied.mkdir()
+        unrelated = occupied / "notes.txt"
+        unrelated.write_text("keep me")
+
+        with pytest.raises(ValueError):
+            mgr.move_database(trip, source.parent, create_subfolder=True)
+
+        assert trip.path == source and source.is_file()
+        assert list(occupied.iterdir()) == [unrelated]
+
     def test_move_non_active_keeps_id_and_removes_source(self, mgr, tmp_path):
         usb = tmp_path / "usb"
         usb.mkdir()
@@ -188,7 +216,10 @@ class TestMoveDatabase:
         with pytest.raises(FileNotFoundError):
             mgr.move_database(trip, tmp_path)
 
-    def test_failed_copy_leaves_everything_unchanged(self, mgr, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("create_subfolder", [False, True])
+    def test_failed_copy_leaves_everything_unchanged(
+        self, mgr, tmp_path, monkeypatch, create_subfolder
+    ):
         import opensak.db.manager as manager_mod
 
         usb = tmp_path / "usb"
@@ -202,11 +233,11 @@ class TestMoveDatabase:
 
         monkeypatch.setattr(manager_mod.shutil, "copy2", broken_copy)
         with pytest.raises(ValueError):
-            mgr.move_database(trip, usb)
+            mgr.move_database(trip, usb, create_subfolder=create_subfolder)
 
         assert trip.path == old_path
         assert old_path.exists()
-        assert not (usb / "Trip.db").exists()
+        assert list(usb.iterdir()) == []
 
     def test_undeletable_source_uses_new_path_and_warns(self, mgr, tmp_path, monkeypatch):
         usb = tmp_path / "usb"

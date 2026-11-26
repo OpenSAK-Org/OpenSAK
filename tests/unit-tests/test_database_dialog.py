@@ -396,6 +396,7 @@ class TestManagerDialog:
                 self.name = name
                 self.folder = folder
                 self.target_path = folder / f"{name}.db"
+                self.create_subfolder = not copy
 
             def exec(self):
                 return QDialog.DialogCode.Accepted if accepted else QDialog.DialogCode.Rejected
@@ -448,7 +449,9 @@ class TestManagerDialog:
         _select(dlg, "Other")
         dlg._move_database()
         assert seen["copy"] is False
-        manager.move_database.assert_called_once_with(manager._dbs["other"], Path("/usb"))
+        manager.move_database.assert_called_once_with(
+            manager._dbs["other"], Path("/usb"), create_subfolder=True,
+        )
         info.assert_called_once()
 
     def test_move_active_database_refreshes_title(self, dlg, manager, monkeypatch):
@@ -685,14 +688,31 @@ class TestDatabaseLocationDialog:
         assert dlg.target_path == usb / "Trip 2027" / "Trip 2027.db"
         assert dlg._preview.text() == str(usb / "Trip 2027" / "Trip 2027.db")
 
-    def test_move_keeps_file_name(self, qtbot, tmp_path):
+    def test_move_preview_toggles_managed_subfolder(self, qtbot, tmp_path):
         usb = tmp_path / "usb"
         usb.mkdir()
         dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "old" / "trip_x.db"), copy=False)
         qtbot.addWidget(dlg)
         dlg.set_folder(usb)
         assert dlg.name == "Trip"
+        assert dlg.create_subfolder
+        assert dlg.target_path == usb / "Trip" / "Trip.db"
+        assert dlg._preview.text() == str(dlg.target_path)
+        dlg._subfolder_check.setChecked(False)
         assert dlg.target_path == usb / "trip_x.db"
+        assert dlg._preview.text() == str(dlg.target_path)
+
+    def test_move_refuses_an_occupied_database_subfolder(self, qtbot, tmp_path, monkeypatch):
+        (tmp_path / "Trip").mkdir()
+        warn = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "warning", warn)
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "old" / "Trip.db"), copy=False)
+        qtbot.addWidget(dlg)
+
+        dlg._validate()
+
+        warn.assert_called_once()
+        assert dlg.result() != QDialog.DialogCode.Accepted
 
     def test_refuses_existing_target(self, qtbot, tmp_path, monkeypatch):
         usb = tmp_path / "usb"
@@ -703,6 +723,7 @@ class TestDatabaseLocationDialog:
         dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=False)
         qtbot.addWidget(dlg)
         dlg.set_folder(usb)
+        dlg._subfolder_check.setChecked(False)
         dlg._validate()
         warn.assert_called_once()
         assert dlg.result() != QDialog.DialogCode.Accepted
@@ -712,6 +733,7 @@ class TestDatabaseLocationDialog:
         monkeypatch.setattr(dd.QMessageBox, "warning", warn)
         dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=False)
         qtbot.addWidget(dlg)
+        dlg._subfolder_check.setChecked(False)
         dlg._validate()
         warn.assert_called_once()
 

@@ -979,6 +979,7 @@ STRINGS: dict[str, str] = {
     "db_move_btn":                  "➜  Verplaatsen…",
     "db_move_title":                "Database verplaatsen",
     "db_target_file_label":         "Nieuw bestand:",
+    "db_move_create_subfolder":      "Een eigen submap voor de database maken",
     "db_move_info":                 "De database behoudt zijn naam. Het bestand wordt naar de gekozen map verplaatst en het origineel wordt verwijderd zodra de kopie is gecontroleerd.",
     "db_moved_title":               "Database verplaatst",
     "db_moved_msg":                 "'{name}' is verplaatst naar:\n{path}",

@@ -976,6 +976,7 @@ STRINGS: dict[str, str] = {
     "db_move_btn":                  "➜  Flyt…",
     "db_move_title":                "Flyt database",
     "db_target_file_label":         "Ny fil:",
+    "db_move_create_subfolder":      "Opret en separat undermappe til databasen",
     "db_move_info":                 "Databasen beholder sit navn. Filen flyttes til den valgte mappe, og originalen slettes, når kopien er kontrolleret.",
     "db_moved_title":               "Database flyttet",
     "db_moved_msg":                 "'{name}' er flyttet til:\n{path}",

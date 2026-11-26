@@ -910,10 +910,20 @@ class DatabaseManager:
         ).strip()
         return f"{safe_name}.db"
 
-    def move_database(self, db_info: "DatabaseInfo", new_dir: Path) -> Optional[str]:
+    @staticmethod
+    def move_target_path(db_info: DatabaseInfo, directory: Path, create_subfolder: bool) -> Path:
+        """Resolve the path displayed by the move dialog and used by the move."""
+        if create_subfolder:
+            return DatabaseManager.new_database_path(db_info.name, directory)
+        return directory / db_info.path.name
+
+    def move_database(
+        self, db_info: DatabaseInfo, new_dir: Path, *, create_subfolder: bool = False,
+    ) -> Optional[str]:
         """
         Issue #1047: move one database (with its -wal/-shm sidecars) to the
-        folder *new_dir*, keeping its name and database id.
+        folder *new_dir*, optionally in a new managed subfolder, keeping its
+        display name and database id.
 
         The original is deleted only after the copy is verified. Returns a
         warning message if the copy is in place and in use but the original
@@ -927,17 +937,19 @@ class DatabaseManager:
         old_path = db_info.path
         if not db_info.exists:
             raise FileNotFoundError(tr("db_err_file_not_found", path=old_path))
-        new_path = new_dir / old_path.name
+        new_path = self.move_target_path(db_info, new_dir, create_subfolder)
         if new_path == old_path:
             raise ValueError(tr("db_err_move_same_folder", name=db_info.name))
-        try:
-            new_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise ValueError(tr("db_err_mkdir_failed", path=new_dir) + f"\n{exc}")
+        self._create_destination_folder(new_path.parent, exclusive=create_subfolder)
 
         was_active = db_info == self._active
         try:
             original_removed = self._relocate(db_info, new_path, delete_original=True)
+            db_info.managed_folder = create_subfolder
+        except ValueError:
+            if create_subfolder:
+                _remove_empty_folder(new_path.parent)
+            raise
         finally:
             if was_active:
                 # The active engine was disposed to release the file. Reopen
@@ -978,12 +990,12 @@ class DatabaseManager:
         from opensak.db.database import dispose_engine
 
         old_path = db_info.path
-        if self._find_by_path(new_path) or new_path.exists():
+        if self._find_by_path(new_path) or new_path.exists() or new_path.is_symlink():
             raise ValueError(
                 tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))
             )
         new_companion = companion.companion_path(new_path)
-        if new_companion.exists():
+        if new_companion.exists() or new_companion.is_symlink():
             raise ValueError(
                 tr("db_err_move_target_exists", name=db_info.name, path=str(new_companion))
             )

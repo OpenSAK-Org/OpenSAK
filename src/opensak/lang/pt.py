@@ -976,6 +976,7 @@ STRINGS: dict[str, str] = {
     "db_move_btn":                  "➜  Mover…",
     "db_move_title":                "Mover base de dados",
     "db_target_file_label":         "Novo ficheiro:",
+    "db_move_create_subfolder":      "Criar uma subpasta para a base de dados",
     "db_move_info":                 "A base de dados mantém o nome. O ficheiro é movido para a pasta escolhida e o original é apagado depois de a cópia ser verificada.",
     "db_moved_title":               "Base de dados movida",
     "db_moved_msg":                 "'{name}' foi movida para:\n{path}",

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem,
     QLineEdit, QFileDialog, QMessageBox,
-    QGroupBox, QFormLayout, QDialogButtonBox,
+    QGroupBox, QFormLayout, QDialogButtonBox, QCheckBox,
     QSizePolicy
 )
 
@@ -158,6 +158,13 @@ class DatabaseLocationDialog(QDialog):
         folder_row.addWidget(browse_btn)
         form.addRow(tr("file_export_folder"), folder_row)
 
+        self._subfolder_check: QCheckBox | None = None
+        if not copy:
+            self._subfolder_check = QCheckBox(tr("db_move_create_subfolder"))
+            self._subfolder_check.setChecked(True)
+            self._subfolder_check.toggled.connect(self._update_preview)
+            form.addRow(self._subfolder_check)
+
         self._preview = QLabel()
         self._preview.setWordWrap(True)
         self._preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -193,10 +200,14 @@ class DatabaseLocationDialog(QDialog):
         return self._folder
 
     @property
+    def create_subfolder(self) -> bool:
+        return self._subfolder_check is not None and self._subfolder_check.isChecked()
+
+    @property
     def target_path(self) -> Path:
         if self._copy:
             return DatabaseManager.new_database_path(self.name, self._folder)
-        return self._folder / self._db.path.name
+        return DatabaseManager.move_target_path(self._db, self._folder, self.create_subfolder)
 
     def set_folder(self, folder: Path) -> None:
         self._folder = Path(folder)
@@ -231,12 +242,14 @@ class DatabaseLocationDialog(QDialog):
                 self, tr("warning"), tr("db_err_move_same_folder", name=self._db.name)
             )
             return
-        if self._copy and (target.parent.exists() or target.parent.is_symlink()):
+        if (self._copy or self.create_subfolder) and (
+            target.parent.exists() or target.parent.is_symlink()
+        ):
             QMessageBox.warning(
                 self, tr("warning"), tr("db_err_new_folder_exists", path=target.parent),
             )
             return
-        if target.exists():
+        if target.exists() or target.is_symlink():
             QMessageBox.warning(
                 self, tr("warning"),
                 tr("db_err_target_path_exists", name=self.name, path=str(target)),
@@ -582,7 +595,9 @@ class DatabaseManagerDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            warning = self._manager.move_database(db, dlg.folder)
+            warning = self._manager.move_database(
+                db, dlg.folder, create_subfolder=dlg.create_subfolder,
+            )
         except Exception as e:
             self._refresh_list(select_db=db)
             QMessageBox.warning(self, tr("warning"), str(e))
