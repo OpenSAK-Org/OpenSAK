@@ -4,14 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.7] — Unreleased
+## [1.23.0-beta.7] — 2026-11-26
 
 > Headline: **Repair a database, more base maps and shared macros.**
 > Repair… checks a database like GSAK's Repair/Defrag and fixes only what
 > you tick, after a backup. The map gets aerial imagery and national
 > topographic maps, the Macro manager can install and update macros from
 > OpenSAK-Macros, and the ◎ button shows only the selected cache. Plus
-> fixes for GSAK dates, MTP exports on Windows and the macro sandbox.
+> fixes for GSAK dates, the Virtual container, log IDs in GPX exports,
+> MTP exports on Windows and the macro sandbox.
 >
 > New texts in the user interface are machine-translated for all
 > languages except English and Danish. Corrections are welcome.
@@ -117,6 +118,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   dates one day early (#1363)** — an imported filter now compares these
   columns as GSAK's local dates. Before, for example, a FavPoints-per-day
   filter also let in caches that GSAK leaves out. Contributed by nagisml.
+
+- **GSAK import turned the container "Virtual" into "Not chosen"
+  (#1372)** — a cache now gets the same container whether it comes from
+  a GSAK database or a GPX file. "Virtual" is a new choice in the
+  container filter, and an imported GSAK filter with Virtual ticked
+  keeps it. Existing Virtual, Webcam and Lab Caches stored as "Not
+  chosen" get "Virtual" when the database is opened (schema 30).
+  Contributed by nagisml.
+
+- **GPX/GGZ export wrote OpenSAK's internal log IDs (#1373)** — tools
+  that read the log ID, such as c:geo, got values like
+  `GC19FJ0_1394478404`. The export now writes the plain geocaching.com
+  log ID (`1394478404`), as GSAK does. Re-importing such a file no
+  longer adds a second copy of logs without a real ID. Contributed by
+  nagisml.
+
+- **German texts address you consistently as "Sie" (#1380)** — the
+  German and Swiss German translations mixed "Sie" and "du", used two
+  kinds of dashes and wrote the state label two ways. Contributed by
+  nagisml.
 
 ## [1.23.0-beta.6] — 2026-11-19
 
