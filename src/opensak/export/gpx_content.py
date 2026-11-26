@@ -141,6 +141,20 @@ def export_log_id(log_id: Optional[str], gc_code: Optional[str]) -> str:
     return log_id
 
 
+def log_id_number(log_id: Optional[str]) -> int:
+    """A stored log id as a number, for ordering logs of the same date
+    (#1385): a plain GPX id, or the lLogId of the GSAK importer's
+    ``f"{gc_code}_{lLogId}"``. Ids compare as numbers, not text ("999" <
+    "1000"). A missing, generated (``gen_…``) or non-numeric id is -1, so
+    it sorts after every real id."""
+    if not log_id or log_id.startswith("gen_"):
+        return -1
+    try:
+        return int(log_id.rsplit("_", 1)[-1])
+    except ValueError:
+        return -1
+
+
 def is_extra_info_log(log_id: Optional[str], finder: Optional[str]) -> bool:
     """True if a GPX log is the extra-info log of an OpenSAK export (#454),
     which an import skips."""
@@ -280,14 +294,17 @@ class GpxContent:
     def select_logs(self, logs: Iterable, is_mine: Optional[Callable[[Any], bool]] = None) -> list:
         """*logs* newest first, cut to max_logs. With my_logs_always the
         user's own logs (*is_mine*) that the limit cut are kept as well,
-        still in date order."""
+        still in date order. Logs of the same date are ordered by log id,
+        higher first, as GSAK does (#1385)."""
         min_dt = datetime.min.replace(tzinfo=timezone.utc)
 
-        def _key(log) -> datetime:
+        def _key(log) -> tuple[datetime, int]:
             when = log.log_date
             if when is None:
-                return min_dt
-            return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+                when = min_dt
+            elif not when.tzinfo:
+                when = when.replace(tzinfo=timezone.utc)
+            return when, log_id_number(log.log_id)
 
         ordered = sorted(logs or [], key=_key, reverse=True)
         if not self.max_logs or len(ordered) <= self.max_logs:

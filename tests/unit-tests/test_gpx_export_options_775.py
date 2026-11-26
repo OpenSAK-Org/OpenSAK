@@ -21,7 +21,7 @@ from opensak.db.models import Cache, Log, UserNote, Waypoint
 from opensak.export.file_export import select_for_export, wpt_counts, write_export_file
 from opensak.export.file_export_settings import FileExportSettings
 from opensak.export.gpx_content import (
-    DEFAULT_CONTENT, GpxContent, is_user_note_log, normalize_note,
+    DEFAULT_CONTENT, GpxContent, is_user_note_log, log_id_number, normalize_note,
 )
 from opensak.gps.garmin import generate_ggz, generate_gpx, gpx_bounds
 from opensak.importer import import_gpx
@@ -133,6 +133,23 @@ class TestGpxContent:
         logs = [_log("a", 1), SimpleNamespace(log_id="b", log_date=datetime(2026, 2, 1)),
                 SimpleNamespace(log_id="c", log_date=None)]
         assert [l.log_id for l in DEFAULT_CONTENT.select_logs(logs)] == ["b", "a", "c"]
+
+    def test_select_logs_same_date_by_log_id(self):
+        # #1385: same date -> higher log id first, compared as numbers, as GSAK does.
+        logs = [_log(i, 7) for i in ("100", "1000", "250")]
+        assert [l.log_id for l in DEFAULT_CONTENT.select_logs(logs)] == ["1000", "250", "100"]
+        assert [l.log_id for l in GpxContent(max_logs=2).select_logs(logs)] == ["1000", "250"]
+        # GSAK importer ids, generated and missing ids; date still comes first.
+        logs = [_log("GC1_99", 7), _log("gen_GC1_5", 7), _log(None, 7),
+                _log("GC1_1000", 7), _log("GC1_1", 8)]
+        assert [l.log_id for l in DEFAULT_CONTENT.select_logs(logs)][:3] == ["GC1_1", "GC1_1000", "GC1_99"]
+
+    @pytest.mark.parametrize("log_id, expected", [
+        ("1234", 1234), ("GC12AB_987", 987), ("GC12AB_-2", -2),
+        ("gen_GC12AB_3", -1), (None, -1), ("", -1), ("abc", -1),
+    ])
+    def test_log_id_number(self, log_id, expected):
+        assert log_id_number(log_id) == expected
 
     def test_is_user_note_log(self):
         notes = {normalize_note("Solved:\r\nN 47")}
