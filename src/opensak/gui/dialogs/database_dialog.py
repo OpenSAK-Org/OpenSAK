@@ -195,7 +195,7 @@ class DatabaseLocationDialog(QDialog):
     @property
     def target_path(self) -> Path:
         if self._copy:
-            return self._folder / DatabaseManager.file_name_for(self.name)
+            return DatabaseManager.new_database_path(self.name, self._folder)
         return self._folder / self._db.path.name
 
     def set_folder(self, folder: Path) -> None:
@@ -217,7 +217,8 @@ class DatabaseLocationDialog(QDialog):
         if self._copy and not self.name:
             self._preview.setText("—")
         else:
-            self._preview.setText(str(resolve_physical_appdata_path(self.target_path)))
+            display_folder = resolve_physical_appdata_path(self._folder)
+            self._preview.setText(str(display_folder / self.target_path.relative_to(self._folder)))
 
     def _validate(self) -> None:
         global _last_destination
@@ -228,6 +229,11 @@ class DatabaseLocationDialog(QDialog):
         if not self._copy and target == self._db.path:
             QMessageBox.warning(
                 self, tr("warning"), tr("db_err_move_same_folder", name=self._db.name)
+            )
+            return
+        if self._copy and (target.parent.exists() or target.parent.is_symlink()):
+            QMessageBox.warning(
+                self, tr("warning"), tr("db_err_new_folder_exists", path=target.parent),
             )
             return
         if target.exists():
@@ -558,7 +564,7 @@ class DatabaseManagerDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            new_db = self._manager.copy_database(db, dlg.name, dlg.target_path)
+            new_db = self._manager.copy_database(db, dlg.name, directory=dlg.folder)
             self._refresh_list()
             QMessageBox.information(
                 self, tr("db_copied_title"),

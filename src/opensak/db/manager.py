@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import shutil
 import time
 from datetime import datetime
@@ -22,6 +23,7 @@ from opensak.backup.snapshot import SnapshotError, snapshot_database
 from opensak.db import companion
 from opensak.lang import tr
 from opensak.settings_store import get_store
+from opensak.utils.file_names import is_reserved_device_name
 
 if TYPE_CHECKING:
     from opensak.db.lock import DatabaseLock
@@ -37,9 +39,6 @@ from opensak.logger import get_logger
 _debug_log = get_logger("db_manager")
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
-_WINDOWS_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
-    f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "123456789¹²³"
-}
 # Leave room for extensions, companion files and SQLite sidecars.
 _MAX_DATABASE_STEM_BYTES = 230
 
@@ -70,13 +69,61 @@ def _is_valid_sqlite_file(path: Path) -> bool:
     return header == _SQLITE_MAGIC
 
 
-def _rename_companion(old_db: Path, new_db: Path) -> None:
-    """Rename *old_db*'s companion database and its sidecars to go with
-    *new_db* (#1034). Nothing if it has none."""
-    old_companion = companion.companion_path(old_db)
-    new_companion = companion.companion_path(new_db)
-    for src in companion.files(old_db):
-        src.rename(Path(str(new_companion) + src.name[len(old_companion.name):]))
+def _rename_database_files(old_path: Path, new_path: Path, folder: Path) -> None:
+    """Rename database files in place, then move their folder if needed."""
+    old_companion = companion.companion_path(old_path)
+    new_companion = companion.companion_path(new_path)
+    pairs = [(old_path, new_path)] + [
+        (Path(str(old_path) + suffix), Path(str(new_path) + suffix))
+        for suffix in ("-shm", "-wal", "-journal")
+        if Path(str(old_path) + suffix).exists()
+    ] + [
+        (src, Path(str(new_companion) + src.name[len(old_companion.name):]))
+        for src in companion.files(old_path)
+    ]
+
+    moves_folder = old_path.parent.name != folder.name
+    reserved_folder = False
+    renamed: list[tuple[Path, Path]] = []
+    try:
+        # POSIX rename can replace an empty directory. Claim the destination
+        # first so simultaneous create/copy/restore calls cannot claim it.
+        # Windows rename already refuses to replace an existing directory.
+        if moves_folder and os.name != "nt" and not _same_name_ignoring_case(old_path.parent, folder):
+            folder.mkdir()
+            reserved_folder = True
+        for source, target in pairs:
+            if source.name != target.name:
+                source.rename(target)
+                renamed.append((source, target))
+        if moves_folder:
+            old_path.parent.rename(folder)
+    except OSError:
+        try:
+            for source, target in reversed(renamed):
+                target.rename(source)
+        finally:
+            if reserved_folder:
+                _remove_empty_folder(folder)
+        raise
+
+
+def _same_name_ignoring_case(source: Path, target: Path) -> bool:
+    """Allow a spelling-only rename on a case-insensitive filesystem."""
+    return (
+        source.name.casefold() == target.name.casefold()
+        and not target.is_symlink()
+        and target.exists()
+        and source.exists()
+        and source.samefile(target)
+    )
+
+
+def _remove_empty_folder(path: Path) -> None:
+    try:
+        path.rmdir()
+    except OSError:
+        logger.warning("Could not remove database folder %s", path)
 
 
 def _remove_with_sidecars(path: Path) -> None:
@@ -91,7 +138,8 @@ def _remove_with_sidecars(path: Path) -> None:
 class DatabaseInfo:
     """Metadata om en enkelt database."""
 
-    def __init__(self, name: str, path: Path):
+    def __init__(self, name: str, path: Path, *, managed_folder: bool = False):
+        self.managed_folder = managed_folder
         self.name = name
         self.path = Path(path)
 
@@ -112,11 +160,15 @@ class DatabaseInfo:
         return None
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "path": str(self.path)}
+        entry: dict[str, str | bool] = {"name": self.name, "path": str(self.path)}
+        if self.managed_folder:
+            entry["managed_folder"] = True
+        return entry
 
     @classmethod
     def from_dict(cls, data: dict) -> "DatabaseInfo":
-        return cls(data["name"], Path(data["path"]))
+        return cls(data["name"], Path(data["path"]),
+                   managed_folder=data.get("managed_folder") is True)
 
     def __repr__(self) -> str:
         return f"<DatabaseInfo {self.name!r} @ {self.path}>"
@@ -208,19 +260,25 @@ class DatabaseManager:
                     name = entry.get("name")
                     path = entry.get("path")
                     if name and path:
-                        migrated = self._migrate_path(Path(path))
+                        original_path = Path(path)
+                        migrated = (
+                            original_path if entry.get("managed_folder") is True
+                            else self._migrate_path(original_path)
+                        )
                         _debug_log.debug(
                             "_load_from_settings: database %r -> %s "
                             "(original path %r, exists on disk: %s)",
                             name, migrated, path, migrated.exists(),
                         )
-                        info = DatabaseInfo(name, migrated)
+                        info = DatabaseInfo.from_dict({**entry, "path": migrated})
                         self._databases.append(info)
 
         # Aktiv database
         active_path = raw_active_path
         if active_path:
-            migrated_active = self._migrate_path(Path(active_path))
+            migrated_active = Path(active_path)
+            if not self._find_by_path(migrated_active):
+                migrated_active = self._migrate_path(migrated_active)
             found = self._find_by_path(migrated_active)
             _debug_log.debug(
                 "_load_from_settings: active path %r -> %s, matched a known "
@@ -442,15 +500,15 @@ class DatabaseManager:
 
     @staticmethod
     def default_path_for(name: str) -> Path:
-        """Return the flat database path used by restores and older installations."""
+        """Return the path for a new database under the configured directory."""
         from opensak.settings_store import get_db_dir
-        return get_db_dir() / DatabaseManager.file_name_for(name)
+        return DatabaseManager.new_database_path(name, get_db_dir())
 
     @staticmethod
     def new_database_path(name: str, directory: Path) -> Path:
         """Build a portable folder and SQLite filename for a new database."""
         stem = DatabaseManager.file_name_for(name).removesuffix(".db") or "_"
-        if stem.upper() in _WINDOWS_DEVICE_NAMES:
+        if is_reserved_device_name(stem):
             stem = f"_{stem}"
         encoded = stem.encode("utf-8")
         if len(encoded) > _MAX_DATABASE_STEM_BYTES:
@@ -458,6 +516,17 @@ class DatabaseManager:
             prefix = encoded[:_MAX_DATABASE_STEM_BYTES - len(suffix)]
             stem = prefix.decode("utf-8", errors="ignore").rstrip() + suffix
         return directory / stem / f"{stem}.db"
+
+    @staticmethod
+    def _create_destination_folder(parent: Path, *, exclusive: bool) -> None:
+        try:
+            parent.mkdir(parents=True, exist_ok=not exclusive)
+        except FileExistsError as exc:
+            if exclusive:
+                raise ValueError(tr("db_err_new_folder_exists", path=parent)) from exc
+            raise ValueError(tr("db_err_mkdir_failed", path=parent) + f"\n{exc}") from exc
+        except OSError as exc:
+            raise ValueError(tr("db_err_mkdir_failed", path=parent) + f"\n{exc}") from exc
 
     @staticmethod
     def is_valid_database_file(path: Path) -> bool:
@@ -471,13 +540,12 @@ class DatabaseManager:
         if self._find_by_name(name):
             raise ValueError(tr("db_err_name_exists", name=name))
 
-        from opensak.settings_store import get_db_dir
-
         create_folder = path is None
-        path = (
-            self.new_database_path(name, directory if directory is not None else get_db_dir())
-            if path is None else Path(path)
-        )
+        if path is None:
+            path = (self.default_path_for(name) if directory is None
+                    else self.new_database_path(name, directory))
+        else:
+            path = Path(path)
 
         # #539: init_db() would reopen an existing file and expose its data
         # under the name of a supposedly empty database.
@@ -487,16 +555,7 @@ class DatabaseManager:
             )
 
         parent = path.parent
-        try:
-            parent.mkdir(parents=True, exist_ok=not create_folder)
-        except FileExistsError as e:
-            if create_folder:
-                raise ValueError(tr("db_err_new_folder_exists", path=parent)) from e
-            raise ValueError(tr("db_err_mkdir_failed", path=parent) + f"\n{e}") from e
-        except OSError as e:
-            raise ValueError(
-                tr("db_err_mkdir_failed", path=parent) + f"\n{e}"
-            ) from e
+        self._create_destination_folder(parent, exclusive=create_folder)
 
         from opensak.db.database import init_db, session_for
 
@@ -525,13 +584,10 @@ class DatabaseManager:
                 companion.forget(path)
                 _remove_with_sidecars(path)
                 _remove_with_sidecars(companion.companion_path(path))
-                try:
-                    parent.rmdir()
-                except OSError:
-                    logger.warning("Could not remove failed database folder %s", parent)
+                _remove_empty_folder(parent)
             raise
 
-        info = DatabaseInfo(name, path)
+        info = DatabaseInfo(name, path, managed_folder=create_folder)
         # Its db_uuid right away, not only when it is first opened: a
         # database filled in the background (GSAK import into a new
         # database) has an id before its companion file is made (#1034).
@@ -567,7 +623,7 @@ class DatabaseManager:
         self._save_to_settings()
         return info
 
-    def add_existing(self, path: Path, name: str) -> "DatabaseInfo":
+    def add_existing(self, path: Path, name: str, *, managed_folder: bool = False) -> "DatabaseInfo":
         """
         Add the existing database file *path* to the list under the display
         name *name* (#954: a restored database). Unlike open_database(), the
@@ -580,7 +636,7 @@ class DatabaseManager:
             raise ValueError(tr("db_err_name_exists", name=name))
         if self._find_by_path(path):
             raise ValueError(tr("db_err_target_path_exists", name=name, path=str(path)))
-        info = DatabaseInfo(name, path)
+        info = DatabaseInfo(name, path, managed_folder=managed_folder)
         self._databases.append(info)
         self._save_to_settings()
         return info
@@ -638,51 +694,12 @@ class DatabaseManager:
         # them into the database file first, so they travel with it.
         self._seed_db_settings(db_info)
 
-        safe_name = "".join(
-            c if c.isalnum() or c in "-_ " else "_" for c in new_name
-        ).strip()
-        new_path = old_path.parent / f"{safe_name}.db"
-
-        if new_path != old_path:
-            for taken in (new_path, companion.companion_path(new_path)):
-                if taken.exists():
-                    raise ValueError(
-                        tr("db_err_target_path_exists", name=new_name, path=str(taken))
-                    )
-
-            # Luk engine FØR filoperationer — undgår låste filer på Windows
-            # (samme mønster som delete_database/move_databases_to).
-            from opensak.db.database import dispose_engine, init_db
-            was_active = (db_info == self._active)
-            dispose_engine(old_path)
-            gc.collect()
-            time.sleep(0.05)
-
-            try:
-                # #1034: the companion database keeps its name in step.
-                # Renamed first: if the database itself then can't be, the
-                # companion is renamed back and nothing has changed.
-                _rename_companion(old_path, new_path)
-                try:
-                    old_path.rename(new_path)
-                except OSError:
-                    _rename_companion(new_path, old_path)
-                    raise
-                for suffix in ("-shm", "-wal"):
-                    side = Path(str(old_path) + suffix)
-                    if side.exists():
-                        side.rename(Path(str(new_path) + suffix))
-            except OSError as e:
-                raise ValueError(
-                    tr("db_err_rename_failed", name=old_name, error=e)
-                )
-
-            db_info.path = new_path
-            companion.forget(old_path)
-
-            if was_active:
-                # Genåbn på den nye sti så aktiv-tilstanden forbliver konsistent.
-                init_db(db_path=new_path)
+        old_folder = old_path.parent
+        new_path = self.new_database_path(new_name, old_folder.parent)
+        if not db_info.managed_folder:
+            new_path = old_folder / new_path.name
+        if new_path.name != old_path.name or new_path.parent.name != old_folder.name:
+            self._rename_database(db_info, new_path, new_name)
 
         # Flyt evt. gemte kolonneindstillinger (#199) til det nye navn, så
         # brugeren ikke mister sin kolonneopsætning ved omdøbning. Best-
@@ -702,6 +719,65 @@ class DatabaseManager:
         db_info.name = new_name
         self._save_to_settings()
 
+    def _rename_database(self, db_info: DatabaseInfo, new_path: Path, new_name: str) -> None:
+        """Move an owned directory with its contents, or rename files in place."""
+        from opensak.db.database import dispose_engine, init_db
+
+        old_path = db_info.path
+        old_folder, new_folder = old_path.parent, new_path.parent
+        in_place = old_path.with_name(new_path.name)
+        if old_folder.name != new_folder.name:
+            if (new_folder.exists() or new_folder.is_symlink()) and not _same_name_ignoring_case(
+                old_folder, new_folder
+            ):
+                raise ValueError(tr("db_err_new_folder_exists", path=new_folder))
+            if old_folder.is_symlink():
+                raise ValueError(tr("db_err_target_path_exists", name=db_info.name,
+                                    path=str(old_folder)))
+            absolute_folder = old_folder.absolute()
+            resolved_folder = old_folder.resolve()
+            for other in self._databases:
+                if other is db_info:
+                    continue
+                if (other.path.absolute().is_relative_to(absolute_folder)
+                        or other.path.resolve().is_relative_to(resolved_folder)):
+                    raise ValueError(tr("db_err_target_path_exists", name=other.name,
+                                        path=str(other.path)))
+
+        for source, target in (
+            (old_path, in_place),
+            (companion.companion_path(old_path), companion.companion_path(in_place)),
+        ):
+            for suffix in ("", "-shm", "-wal", "-journal"):
+                src = Path(str(source) + suffix)
+                dst = Path(str(target) + suffix)
+                if (src.name != dst.name and (dst.exists() or dst.is_symlink())
+                        and not _same_name_ignoring_case(src, dst)):
+                    raise ValueError(
+                        tr("db_err_target_path_exists", name=new_name, path=str(dst))
+                    )
+
+        was_active = db_info is self._active
+        dispose_engine(old_path)
+        gc.collect()
+        time.sleep(0.05)
+        if self._active_lock is not None and self._active_lock.db_path == old_path:
+            self._active_lock.release()
+            self._active_lock = None
+        try:
+            _rename_database_files(old_path, in_place, new_folder)
+            db_info.path = new_path
+            companion.forget(old_path)
+        except OSError as exc:
+            raise ValueError(tr("db_err_rename_failed", name=db_info.name, error=exc)) from exc
+        finally:
+            if was_active and db_info.exists:
+                try:
+                    init_db(db_path=db_info.path)
+                except Exception:
+                    logger.exception("Could not reopen database %s after rename", db_info.path)
+                self._sync_active_lock()
+
     @staticmethod
     def _seed_db_settings(db_info: "DatabaseInfo") -> None:
         """Import a database's legacy opensak.json settings into it (#659).
@@ -717,15 +793,18 @@ class DatabaseManager:
                 db_info.name, exc_info=True,
             )
 
-    def copy_database(self, db_info: "DatabaseInfo", new_name: str,
-                      new_path: Optional[Path] = None) -> "DatabaseInfo":
-        """Lav en kopi af en database."""
+    def copy_database(
+        self, db_info: DatabaseInfo, new_name: str, new_path: Optional[Path] = None,
+        *, directory: Optional[Path] = None,
+    ) -> DatabaseInfo:
+        """Copy a database into its own folder, or to an explicit file path."""
         if self._find_by_name(new_name):
             raise ValueError(tr("db_err_name_exists", name=new_name))
 
+        create_folder = new_path is None
         if new_path is None:
-            from opensak.settings_store import get_db_dir
-            new_path = get_db_dir() / self.file_name_for(new_name)
+            new_path = (self.default_path_for(new_name) if directory is None
+                        else self.new_database_path(new_name, directory))
         new_path = Path(new_path)
 
         # Issue #1047: the destination can now be any folder. Never replace
@@ -733,12 +812,12 @@ class DatabaseManager:
         # never copy a database whose file is missing.
         if not db_info.exists:
             raise FileNotFoundError(tr("db_err_file_not_found", path=db_info.path))
-        if self._find_by_path(new_path) or new_path.exists():
+        if self._find_by_path(new_path) or new_path.exists() or new_path.is_symlink():
             raise ValueError(
                 tr("db_err_target_path_exists", name=new_name, path=str(new_path))
             )
         new_companion = companion.companion_path(new_path)
-        if new_companion.exists():
+        if new_companion.exists() or new_companion.is_symlink():
             raise ValueError(
                 tr("db_err_target_path_exists", name=new_name, path=str(new_companion))
             )
@@ -753,6 +832,8 @@ class DatabaseManager:
         # live in the -wal sidecar — notably when copying the active,
         # open database — and could produce an inconsistent copy if a
         # write happened mid-copy.
+        if create_folder:
+            self._create_destination_folder(new_path.parent, exclusive=True)
         try:
             snapshot_database(db_info.path, new_path)
             # #1034: the companion database is part of the copy.
@@ -760,6 +841,9 @@ class DatabaseManager:
                 snapshot_database(companion.companion_path(db_info.path), new_companion)
         except SnapshotError as exc:
             _remove_with_sidecars(new_path)
+            _remove_with_sidecars(new_companion)
+            if create_folder:
+                _remove_empty_folder(new_path.parent)
             raise SnapshotError(
                 tr("db_err_copy_failed", name=db_info.name, error=str(exc))
             ) from exc
@@ -776,7 +860,7 @@ class DatabaseManager:
                 "Could not give the copy %s a new database id", new_path,
                 exc_info=True,
             )
-        info = DatabaseInfo(new_name, new_path)
+        info = DatabaseInfo(new_name, new_path, managed_folder=create_folder)
         self._databases.append(info)
         self._save_to_settings()
         return info
@@ -927,6 +1011,7 @@ class DatabaseManager:
                     pass  # reported below via old_path.exists()
 
         db_info.path = new_path
+        db_info.managed_folder = False
         companion.forget(old_path)
         return not (delete_original and (old_path.exists() or old_companion.exists()))
 
@@ -978,6 +1063,7 @@ class DatabaseManager:
             # ikke en fejl, bare intet arbejde at udføre.
             if not old_path.exists():
                 db_info.path = new_path
+                db_info.managed_folder = False
                 updated_any = True
                 continue
 

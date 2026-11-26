@@ -680,7 +680,7 @@ class TestGsakImportDialogRun:
         assert shown and dlg._worker is None
 
     def test_existing_destination_folder_gets_a_free_name(self, dlg, manager, tmp_path, qtbot):
-        path = manager.new_database_path("Trip", manager.default_path_for("Trip").parent)
+        path = manager.default_path_for("Trip")
         path.parent.mkdir()
         other_file = path.parent / "notes.txt"
         other_file.write_text("Keep me")

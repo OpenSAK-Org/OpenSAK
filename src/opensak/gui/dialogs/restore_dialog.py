@@ -157,7 +157,9 @@ class RestoreWorker(QThread):
         manager = get_db_manager()
         for info in restored:
             try:
-                manager.delete_database(info)
+                empty_folder = manager.delete_database(info)
+                if empty_folder is not None and info.managed_folder:
+                    manager.delete_folder(empty_folder)
             except Exception:
                 logger.warning("restore: could not roll back %s", info.path,
                                exc_info=True)

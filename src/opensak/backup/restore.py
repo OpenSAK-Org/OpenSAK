@@ -66,7 +66,7 @@ def restore_database(
     """
     Restore *entry* from *backup_set* as a new database and return it.
 
-    The database is copied into the database folder under a new name
+    The database is copied into its own subfolder under a new name
     ("<name> (restored YYYY-MM-DD)", made unique if needed), checked with
     ``PRAGMA integrity_check`` before it is moved into place, and added to
     the database list. Its companion database (#1034), if the set has one,
@@ -84,31 +84,32 @@ def restore_database(
     manager = get_db_manager()
     today = today or date.today()
     base = tr("restore_db_name", name=entry.name, date=today.isoformat())
-    name, target = _free_name_and_path(manager, base)
-
-    with _source_file(backup_set, entry.file, entry.name, target, progress) as (
-        source, copy_progress,
-    ):
-        actual_version = _user_version(source)
-        if actual_version is None:
-            raise RestoreError(f"{entry.name} is not a readable database")
-        if actual_version > SCHEMA_VERSION:
-            raise RestoreError(
-                f"{entry.name} was backed up from OpenSAK "
-                f"{backup_set.opensak_version or 'a newer version'}, which uses a "
-                f"newer database format; update OpenSAK to restore it"
-            )
-        try:
-            snapshot_database(source, target, copy_progress)   # verify=True: integrity
-        except SnapshotError as exc:
-            raise RestoreError(f"{entry.name} could not be restored: {exc}") from exc
+    name, target = _reserve_destination(manager, base)
 
     try:
+        with _source_file(backup_set, entry.file, entry.name, target, progress) as (
+            source, copy_progress,
+        ):
+            actual_version = _user_version(source)
+            if actual_version is None:
+                raise RestoreError(f"{entry.name} is not a readable database")
+            if actual_version > SCHEMA_VERSION:
+                raise RestoreError(
+                    f"{entry.name} was backed up from OpenSAK "
+                    f"{backup_set.opensak_version or 'a newer version'}, which uses a "
+                    f"newer database format; update OpenSAK to restore it"
+                )
+            try:
+                snapshot_database(source, target, copy_progress)   # verify=True: integrity
+            except SnapshotError as exc:
+                raise RestoreError(f"{entry.name} could not be restored: {exc}") from exc
         _restore_companion(backup_set, entry, target)
-        info = manager.add_existing(target, name)
+        info = manager.add_existing(target, name, managed_folder=True)
     except BaseException:
         _remove_database_file(target)
         _remove_database_file(companion.companion_path(target))
+        with contextlib.suppress(OSError):
+            target.parent.rmdir()
         raise
     logger.info("restore: %s from %s → %s", entry.name, backup_set.path.name, target)
     return info
@@ -268,8 +269,8 @@ def _entry_path(backup_set: BackupSet, file: str) -> Path:
     return path
 
 
-def _free_name_and_path(manager: "DatabaseManager", base: str) -> tuple[str, Path]:
-    """A display name and file path that are both still free."""
+def _reserve_destination(manager: "DatabaseManager", base: str) -> tuple[str, Path]:
+    """Choose a free display name and claim the corresponding subfolder."""
     from opensak.db.manager import DatabaseManager
 
     names = {db.name for db in manager.databases}
@@ -277,8 +278,16 @@ def _free_name_and_path(manager: "DatabaseManager", base: str) -> tuple[str, Pat
     name, n = base, 1
     while True:
         path = DatabaseManager.default_path_for(name)
-        if name not in names and path not in paths and not path.exists():
-            return name, path
+        if name not in names and path not in paths:
+            try:
+                path.parent.mkdir(parents=True)
+            except FileExistsError:
+                if not (path.parent.exists() or path.parent.is_symlink()):
+                    raise
+            except OSError as exc:
+                raise RestoreError(f"Could not create {path.parent}: {exc}") from exc
+            else:
+                return name, path
         n += 1
         name = f"{base} ({n})"
 

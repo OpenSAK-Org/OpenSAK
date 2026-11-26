@@ -119,8 +119,8 @@ def target_state(name: str):
     if existing is not None:
         return TARGET_EXISTING, existing
     manager = get_db_manager()
-    flat_path = manager.default_path_for(name)
-    path = manager.new_database_path(name, flat_path.parent)
+    path = manager.default_path_for(name)
+    flat_path = path.parent.parent / manager.file_name_for(name)
     # Older databases may still be at the flat path. Keep offering to
     # register them explicitly, without moving them or creating a duplicate.
     for candidate in (path, flat_path):

@@ -411,7 +411,7 @@ class TestManagerDialog:
         dlg._copy_database()
         assert seen["copy"] is True
         manager.copy_database.assert_called_once_with(
-            manager._dbs["other"], "Copy", Path("/usb/Copy.db")
+            manager._dbs["other"], "Copy", directory=Path("/usb")
         )
 
     def test_copy_database_cancelled(self, dlg, manager, monkeypatch):
@@ -673,7 +673,7 @@ class TestDatabaseLocationDialog:
         qtbot.addWidget(dlg)
         assert dlg.folder == tmp_path
         assert dlg.name.startswith("Trip (")
-        assert dlg.target_path.parent == tmp_path
+        assert dlg.target_path.parent == tmp_path / dlg.target_path.stem
 
     def test_copy_target_follows_name_and_folder(self, qtbot, tmp_path):
         usb = tmp_path / "usb"
@@ -682,8 +682,8 @@ class TestDatabaseLocationDialog:
         qtbot.addWidget(dlg)
         dlg._name_edit.setText("Trip 2027")
         dlg.set_folder(usb)
-        assert dlg.target_path == usb / "Trip 2027.db"
-        assert dlg._preview.text() == str(usb / "Trip 2027.db")
+        assert dlg.target_path == usb / "Trip 2027" / "Trip 2027.db"
+        assert dlg._preview.text() == str(usb / "Trip 2027" / "Trip 2027.db")
 
     def test_move_keeps_file_name(self, qtbot, tmp_path):
         usb = tmp_path / "usb"
