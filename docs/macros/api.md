@@ -4712,7 +4712,7 @@ A column is NULL (`nil` in Lua) where nothing is known. *Field* names the same v
 | metres | A height in metres above sea level. |
 | degrees 0 – 360 | A compass bearing in degrees, 0 = north, 90 = east. |
 | cache type | One of "Traditional Cache", "Multi-cache", "Unknown Cache", "Letterbox Hybrid", "Wherigo Cache", "Earthcache", "Virtual Cache", "Webcam Cache", "Event Cache", "Cache In Trash Out Event", "Mega-Event Cache", "Giga-Event Cache", "Community Celebration Event", "Geocaching HQ Celebration", "Geocaching HQ Block Party", "Geocaching HQ Cache", "GPS Adventures Maze", "Lab Cache", "Project A.P.E. Cache", "Locationless (Reverse) Cache", "Waypoint", "Hotel/POI". |
-| container | One of "Micro", "Small", "Regular", "Large", "Other", "Not chosen". |
+| container | One of "Micro", "Small", "Regular", "Large", "Other", "Virtual", "Not chosen". |
 | log type | geocaching.com's log type: "Announcement", "Archive", "Attended", "Didn't find it", "Enable Listing", "Found it", "Needs Archived", "Needs Maintenance", "Owner Maintenance", "Post Reviewer Note", "Publish Listing", "Retract Listing", "Temporarily Disable Listing", "Unarchive", "Update Coordinates", "Webcam Photo Taken", "Will Attend", "Write note". A log imported from elsewhere may have another type. |
 
 ### Table `caches`
