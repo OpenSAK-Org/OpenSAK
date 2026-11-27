@@ -135,6 +135,12 @@ class TestTags:
         stored = _cache(last_log_date=datetime(2026, 3, 3), last_found_date=datetime(2026, 3, 1))
         assert expand("%LastLog %LastFound", stored) == "2026-03-03 2026-03-01"
 
+    def test_last4_same_date_by_log_id(self):
+        # #1385: same date -> higher log id first (as numbers), as GSAK does.
+        cache = _cache(logs=[_log("999", 7, "Didn't find it"), _log("1000", 7),
+                             _log("GC1_5", 6), _log("GC1_40", 6, "Didn't find it")])
+        assert expand("%last4", cache) == "FNNF"
+
     def test_yes_no_tags(self):
         cache = _cache(found=True, dnf=True, user_flag=True, trackables=[object()],
                        user_note=SimpleNamespace(note="n", is_corrected=True,

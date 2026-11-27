@@ -1206,20 +1206,25 @@ def _gpx_chunks(
 
             # Issue #695: groundspeak:owner was missing entirely from the
             # export, even though cache.owner_name/owner_id are already
-            # populated by the importer. Only written when we actually
-            # have an owner id, matching the source GPX's own convention
-            # (the id attribute is how GSAK/geocaching.com distinguish
-            # this from placed_by, which is free text and always present).
-            if cache.owner_id:
+            # populated by the importer. The id attribute is only written
+            # when known. Issue #1386: a record with no owner (e.g. an
+            # Adventure Lab) still gets the element, with placed_by as
+            # its text, so apps reading the GPX show who placed it.
+            owner_text = cache.owner_name or cache.placed_by
+            if owner_text:
                 gs_owner = SubElement(gs_cache, "groundspeak:owner")
-                gs_owner.set("id", str(cache.owner_id))
-                gs_owner.text = cache.owner_name or cache.placed_by or ""
+                if cache.owner_id:
+                    gs_owner.set("id", str(cache.owner_id))
+                gs_owner.text = owner_text
 
             gs_type = SubElement(gs_cache, "groundspeak:type")
             gs_type.text = cache.cache_type or "Traditional Cache"
 
             gs_container = SubElement(gs_cache, "groundspeak:container")
-            gs_container.text = cache.container or "Regular"
+            # No size known (custom data, .loc import, GPX without a
+            # container): geocaching.com's "Not chosen", not a made-up
+            # physical size (#1390).
+            gs_container.text = cache.container or "Not chosen"
 
             # Attributes (issue #656 follow-up — previously not exported at
             # all). Written here, right after container, to match the
@@ -1615,7 +1620,7 @@ def write_loc(
         terr_el.text = str(terr)
 
         container_el = SubElement(wp, "container")
-        container_el.text = cache.container or "Unknown"
+        container_el.text = cache.container or "Not chosen"  # as the GPX export (#1390)
 
         if not count:
             out.write(root_tag + ">")

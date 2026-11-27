@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+from opensak.export.gpx_content import log_id_number
 from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES
 
 # A cache's custom field values: (name, value) pairs (see
@@ -199,8 +200,11 @@ def _format_coord(value: Optional[float], is_lat: bool, fmt: str) -> str:
 
 
 def _sorted_logs(cache) -> list:
+    """Dated logs newest first; same date -> higher log id first, as GSAK
+    and GpxContent.select_logs do (#1385)."""
     logs = [lg for lg in (getattr(cache, "logs", None) or []) if lg.log_date is not None]
-    return sorted(logs, key=lambda lg: _naive(lg.log_date), reverse=True)
+    return sorted(logs, key=lambda lg: (_naive(lg.log_date), log_id_number(lg.log_id)),
+                  reverse=True)
 
 
 def _naive(value: datetime) -> datetime:
