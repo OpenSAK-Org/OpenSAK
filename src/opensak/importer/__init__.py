@@ -1037,6 +1037,69 @@ def _report_unmatched_wpts(result: "ImportResult", codes: list[str]) -> None:
     result.warnings.append(tr("import_wpts_without_cache", count=len(codes), codes=examples))
 
 
+# #1388: a user waypoint kept by an import, by its cache and prefix.
+_UserWaypoints = dict[tuple[int, str], int]
+
+
+def _delete_file_waypoints(session: Session, cache_ids: list[int]) -> _UserWaypoints:
+    """#1388: delete the waypoints of *cache_ids* that came from a file and keep
+    the user-created ones (waypoint dialog, macros, GSAK's Child_ByGSAK), as
+    GSAK does. Before, an import deleted all of them.
+
+    Returns the kept waypoints as ``{(cache_id, PREFIX): waypoint id}``, so a
+    file that carries one of them back updates it (see
+    :func:`_add_file_waypoint`) instead of adding a duplicate.
+    """
+    kept: _UserWaypoints = {}
+    for i in range(0, len(cache_ids), 500):
+        chunk = cache_ids[i:i + 500]
+        session.query(Waypoint).filter(
+            Waypoint.cache_id.in_(chunk),
+            Waypoint.created_by_user.is_(False),
+        ).delete(synchronize_session=False)
+        for wid, cid, prefix in session.query(
+            Waypoint.id, Waypoint.cache_id, Waypoint.prefix
+        ).filter(Waypoint.cache_id.in_(chunk)).order_by(Waypoint.id):
+            kept.setdefault((cid, (prefix or "").upper()), wid)
+    session.flush()
+    return kept
+
+
+def _add_file_waypoint(session: Session, cache_id: int, parent_gc: Optional[str],
+                       wp: dict, kept: _UserWaypoints) -> None:
+    """Add a waypoint parsed from a file to *cache_id*.
+
+    #1388: a user waypoint the file carries back (``gsak:Child_ByGSAK``, as
+    OpenSAK's and GSAK's exports write it) updates the kept user waypoint with
+    the same prefix on that cache instead of adding a duplicate.
+    """
+    created_by_user = bool(wp.get("created_by_user"))
+    fields = dict(
+        prefix=wp["prefix"],
+        wp_type=wp["wp_type"],
+        name=wp["name"],
+        description=wp["description"],
+        comment=wp["comment"],
+        latitude=wp["latitude"],
+        longitude=wp["longitude"],
+        # #1169: GSAK's Child_ByGSAK / Child_Flag when the file has them.
+        wp_flag=bool(wp.get("wp_flag")),
+    )
+    if created_by_user:
+        wid = kept.get((cache_id, (wp["prefix"] or "").upper()))
+        existing = session.get(Waypoint, wid) if wid is not None else None
+        if existing is not None:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+            return
+    session.add(Waypoint(
+        cache_id=cache_id,
+        parent_gc_code=parent_gc,
+        created_by_user=created_by_user,
+        **fields,
+    ))
+
+
 def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 500,
                        unmatched: Optional[list[str]] = None) -> int:
     """Insert/update extra (inline) waypoints.
@@ -1063,16 +1126,11 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
         wpts_by_suffix.setdefault(wp["suffix"], []).append(wp)
 
     # One batched delete of every affected cache's stale waypoints, chunked to
-    # stay under SQLite's bound-parameter limit.
+    # stay under SQLite's bound-parameter limit. #1388: user waypoints stay.
     target_ids = list({
         suffix_to_cache_id[s] for s in wpts_by_suffix if s in suffix_to_cache_id
     })
-    for i in range(0, len(target_ids), 500):
-        chunk = target_ids[i:i + 500]
-        session.query(Waypoint).filter(
-            Waypoint.cache_id.in_(chunk)
-        ).delete(synchronize_session=False)
-    session.flush()
+    kept = _delete_file_waypoints(session, target_ids)
 
     count = 0
     batch = 0
@@ -1084,20 +1142,7 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
 
         parent_gc = suffix_to_gc_code.get(suffix)
         for wp in wps:
-            session.add(Waypoint(
-                cache_id=cache_id,
-                parent_gc_code=parent_gc,
-                prefix=wp["prefix"],
-                wp_type=wp["wp_type"],
-                name=wp["name"],
-                description=wp["description"],
-                comment=wp["comment"],
-                latitude=wp["latitude"],
-                longitude=wp["longitude"],
-                # #1169: GSAK's Child_ByGSAK / Child_Flag when the file has them.
-                created_by_user=bool(wp.get("created_by_user")),
-                wp_flag=bool(wp.get("wp_flag")),
-            ))
+            _add_file_waypoint(session, cache_id, parent_gc, wp, kept)
             count += 1
 
         batch += 1
@@ -1312,8 +1357,12 @@ def _upsert_cache(
         # that isn't in this file is left untouched.
         session.query(Attribute).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         session.query(Trackable).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        session.query(Waypoint).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        cache.waypoint_count = 0
+        # #1388: only the waypoints that came from a file; user waypoints stay
+        # and still count.
+        session.query(Waypoint).filter_by(
+            cache_id=cache.id, created_by_user=False
+        ).delete(synchronize_session=False)
+        cache.waypoint_count = session.query(Waypoint).filter_by(cache_id=cache.id).count()
         session.flush()
 
     # Scalar fields
@@ -1982,13 +2031,9 @@ def _link_extra_waypoints(
         return 0
 
     # Batched delete of stale waypoints for every matched cache.
+    # #1388: user waypoints stay.
     target_ids = list(set(resolved.values()))
-    for i in range(0, len(target_ids), 500):
-        chunk = target_ids[i:i + 500]
-        session.query(Waypoint).filter(
-            Waypoint.cache_id.in_(chunk)
-        ).delete(synchronize_session=False)
-    session.flush()
+    kept = _delete_file_waypoints(session, target_ids)
 
     count = 0
     for suffix, wpts in extra.items():
@@ -1997,17 +2042,7 @@ def _link_extra_waypoints(
             continue
         parent_gc = resolved_gc.get(suffix)
         for wp in wpts:
-            session.add(Waypoint(
-                cache_id=cache_id,
-                parent_gc_code=parent_gc,
-                prefix=wp["prefix"],
-                wp_type=wp["wp_type"],
-                name=wp["name"],
-                description=wp["description"],
-                comment=wp["comment"],
-                latitude=wp["latitude"],
-                longitude=wp["longitude"],
-            ))
+            _add_file_waypoint(session, cache_id, parent_gc, wp, kept)
             count += 1
 
     # Refresh waypoint_count for every matched cache in one SQL pass.
