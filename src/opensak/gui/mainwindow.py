@@ -4430,6 +4430,12 @@ class MainWindow(QMainWindow):
         while generation in self._refresh_started_at and time.monotonic() < deadline:
             QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
 
+    def keep_alive(self) -> None:
+        """MacroHost: keep the windows painted while a macro waits
+        (opensak.get_url without a caption, #1391). Clicks and keys wait
+        until the macro goes on, so nothing new starts meanwhile."""
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, 50)
+
     def locations_changed(self) -> None:
         """MacroHost: opensak.import_gsak() changed the user locations."""
         self._on_home_points_imported()

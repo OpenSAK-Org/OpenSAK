@@ -40,6 +40,7 @@ import json
 import locale
 import logging
 import os
+import queue
 import sqlite3
 import threading
 import time
@@ -312,6 +313,33 @@ LOG_VARS_OPTIONS = {"depth": "depth", "globals": "globals"}
 LOG_VARS_DEPTH = 2
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
+# opensak.get_url() waits for its worker thread in steps of this many
+# seconds, keeping the windows alive in between (#1391).
+_WAIT_STEP_S = 0.05
+
+
+class _Call:
+    """A function a worker thread has the GUI thread run (#1391): the
+    worker waits for *done*, then takes result()."""
+
+    def __init__(self, func: Callable[[], Any]):
+        self._func = func
+        self.done = threading.Event()
+        self._value: Any = None
+        self._error: Optional[BaseException] = None
+
+    def run(self) -> None:
+        try:
+            self._value = self._func()
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            self.done.set()
+
+    def result(self) -> Any:
+        if self._error is not None:
+            raise self._error
+        return self._value
 
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
@@ -1073,6 +1101,12 @@ class MacroHost(Protocol):
 
     def refresh(self) -> None:
         """Apply the refreshes deferred so far and redraw the grid now."""
+
+    def keep_alive(self) -> None:
+        """Process window events for a moment while the macro waits, e.g.
+        for a web site (opensak.get_url without a caption, #1391), so the
+        windows keep painting and the desktop doesn't call OpenSAK frozen.
+        Must leave user input until the macro goes on. Optional."""
 
     # Optional too: told after opensak.import_gsak() changed OpenSAK's user
     # locations or filter profiles, so lists showing them can reload.
@@ -3665,20 +3699,8 @@ class MacroRuntime:
         if caption is not None:
             handle = self._ui("progress", func)(caption, 100)
             self._progress_windows.append(handle)
-
-        def progress(done: int, total: Optional[int]) -> None:
-            self._check_cancelled()
-            if handle is None:
-                return
-            percent = done * 100 // total if total else None
-            if not handle.update(percent, f"{done // 1024} KB"):
-                raise MacroError(f"{func}: cancelled by the user: {target.url}")
-
         try:
-            response = net_access.fetch(
-                target.url, lambda t, local: self._require_host(func, t, local),
-                timeout=timeout, max_bytes=max_bytes, progress=progress,
-            )
+            response = self._fetch_waiting(func, target, timeout, max_bytes, handle)
         except net_access.NetError as exc:
             raise MacroError(f"{func}: {exc}") from None
         finally:
@@ -3692,6 +3714,77 @@ class MacroRuntime:
             "url": response.url,
         })
         return (response.body if binary else response.text()), info
+
+    def _fetch_waiting(
+        self, func: str, target: net_access.Target, timeout: float, max_bytes: int,
+        handle: Optional["ProgressHandle"],
+    ) -> net_access.Response:
+        """net_access.fetch() in a worker thread (#1391). The macro runs on
+        the GUI thread, which meanwhile keeps the windows alive: it updates
+        the progress window *handle* (or, without one, lets the host keep
+        its windows painted), asks the user the web site questions the
+        request raises, and on Cancel stops waiting at once. A request left
+        behind ends by itself, at the latest after *timeout*."""
+        calls: queue.Queue[Optional[_Call]] = queue.Queue()
+        abandoned = threading.Event()   # the macro stopped waiting
+        finished = threading.Event()
+        read: list[tuple[int, Optional[int]]] = []    # (bytes read, in all)
+        outcome: list[Any] = []                       # response or exception
+
+        def approve(t: net_access.Target, local: bool) -> None:
+            # The question and the runtime's state belong to the GUI thread.
+            call = _Call(lambda: self._require_host(func, t, local))
+            calls.put(call)
+            while not call.done.wait(_WAIT_STEP_S):
+                if abandoned.is_set():
+                    raise net_access.NetError("no longer waited for")
+            call.result()
+
+        def progress(done: int, total: Optional[int]) -> None:
+            if abandoned.is_set():
+                raise net_access.NetError("no longer waited for")
+            read.append((done, total))
+
+        def work() -> None:
+            try:
+                outcome.append(net_access.fetch(
+                    target.url, approve, timeout=timeout, max_bytes=max_bytes,
+                    progress=progress))
+            except BaseException as exc:            # handed to the GUI thread
+                outcome.append(exc)
+            finally:
+                finished.set()
+                calls.put(None)                     # wake the GUI thread
+
+        def show() -> None:
+            if handle is None:
+                return
+            done, total = read[-1] if read else (0, None)
+            percent = done * 100 // total if total else None
+            if not handle.update(percent, f"{done // 1024} KB" if read else ""):
+                raise MacroError(f"{func}: cancelled by the user: {target.url}")
+
+        keep_alive = getattr(self._host, "keep_alive", None) if handle is None else None
+        threading.Thread(target=work, name=func, daemon=True).start()
+        try:
+            while not finished.is_set():
+                try:
+                    call = calls.get(timeout=_WAIT_STEP_S)
+                except queue.Empty:
+                    call = None
+                if call is not None:
+                    call.run()
+                self._check_cancelled()
+                show()
+                if keep_alive is not None:
+                    keep_alive()
+        finally:
+            abandoned.set()
+        show()
+        [result] = outcome
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     @staticmethod
     def _number_option(func: str, opts: dict, key: str, default: float,

@@ -527,3 +527,84 @@ def test_pause_between_requests_to_one_host(server, public, monkeypatch):
     started = time.monotonic()
     run(Host(), f'opensak.get_url("{url(server, "/")}")\nopensak.get_url("{url(server, "/")}")')
     assert time.monotonic() - started >= 0.5
+
+
+# ── Waiting for a slow server (#1391) ───────────────────────────────────────
+# The macro runs on the GUI thread. While the request runs in a worker,
+# that thread keeps the windows alive instead of blocking until the
+# server answers ("OpenSAK is not responding").
+
+
+def test_progress_window_is_updated_before_the_server_answers(server, public):
+    host = Host()
+    seen: list[float] = []
+    real = host.progress
+
+    def progress(title, total):
+        window = real(title, total)
+        update = window.update
+
+        def timed(value, text):
+            seen.append(time.monotonic())
+            return update(value, text)
+
+        window.update = timed
+        return window
+
+    host.progress = progress
+    started = time.monotonic()
+    out = run(host, f'local body = opensak.get_url("{url(server, "/slow")}", '
+                    '{ caption = "Data" })\nprint(body)')
+    assert out == ["late"]                      # the next line has the body
+    early = [t for t in seen if t - started < 1.5]   # /slow answers after 2 s
+    assert len(early) >= 5
+
+
+def test_without_a_caption_the_host_keeps_its_windows_alive(server, public):
+    class Waiting(Host):
+        def __init__(self):
+            super().__init__()
+            self.kept_alive = 0
+
+        def keep_alive(self):
+            self.kept_alive += 1
+
+    host = Waiting()
+    out = run(host, f'print(opensak.get_url("{url(server, "/slow")}"))')
+    assert out[0].startswith("late") and host.kept_alive >= 5
+
+
+def test_cancel_in_the_progress_window_does_not_wait_for_the_server(server, public):
+    host = Host()
+    host.cancel_progress = True
+    started = time.monotonic()
+    with pytest.raises(MacroError, match="cancelled by the user"):
+        run(host, f'opensak.get_url("{url(server, "/slow")}", {{ caption = "Data" }})')
+    assert time.monotonic() - started < 1       # /slow answers after 2 s
+
+
+def test_cancel_does_not_wait_for_the_server(server, public):
+    rt = MacroRuntime(Host(), output=lambda _text: None)
+    threading.Timer(0.3, rt.cancel).start()
+    started = time.monotonic()
+    with pytest.raises(MacroError, match="cancelled"):
+        rt.run(f'opensak.get_url("{url(server, "/slow")}")')
+    assert time.monotonic() - started < 1.5     # /slow answers after 2 s
+
+
+def test_web_site_questions_are_asked_on_the_macros_thread(server, public, tmp_path):
+    class Watching(Host):
+        def __init__(self):
+            super().__init__()
+            self.threads: list[threading.Thread] = []
+
+        def approve_host(self, host, **kwargs):
+            self.threads.append(threading.current_thread())
+            return super().approve_host(host, **kwargs)
+
+    host = Watching()
+    target = url(server, "/", "b.example.test")
+    run(host, f'opensak.get_url("{url(server, "/redirect")}?to={target}")',
+        macro=tmp_path / "m.lua")
+    assert [a["host"] for a in host.asked] == ["a.example.test", "b.example.test"]
+    assert host.threads == [threading.main_thread()] * 2
