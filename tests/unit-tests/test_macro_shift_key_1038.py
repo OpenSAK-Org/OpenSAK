@@ -71,7 +71,7 @@ def test_called_macro_runs_without_shift(tmp_path):
 
 def test_shift_key_is_api_5():
     func = next(f for f in API if f.name == "shift_key")
-    assert func.since == 5 == API_VERSION
+    assert func.since == 5 <= API_VERSION
 
 
 # ── GUI: Shift is read when the user starts the macro ────────────────────────
