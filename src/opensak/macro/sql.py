@@ -101,6 +101,12 @@ FETCH_SIZE = 500
 # SQLite VM instructions between two timeout checks.
 _PROGRESS_STEPS = 10_000
 
+# Called by the progress handler as well, every _PROGRESS_STEPS VM
+# instructions while a statement runs (#1398): the macro runs on the GUI
+# thread, so this is where a long statement can keep the windows alive.
+# True stops the statement (the macro was cancelled).
+Tick = Callable[[], bool]
+
 # PRAGMAs that only read, whatever their argument (a table or index name).
 _READ_PRAGMAS = frozenset({
     "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
@@ -455,6 +461,7 @@ class ReadOnlyDatabase:
         self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S,
         connection: Optional[sqlite3.Connection] = None,
         companion: Optional[CompanionAccess] = None,
+        tick: Optional[Tick] = None,
     ):
         self._db_path = Path(db_path)
         self._timeout_s = timeout_s
@@ -463,6 +470,8 @@ class ReadOnlyDatabase:
         self._companion = companion
         self._authorizer: Any = None
         self._deadline = 0.0
+        self._tick = tick
+        self._stopped = False       # the last statement was stopped by tick
 
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -487,10 +496,14 @@ class ReadOnlyDatabase:
         return self._conn
 
     def _check_deadline(self) -> int:
+        if self._tick is not None and self._tick():
+            self._stopped = True
+            return 1
         return 1 if time.monotonic() > self._deadline else 0
 
     def _start_clock(self) -> None:
         self._deadline = time.monotonic() + self._timeout_s
+        self._stopped = False
         if self._borrowed is not None:
             self._borrowed.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
 
@@ -502,6 +515,8 @@ class ReadOnlyDatabase:
 
     def _error(self, exc: sqlite3.Error) -> SqlError:
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
+            if self._stopped:
+                return SqlError("SQL query stopped: the macro was cancelled")
             return SqlError(f"SQL query aborted: took longer than {self._timeout_s:g} s")
         read_only = _read_only_macro_db(self._conn, exc)
         if read_only is not None:
@@ -767,6 +782,7 @@ class WritableDatabase:
         self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S,
         companion_owner: Callable[[], Optional[str]] = lambda: None,
         companion_owner_name: Callable[[], str] = lambda: "",
+        tick: Optional[Tick] = None,
     ):
         self._db_path = Path(db_path)
         self._timeout_s = timeout_s
@@ -774,6 +790,8 @@ class WritableDatabase:
         self._conn: Optional[sqlite3.Connection] = None
         self._authorizer: Any = None
         self._deadline = 0.0
+        self._tick = tick
+        self._stopped = False       # the last statement was stopped by tick
         # opensak.transaction(): SQLAlchemy's view of this connection and
         # its transaction, and the nesting depth (> 1: SAVEPOINTs).
         self._sa_engine: Any = None
@@ -1063,10 +1081,15 @@ class WritableDatabase:
         )
 
     def _check_deadline(self) -> int:
+        if self._tick is not None and self._tick():
+            self._stopped = True
+            return 1
         return 1 if time.monotonic() > self._deadline else 0
 
     def _error(self, exc: sqlite3.Error) -> SqlError:
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
+            if self._stopped:
+                return SqlError("SQL statement stopped: the macro was cancelled")
             return SqlError(f"SQL statement aborted: took longer than {self._timeout_s:g} s")
         read_only = _read_only_macro_db(self._conn, exc)
         if read_only is not None:
@@ -1232,7 +1255,7 @@ class WritableDatabase:
         if self._reader is None:
             self._reader = ReadOnlyDatabase(
                 self._db_path, self._timeout_s, connection=self._connection(),
-                companion=self._companion,
+                companion=self._companion, tick=self._tick,
             )
         return self._reader
 
@@ -1273,6 +1296,7 @@ class WritableDatabase:
             if self._companion.attached:
                 self._companion.load(conn)
             self._deadline = time.monotonic() + self._timeout_s
+            self._stopped = False
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
             conn.set_authorizer(self._authorizer)
             try:

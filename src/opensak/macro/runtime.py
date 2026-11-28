@@ -219,6 +219,7 @@ from opensak.stats import html as report_html
 from opensak.stats import maps as report_maps
 from opensak.stats import tables as stats_tables
 from opensak.utils import flags
+from opensak.utils.cancel import Cancelled
 from opensak.utils.constants import (
     ATTRIBUTES,
     CACHE_TYPES,
@@ -232,6 +233,12 @@ logger = logging.getLogger(__name__)
 # A runaway `while true do end` would freeze the GUI thread, so the script is
 # aborted after this many Lua VM instructions.
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
+# The instruction-count hook runs every min(limit, 1000) instructions and
+# calls MacroRuntime._tick() every TICK_HOOKS of its runs (#1398).
+TICK_HOOKS = 20
+# While Lua code (_tick) or an SQL statement (_sql_tick) runs, the windows
+# are kept alive at most every this many seconds (#1398).
+KEEP_ALIVE_INTERVAL_S = 0.05
 # Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 # opensak.choose_file(): longest accepted title / file type filter
@@ -313,9 +320,12 @@ LOG_VARS_OPTIONS = {"depth": "depth", "globals": "globals"}
 LOG_VARS_DEPTH = 2
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
-# opensak.get_url() waits for its worker thread in steps of this many
-# seconds, keeping the windows alive in between (#1391).
+# opensak.get_url() (#1391) and opensak.sleep() (#1398) wait in steps of
+# this many seconds, keeping the windows alive in between.
 _WAIT_STEP_S = 0.05
+# opensak.export_file() / export_gpx(): their progress window is updated at
+# most every this many seconds (#1398).
+_EXPORT_PROGRESS_S = 0.05
 
 
 class _Call:
@@ -623,6 +633,11 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #   * The budget is shared by all threads, so spreading the work over many
 #     coroutines does not multiply it.
 #
+# The hook also calls tick() every TICK_HOOKS runs (#1398), so that a long
+# Lua loop on the GUI thread keeps the windows painted and can be cancelled.
+# What tick() returns stops the run like stop() does (nil: go on); it is not
+# called once the run is stopped or out of budget.
+#
 # The chunk returns four functions for the runtime:
 #   * stop(msg) makes the hook sticky with *msg* right away — opensak.exit()
 #     and a cancelled run end the macro this way, so pcall cannot catch it.
@@ -639,14 +654,22 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #     for opensak.log_vars() (#1276), or nil if *level* is not the macro's
 #     own code (see below).
 _SANDBOX_SETUP = """
-local limit = ...
+local limit, tick, tick_hooks = ...
 local sethook, getinfo = debug.sethook, debug.getinfo
 local co_create, co_resume = coroutine.create, coroutine.resume
 local pack, unpack = table.pack, table.unpack
 local main = coroutine.running()
 local step = math.min(limit, 1000)
 local used, tripped, stopped = 0, false, nil
+local ticks = 0
 local function hook()
+  if not (stopped or tripped) then
+    ticks = ticks + 1
+    if ticks >= tick_hooks then
+      ticks = 0
+      stopped = tick()
+    end
+  end
   if stopped then
     sethook(hook, "", 1)
     sethook(main, hook, "", 1)
@@ -1890,6 +1913,9 @@ class MacroRuntime:
         # unsaved macro).
         self._clipboard_readers: set[Optional[Path]] = set()
         self._cancelled = threading.Event()
+        # When _keep_windows_alive() last ran (time.monotonic()); -inf so
+        # the first call always repaints, however near 0 monotonic() starts.
+        self._kept_alive = float("-inf")
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
@@ -2448,6 +2474,7 @@ class MacroRuntime:
                 Path(get_engine().url.database or ""),
                 companion_owner=self._companion_owner,
                 companion_owner_name=self._companion_owner_name,
+                tick=self._sql_tick,
             )
             # Attached again after opensak.switch_database().
             active = self._active_db_path()
@@ -2820,9 +2847,20 @@ class MacroRuntime:
     def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
         if db is not None:
             if db.path not in self._other_sql:
-                self._other_sql[db.path] = ReadOnlyDatabase(db.path)
+                self._other_sql[db.path] = ReadOnlyDatabase(db.path, tick=self._sql_tick)
             return self._other_sql[db.path]
         return self._writable_db().reader()
+
+    def _sql_tick(self) -> bool:
+        """Called while an SQL statement of the macro runs (sql.Tick,
+        #1398). The macro runs on the GUI thread, so a long statement would
+        freeze the windows: this keeps them alive at most every
+        KEEP_ALIVE_INTERVAL_S (_keep_windows_alive). True once the run is
+        cancelled, which stops the statement; _wrap() then ends the run."""
+        if self._cancelled.is_set():
+            return True
+        self._keep_windows_alive(KEEP_ALIVE_INTERVAL_S)
+        return False
 
     def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
@@ -3803,8 +3841,8 @@ class MacroRuntime:
         if last is None:
             return
         wait = net_access.MIN_INTERVAL_S - (time.monotonic() - last)
-        if wait > 0 and self._cancelled.wait(wait):
-            raise MacroError("macro cancelled")
+        if wait > 0:
+            self._wait(wait)
 
     def _host_list(self) -> list[net_access.HostPermission]:
         """The web sites the running macro may contact: those allowed this
@@ -4747,8 +4785,39 @@ class MacroRuntime:
                 f"opensak.sleep: a macro may sleep at most {SLEEP_BUDGET_S:g} s in total"
             )
         self._slept += seconds
-        if self._cancelled.wait(seconds):
-            raise MacroError("macro cancelled")
+        self._wait(seconds)
+
+    def _wait(self, seconds: float) -> None:
+        """Wait *seconds* on the GUI thread, which runs the macro (#1398),
+        in steps of _WAIT_STEP_S, keeping the windows alive in between
+        (_keep_windows_alive). A cancelled macro stops at once."""
+        deadline = time.monotonic() + seconds
+        while (left := deadline - time.monotonic()) > 0:
+            if self._cancelled.wait(min(left, _WAIT_STEP_S)):
+                raise MacroError("macro cancelled")
+            self._keep_windows_alive()
+
+    def _keep_windows_alive(self, every: float = 0.0) -> None:
+        """Let the windows paint while the macro, which runs on the GUI
+        thread, waits or works (#1398): repaint the macro's open progress
+        window (its Cancel stays clickable; the macro sees it at its next
+        p:update), otherwise let the host keep its windows painted
+        (keep_alive). With *every*, at most once in that many seconds. A
+        failing repaint is only logged: it must never end the macro, or
+        reach its pcall."""
+        if every and time.monotonic() - self._kept_alive < every:
+            return
+        try:
+            if self._progress_windows:
+                self._progress_windows[-1].update(None, "")
+            else:
+                keep_alive = getattr(self._host, "keep_alive", None)
+                if keep_alive is not None:
+                    keep_alive()
+        except Exception:
+            logger.exception("keeping the windows alive failed")
+        # Measured after the repaint, which itself may take a while.
+        self._kept_alive = time.monotonic()
 
     # -- opensak.coords --------------------------------------------------------
 
@@ -4906,12 +4975,14 @@ class MacroRuntime:
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(target))):
                     return None
         try:
-            count = write_export_file(
-                caches, target, settings.fmt,
-                use_corrected=settings.use_corrected_coords,
-                save=self._safe_saver(target),
-                content=settings.content(),
-            )
+            with self._export_progress("opensak.export_file", target) as progress:
+                count = write_export_file(
+                    caches, target, settings.fmt,
+                    use_corrected=settings.use_corrected_coords,
+                    progress_cb=progress,
+                    save=self._safe_saver(target),
+                    content=settings.content(),
+                )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         except OSError as exc:
@@ -5010,18 +5081,72 @@ class MacroRuntime:
 
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
                     return None
-        text = self._export_text(lua, func, caches, rename, describe, first_log_fn)
         try:
-            count = write_export_file(
-                caches, output, fmt, use_corrected=corrected, text=text,
-                attributes=attributes, child_waypoints=child_waypoints,
-                save=self._safe_saver(output), content=content,
-            )
+            with self._export_progress(func, output) as progress:
+                text = self._export_text(lua, func, caches, rename, describe, first_log_fn,
+                                         progress)
+                count = write_export_file(
+                    caches, output, fmt, use_corrected=corrected, text=text,
+                    attributes=attributes, child_waypoints=child_waypoints,
+                    progress_cb=progress,
+                    save=self._safe_saver(output), content=content,
+                )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {output}: {exc}") from None
         return str(output), count
+
+    @contextmanager
+    def _export_progress(self, func: str, output: Path) -> Iterator[Callable[[int, int], None]]:
+        """A progress window for an export into *output* (#1398), and the
+        progress_cb(done, total) for write_export_file(). The macro runs on
+        the GUI thread, so without it a large export froze the windows. The
+        callback updates the window at most every _EXPORT_PROGRESS_S and
+        raises Cancelled once the user presses Cancel or the macro is
+        cancelled; the run then ends with "<func>: cancelled by the user"
+        or, through the sandbox's stop(), "macro cancelled". The export
+        writes into a temporary file (safe_write_stream), so a cancelled
+        export leaves no file behind and an older file at *output* as it
+        was. Without a user interface (a headless run) only the cancel is
+        checked."""
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            from opensak.lang import tr
+
+            handle = self._host.progress(tr("file_export_dialog_title"), 100)
+            self._progress_windows.append(handle)
+        # When the window was last updated; None until the first update,
+        # which is always shown (time.monotonic() may start near 0).
+        shown: Optional[float] = None
+        by_user = False
+
+        def progress(done: int, total: int) -> None:
+            nonlocal shown, by_user
+            if self._cancelled.is_set():
+                raise Cancelled()
+            now = time.monotonic()
+            if handle is None or (
+                shown is not None and now - shown < _EXPORT_PROGRESS_S and done != total
+            ):
+                return
+            shown = now
+            # The file name only: a headless host prints every new text.
+            if not handle.update(done * 100 // total if total else None, output.name):
+                by_user = True
+                raise Cancelled()
+
+        try:
+            yield progress
+        except Cancelled:
+            if by_user:
+                raise MacroError(f"{func}: cancelled by the user: {output}") from None
+            self._check_cancelled()     # a stop that pcall cannot catch
+            raise MacroError("macro cancelled") from None
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
 
     @staticmethod
     def _lua_function(func: str, key: str, value: Any) -> Optional[Any]:
@@ -5114,9 +5239,12 @@ class MacroRuntime:
         return result[0], result[1]
 
     def _export_text(self, lua, func: str, caches: list, rename, describe,
-                     first_log=None) -> ExportText:
+                     first_log=None,
+                     progress: Optional[Callable[[int, int], None]] = None) -> ExportText:
         """Call the macro's rename / description / first_log functions once
-        per cache, with the cache table (see Cache fields)."""
+        per cache, with the cache table (see Cache fields). *progress* (see
+        _export_progress) is called before each cache, with no total: the
+        bar fills while the file is written."""
         if rename is None and describe is None and first_log is None:
             return ExportText()
         names: dict[str, str] = {}
@@ -5124,6 +5252,8 @@ class MacroRuntime:
         first_logs: dict[str, str] = {}
         codes = [c.gc_code for c in caches]
         for record in iter_records(get_session, codes, resolve_fields(None), self._db_file(None)):
+            if progress is not None:
+                progress(0, 0)
             table = lua.table_from(record, recursive=True)
             for fn, key, result in ((rename, "rename", names),
                                     (describe, "description", descriptions),
@@ -5607,7 +5737,7 @@ class MacroRuntime:
             attribute_filter=self._deny_attribute,
         )
         self._stop, self._where, self._line, make_loader, self._variables = lua.execute(
-            _SANDBOX_SETUP, self._instruction_limit
+            _SANDBOX_SETUP, self._instruction_limit, self._tick, TICK_HOOKS
         )
 
         g = lua.globals()
@@ -5686,6 +5816,19 @@ class MacroRuntime:
             self._load_macro = None
             self._close_progress_windows()
             self._host.end_macro()
+
+    def _tick(self) -> Optional[str]:
+        """Called by the instruction-count hook while Lua code runs (#1398).
+        The macro runs on the GUI thread, so a long Lua loop would freeze
+        the windows: this keeps them alive at most every
+        KEEP_ALIVE_INTERVAL_S (_keep_windows_alive). Returns "macro
+        cancelled" once the run is cancelled, which the hook turns into a
+        stop that pcall cannot catch. Work inside a single C call is not
+        covered: the hook does not run during it."""
+        if self._cancelled.is_set():
+            return "macro cancelled"
+        self._keep_windows_alive(KEEP_ALIVE_INTERVAL_S)
+        return None
 
     def _api_function(self, func: Callable) -> Any:
         """*func* as a function for Lua: MacroError becomes a Lua error
@@ -5800,6 +5943,11 @@ class MacroRuntime:
                 self._check_cancelled()
                 return result
             except MacroError as exc:
+                if self._cancelled.is_set() and self._stop is not None:
+                    # Cancelled during the call, e.g. an SQL statement the
+                    # cancel stopped (#1398): end the run, so that pcall
+                    # cannot catch it.
+                    self._stop("macro cancelled")
                 message = str(exc)
                 if self._where is not None and not self._cancelled.is_set():
                     where = self._where()
