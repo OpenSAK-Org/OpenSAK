@@ -325,6 +325,9 @@ _WAIT_STEP_S = 0.05
 # opensak.export_file() / export_gpx(): their progress window is updated at
 # most every this many seconds (#1398).
 _EXPORT_PROGRESS_S = 0.05
+# A long SQL statement keeps the windows alive at most every this many
+# seconds (MacroRuntime._sql_tick, #1398).
+_SQL_TICK_S = 0.05
 
 
 class _Call:
@@ -1914,6 +1917,8 @@ class MacroRuntime:
         self._cancelled = threading.Event()
         # When _tick() last kept the windows alive (time.monotonic()).
         self._ticked = 0.0
+        # When _sql_tick() last kept the windows alive (time.monotonic()).
+        self._sql_ticked = 0.0
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
@@ -2472,6 +2477,7 @@ class MacroRuntime:
                 Path(get_engine().url.database or ""),
                 companion_owner=self._companion_owner,
                 companion_owner_name=self._companion_owner_name,
+                tick=self._sql_tick,
             )
             # Attached again after opensak.switch_database().
             active = self._active_db_path()
@@ -2844,9 +2850,35 @@ class MacroRuntime:
     def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
         if db is not None:
             if db.path not in self._other_sql:
-                self._other_sql[db.path] = ReadOnlyDatabase(db.path)
+                self._other_sql[db.path] = ReadOnlyDatabase(db.path, tick=self._sql_tick)
             return self._other_sql[db.path]
         return self._writable_db().reader()
+
+    def _sql_tick(self) -> bool:
+        """Called while an SQL statement of the macro runs (sql.Tick,
+        #1398). The macro runs on the GUI thread, so a long statement would
+        freeze the windows: at most every _SQL_TICK_S this repaints the
+        macro's open progress window (its Cancel stays clickable; the macro
+        sees it at its next p:update) or lets the host keep its windows
+        painted (keep_alive). True once the run is cancelled, which stops
+        the statement; _wrap() then ends the run."""
+        if self._cancelled.is_set():
+            return True
+        if time.monotonic() - self._sql_ticked < _SQL_TICK_S:
+            return False
+        try:
+            if self._progress_windows:
+                self._progress_windows[-1].update(None, "")
+            else:
+                keep_alive = getattr(self._host, "keep_alive", None)
+                if keep_alive is not None:
+                    keep_alive()
+        except Exception:
+            # Repainting must never fail the statement.
+            logger.exception("keeping the windows alive failed")
+        # Measured after the repaint, which itself may take a while.
+        self._sql_ticked = time.monotonic()
+        return False
 
     def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
@@ -5925,6 +5957,11 @@ class MacroRuntime:
                 self._check_cancelled()
                 return result
             except MacroError as exc:
+                if self._cancelled.is_set() and self._stop is not None:
+                    # Cancelled during the call, e.g. an SQL statement the
+                    # cancel stopped (#1398): end the run, so that pcall
+                    # cannot catch it.
+                    self._stop("macro cancelled")
                 message = str(exc)
                 if self._where is not None and not self._cancelled.is_set():
                     where = self._where()
