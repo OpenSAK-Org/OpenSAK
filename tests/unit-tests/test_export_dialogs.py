@@ -328,3 +328,18 @@ class TestFileExportDialog:
         dlg._on_error("bad")
         assert "bad" in dlg._log.toPlainText()
         assert dlg._btn_export.isEnabled() is True
+
+    def test_fits_a_short_screen_with_export_button_visible(self, qtbot):
+        """#1397: the option groups scroll, so the dialog can be made
+        shorter than its content and the Export button stays reachable
+        (it was cut off below the screen-height cap)."""
+        dlg = FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        dlg.setMaximumHeight(500)
+        dlg.resize(dlg.width(), 500)
+        dlg.show()
+        qtbot.waitExposed(dlg)
+        assert dlg.minimumSizeHint().height() <= 500
+        assert dlg.height() <= 500
+        assert dlg.rect().contains(dlg._btn_export.geometry())
+        assert dlg._scroll.verticalScrollBar().maximum() > 0

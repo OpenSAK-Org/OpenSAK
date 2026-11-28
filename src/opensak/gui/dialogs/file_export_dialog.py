@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
     QButtonGroup, QGroupBox, QProgressBar,
     QTextEdit, QComboBox, QInputDialog, QSizePolicy,
     QCheckBox, QSpinBox, QFormLayout, QLineEdit,
-    QToolButton, QStyle, QPlainTextEdit,
+    QToolButton, QStyle, QPlainTextEdit, QScrollArea, QWidget,
 )
 
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import (
+    WorkerGuardMixin, clamp_dialog_height_to_screen, remember_dialog_geometry,
+)
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.dialogs import make_progress_cb
 from opensak.utils.cancel import CancelFlag, Cancelled
@@ -270,18 +272,39 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._wpt_counts: dict[tuple, list[int]] = {}
         self._setup_ui()
         self._apply_settings(FileExportProfile.load_last_used())
+        self._fit_height_to_content()
+        # #1397: keep the size the user drags it to.
+        remember_dialog_geometry(self, "file_export")
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setSpacing(10)
 
         # Info label
         count = len([c for c in self._caches if c.latitude is not None])
         info = QLabel(tr("file_export_cache_count").format(count=count))
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info)
+        outer.addWidget(info)
+
+        # #1397: the option groups below (format, options, content, texts)
+        # together are taller than clamp_dialog_height_to_screen() allows
+        # on most screens, so without scrolling the bottom of the dialog —
+        # including the Export button — was cut off with no way to reach
+        # it. They go in a scroll area; saved settings, log, progress and
+        # buttons stay outside it, in the dialog's own layout, so they are
+        # always visible (same pattern as gps_dialog.py, #811).
+        content = self._scroll_content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
 
         # Format selector
         fmt_group = QGroupBox(tr("file_export_format_label"))
@@ -375,20 +398,24 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._chk_children_only.toggled.connect(self._update_file_name_preview)
         self._spin_max_logs.valueChanged.connect(self._update_content_state)
 
+        layout.addStretch()
+        self._scroll.setWidget(content)
+        outer.addWidget(self._scroll, 1)
+
         # Saved settings
-        layout.addWidget(self._build_settings_group())
+        outer.addWidget(self._build_settings_group())
 
         # Progress / log area
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setMaximumHeight(100)
         self._log.setVisible(False)
-        layout.addWidget(self._log)
+        outer.addWidget(self._log)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)   # indeterminate
         self._progress.setVisible(False)
-        layout.addWidget(self._progress)
+        outer.addWidget(self._progress)
 
         # Buttons
         btn_row = QHBoxLayout()
@@ -403,7 +430,22 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         btn_row.addStretch()
         btn_row.addWidget(self._btn_export)
         btn_row.addWidget(self._btn_close)
-        layout.addLayout(btn_row)
+        outer.addLayout(btn_row)
+
+    def _fit_height_to_content(self) -> None:
+        """#1397: open tall enough to show every option without scrolling
+        when the screen has room, and no taller than the screen cap.
+
+        A QScrollArea's own sizeHint is capped at a modest height, so
+        without this the dialog would open short and scroll even on a
+        big monitor.
+        """
+        wanted = (
+            self.sizeHint().height()
+            - self._scroll.sizeHint().height()
+            + self._scroll_content.sizeHint().height()
+        )
+        self.resize(self.sizeHint().width(), min(wanted, self.maximumHeight()))
 
     def _build_content_group(self) -> QGroupBox:
         """#775: child waypoints, logs, user note log and GPX version;
