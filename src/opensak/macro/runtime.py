@@ -232,6 +232,11 @@ logger = logging.getLogger(__name__)
 # A runaway `while true do end` would freeze the GUI thread, so the script is
 # aborted after this many Lua VM instructions.
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
+# The instruction-count hook runs every min(limit, 1000) instructions and
+# calls MacroRuntime._tick() every TICK_HOOKS of its runs (#1398), which
+# keeps the windows alive at most every TICK_INTERVAL_S seconds.
+TICK_HOOKS = 20
+TICK_INTERVAL_S = 0.05
 # Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 # opensak.choose_file(): longest accepted title / file type filter
@@ -623,6 +628,11 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #   * The budget is shared by all threads, so spreading the work over many
 #     coroutines does not multiply it.
 #
+# The hook also calls tick() every TICK_HOOKS runs (#1398), so that a long
+# Lua loop on the GUI thread keeps the windows painted and can be cancelled.
+# What tick() returns stops the run like stop() does (nil: go on); it is not
+# called once the run is stopped or out of budget.
+#
 # The chunk returns four functions for the runtime:
 #   * stop(msg) makes the hook sticky with *msg* right away — opensak.exit()
 #     and a cancelled run end the macro this way, so pcall cannot catch it.
@@ -639,14 +649,22 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #     for opensak.log_vars() (#1276), or nil if *level* is not the macro's
 #     own code (see below).
 _SANDBOX_SETUP = """
-local limit = ...
+local limit, tick, tick_hooks = ...
 local sethook, getinfo = debug.sethook, debug.getinfo
 local co_create, co_resume = coroutine.create, coroutine.resume
 local pack, unpack = table.pack, table.unpack
 local main = coroutine.running()
 local step = math.min(limit, 1000)
 local used, tripped, stopped = 0, false, nil
+local ticks = 0
 local function hook()
+  if not (stopped or tripped) then
+    ticks = ticks + 1
+    if ticks >= tick_hooks then
+      ticks = 0
+      stopped = tick()
+    end
+  end
   if stopped then
     sethook(hook, "", 1)
     sethook(main, hook, "", 1)
@@ -1890,6 +1908,8 @@ class MacroRuntime:
         # unsaved macro).
         self._clipboard_readers: set[Optional[Path]] = set()
         self._cancelled = threading.Event()
+        # When _tick() last kept the windows alive (time.monotonic()).
+        self._ticked = 0.0
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
@@ -5623,7 +5643,7 @@ class MacroRuntime:
             attribute_filter=self._deny_attribute,
         )
         self._stop, self._where, self._line, make_loader, self._variables = lua.execute(
-            _SANDBOX_SETUP, self._instruction_limit
+            _SANDBOX_SETUP, self._instruction_limit, self._tick, TICK_HOOKS
         )
 
         g = lua.globals()
@@ -5702,6 +5722,34 @@ class MacroRuntime:
             self._load_macro = None
             self._close_progress_windows()
             self._host.end_macro()
+
+    def _tick(self) -> Optional[str]:
+        """Called by the instruction-count hook while Lua code runs (#1398).
+        The macro runs on the GUI thread, so a long Lua loop would freeze
+        the windows: at most every TICK_INTERVAL_S this repaints the
+        macro's open progress window (its Cancel stays clickable; the macro
+        sees it at its next p:update) or lets the host keep its windows
+        painted (keep_alive). Returns "macro cancelled" once the run is
+        cancelled, which the hook turns into a stop that pcall cannot
+        catch. Work inside a single C call is not covered: the hook does
+        not run during it."""
+        if self._cancelled.is_set():
+            return "macro cancelled"
+        if time.monotonic() - self._ticked < TICK_INTERVAL_S:
+            return None
+        try:
+            if self._progress_windows:
+                self._progress_windows[-1].update(None, "")
+            else:
+                keep_alive = getattr(self._host, "keep_alive", None)
+                if keep_alive is not None:
+                    keep_alive()
+        except Exception:
+            # Repainting must never end the macro, or reach its pcall.
+            logger.exception("keeping the windows alive failed")
+        # Measured after the repaint, which itself may take a while.
+        self._ticked = time.monotonic()
+        return None
 
     def _api_function(self, func: Callable) -> Any:
         """*func* as a function for Lua: MacroError becomes a Lua error
