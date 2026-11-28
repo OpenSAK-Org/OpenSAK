@@ -4,6 +4,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.8] — 2026-11-28
+
+> Headline: **Fixes before v1.23.0.**
+> The Export dialog's Export button is reachable again, imports keep the
+> waypoints you added yourself, and GPX exports match GSAK in three more
+> details. Macros no longer freeze OpenSAK while waiting for a web site.
+> No new features. This is planned as the last beta before v1.23.0.
+
+### Fixed
+
+- **File → Export: the Export button was cut off (#1397)** — the export
+  options added in this release made the dialog taller than most
+  screens, so the bottom of it, including the Export button, could not
+  be reached, and the dialog could not be resized. The options now
+  scroll, the Saved settings row and the Export and Close buttons stay
+  visible at the bottom, and the dialog remembers the size you give it.
+  Reported by René Klitgaard.
+- **Imports keep your own waypoints (#1388)** — importing a GPX or
+  Pocket Query no longer deletes the waypoints you added yourself, in the
+  waypoint dialog or with a macro. A file that brings one of your
+  waypoints back, such as an OpenSAK or GSAK export, updates it instead
+  of adding a copy. Contributed by nagisml.
+- **Macros no longer freeze OpenSAK while waiting for a web site
+  (#1391)** — while `opensak.get_url()` waits for a slow server, OpenSAK
+  keeps responding and its progress window keeps updating; Cancel stops
+  the wait at once. Contributed by nagisml.
+- **GPX export: same-day logs in GSAK's order (#1385)** — when a cache
+  has several logs on the same day, the export now orders them as GSAK
+  does, and a log limit keeps the same logs. c:geo no longer shows an
+  older "Needs Maintenance" log ahead of a later "Found it" from that
+  day. `%last4` in export names uses the same order. Contributed by
+  nagisml.
+- **GPX export: owner shown for caches without one (#1386)** — caches
+  that have only a "placed by", such as Adventure Labs, now export it as
+  the owner, so c:geo and GCDroid no longer show an empty owner.
+  Contributed by nagisml.
+- **GPX/LOC export: no made-up size for caches without a container
+  (#1390)** — caches with no container size are now exported as "Not
+  chosen" instead of "Regular" (GPX) or "Unknown" (LOC). Contributed by
+  nagisml.
+
+---
+
 ## [1.23.0-beta.7] — 2026-11-26
 
 > Headline: **Repair a database, more base maps and shared macros.**
