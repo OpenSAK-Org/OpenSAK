@@ -1913,8 +1913,9 @@ class MacroRuntime:
         # unsaved macro).
         self._clipboard_readers: set[Optional[Path]] = set()
         self._cancelled = threading.Event()
-        # When _keep_windows_alive() last ran (time.monotonic()).
-        self._kept_alive = 0.0
+        # When _keep_windows_alive() last ran (time.monotonic()); -inf so
+        # the first call always repaints, however near 0 monotonic() starts.
+        self._kept_alive = float("-inf")
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
@@ -5115,7 +5116,9 @@ class MacroRuntime:
 
             handle = self._host.progress(tr("file_export_dialog_title"), 100)
             self._progress_windows.append(handle)
-        shown = 0.0
+        # When the window was last updated; None until the first update,
+        # which is always shown (time.monotonic() may start near 0).
+        shown: Optional[float] = None
         by_user = False
 
         def progress(done: int, total: int) -> None:
@@ -5123,7 +5126,9 @@ class MacroRuntime:
             if self._cancelled.is_set():
                 raise Cancelled()
             now = time.monotonic()
-            if handle is None or (now - shown < _EXPORT_PROGRESS_S and done != total):
+            if handle is None or (
+                shown is not None and now - shown < _EXPORT_PROGRESS_S and done != total
+            ):
                 return
             shown = now
             # The file name only: a headless host prints every new text.

@@ -126,6 +126,23 @@ def test_updates_are_throttled(tmp_path, monkeypatch):
     assert window.updates == [(0, "a.gpx"), (100, "a.gpx")]  # the first and the last
 
 
+def test_the_first_update_is_shown_right_after_boot(tmp_path, monkeypatch):
+    """time.monotonic() may count from boot: on a freshly started machine
+    it is below the throttle interval, and the first update was skipped."""
+    import time
+    import types
+
+    import opensak.macro.runtime as rt
+
+    monkeypatch.setattr(rt, "_EXPORT_PROGRESS_S", 3600)
+    monkeypatch.setattr(rt, "time", types.SimpleNamespace(
+        **{**vars(time), "monotonic": lambda: 1.0}))     # one second after boot
+    host = Host()
+    runtime(host, tmp_path).run(export_gpx(tmp_path))
+    [window] = host.windows
+    assert window.updates == [(0, "a.gpx"), (100, "a.gpx")]
+
+
 def test_cancel_in_the_window_stops_the_export_and_keeps_the_old_file(tmp_path):
     old = tmp_path / "out" / "a.gpx"
     old.parent.mkdir()
