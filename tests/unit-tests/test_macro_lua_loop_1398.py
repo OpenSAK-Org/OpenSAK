@@ -80,7 +80,7 @@ def test_a_long_loop_keeps_the_windows_alive():
 def test_the_windows_are_kept_alive_at_most_every_interval(monkeypatch):
     import opensak.macro.runtime as runtime
 
-    monkeypatch.setattr(runtime, "TICK_INTERVAL_S", 0.2)
+    monkeypatch.setattr(runtime, "KEEP_ALIVE_INTERVAL_S", 0.2)
     host = Host()
     run(host, BUSY)
     assert 1 <= host.kept_alive <= 4            # 0.5 s / 0.2 s, plus the first

@@ -234,10 +234,11 @@ logger = logging.getLogger(__name__)
 # aborted after this many Lua VM instructions.
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
 # The instruction-count hook runs every min(limit, 1000) instructions and
-# calls MacroRuntime._tick() every TICK_HOOKS of its runs (#1398), which
-# keeps the windows alive at most every TICK_INTERVAL_S seconds.
+# calls MacroRuntime._tick() every TICK_HOOKS of its runs (#1398).
 TICK_HOOKS = 20
-TICK_INTERVAL_S = 0.05
+# While Lua code (_tick) or an SQL statement (_sql_tick) runs, the windows
+# are kept alive at most every this many seconds (#1398).
+KEEP_ALIVE_INTERVAL_S = 0.05
 # Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 # opensak.choose_file(): longest accepted title / file type filter
@@ -325,9 +326,6 @@ _WAIT_STEP_S = 0.05
 # opensak.export_file() / export_gpx(): their progress window is updated at
 # most every this many seconds (#1398).
 _EXPORT_PROGRESS_S = 0.05
-# A long SQL statement keeps the windows alive at most every this many
-# seconds (MacroRuntime._sql_tick, #1398).
-_SQL_TICK_S = 0.05
 
 
 class _Call:
@@ -1915,10 +1913,8 @@ class MacroRuntime:
         # unsaved macro).
         self._clipboard_readers: set[Optional[Path]] = set()
         self._cancelled = threading.Event()
-        # When _tick() last kept the windows alive (time.monotonic()).
-        self._ticked = 0.0
-        # When _sql_tick() last kept the windows alive (time.monotonic()).
-        self._sql_ticked = 0.0
+        # When _keep_windows_alive() last ran (time.monotonic()).
+        self._kept_alive = 0.0
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
@@ -2857,27 +2853,12 @@ class MacroRuntime:
     def _sql_tick(self) -> bool:
         """Called while an SQL statement of the macro runs (sql.Tick,
         #1398). The macro runs on the GUI thread, so a long statement would
-        freeze the windows: at most every _SQL_TICK_S this repaints the
-        macro's open progress window (its Cancel stays clickable; the macro
-        sees it at its next p:update) or lets the host keep its windows
-        painted (keep_alive). True once the run is cancelled, which stops
-        the statement; _wrap() then ends the run."""
+        freeze the windows: this keeps them alive at most every
+        KEEP_ALIVE_INTERVAL_S (_keep_windows_alive). True once the run is
+        cancelled, which stops the statement; _wrap() then ends the run."""
         if self._cancelled.is_set():
             return True
-        if time.monotonic() - self._sql_ticked < _SQL_TICK_S:
-            return False
-        try:
-            if self._progress_windows:
-                self._progress_windows[-1].update(None, "")
-            else:
-                keep_alive = getattr(self._host, "keep_alive", None)
-                if keep_alive is not None:
-                    keep_alive()
-        except Exception:
-            # Repainting must never fail the statement.
-            logger.exception("keeping the windows alive failed")
-        # Measured after the repaint, which itself may take a while.
-        self._sql_ticked = time.monotonic()
+        self._keep_windows_alive(KEEP_ALIVE_INTERVAL_S)
         return False
 
     def _query(self, lua, query=None, params=None, options=None):
@@ -4807,20 +4788,35 @@ class MacroRuntime:
 
     def _wait(self, seconds: float) -> None:
         """Wait *seconds* on the GUI thread, which runs the macro (#1398),
-        in steps of _WAIT_STEP_S, keeping the windows alive in between: the
-        macro's open progress window is repainted (its Cancel stays
-        clickable; the macro sees it at its next p:update), otherwise the
-        host keeps its windows painted (keep_alive). A cancelled macro
-        stops at once."""
+        in steps of _WAIT_STEP_S, keeping the windows alive in between
+        (_keep_windows_alive). A cancelled macro stops at once."""
         deadline = time.monotonic() + seconds
-        keep_alive = getattr(self._host, "keep_alive", None)
         while (left := deadline - time.monotonic()) > 0:
             if self._cancelled.wait(min(left, _WAIT_STEP_S)):
                 raise MacroError("macro cancelled")
+            self._keep_windows_alive()
+
+    def _keep_windows_alive(self, every: float = 0.0) -> None:
+        """Let the windows paint while the macro, which runs on the GUI
+        thread, waits or works (#1398): repaint the macro's open progress
+        window (its Cancel stays clickable; the macro sees it at its next
+        p:update), otherwise let the host keep its windows painted
+        (keep_alive). With *every*, at most once in that many seconds. A
+        failing repaint is only logged: it must never end the macro, or
+        reach its pcall."""
+        if every and time.monotonic() - self._kept_alive < every:
+            return
+        try:
             if self._progress_windows:
                 self._progress_windows[-1].update(None, "")
-            elif keep_alive is not None:
-                keep_alive()
+            else:
+                keep_alive = getattr(self._host, "keep_alive", None)
+                if keep_alive is not None:
+                    keep_alive()
+        except Exception:
+            logger.exception("keeping the windows alive failed")
+        # Measured after the repaint, which itself may take a while.
+        self._kept_alive = time.monotonic()
 
     # -- opensak.coords --------------------------------------------------------
 
@@ -5819,29 +5815,14 @@ class MacroRuntime:
     def _tick(self) -> Optional[str]:
         """Called by the instruction-count hook while Lua code runs (#1398).
         The macro runs on the GUI thread, so a long Lua loop would freeze
-        the windows: at most every TICK_INTERVAL_S this repaints the
-        macro's open progress window (its Cancel stays clickable; the macro
-        sees it at its next p:update) or lets the host keep its windows
-        painted (keep_alive). Returns "macro cancelled" once the run is
-        cancelled, which the hook turns into a stop that pcall cannot
-        catch. Work inside a single C call is not covered: the hook does
-        not run during it."""
+        the windows: this keeps them alive at most every
+        KEEP_ALIVE_INTERVAL_S (_keep_windows_alive). Returns "macro
+        cancelled" once the run is cancelled, which the hook turns into a
+        stop that pcall cannot catch. Work inside a single C call is not
+        covered: the hook does not run during it."""
         if self._cancelled.is_set():
             return "macro cancelled"
-        if time.monotonic() - self._ticked < TICK_INTERVAL_S:
-            return None
-        try:
-            if self._progress_windows:
-                self._progress_windows[-1].update(None, "")
-            else:
-                keep_alive = getattr(self._host, "keep_alive", None)
-                if keep_alive is not None:
-                    keep_alive()
-        except Exception:
-            # Repainting must never end the macro, or reach its pcall.
-            logger.exception("keeping the windows alive failed")
-        # Measured after the repaint, which itself may take a while.
-        self._ticked = time.monotonic()
+        self._keep_windows_alive(KEEP_ALIVE_INTERVAL_S)
         return None
 
     def _api_function(self, func: Callable) -> Any:

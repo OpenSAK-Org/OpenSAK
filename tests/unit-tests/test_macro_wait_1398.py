@@ -96,3 +96,14 @@ def test_cancel_during_sleep_is_seen_at_the_next_update():
                     'opensak.sleep(200)\n'      # the sleep itself goes on
                     'print(p:update(1, "one"))')
     assert out == ["false"]
+
+
+def test_a_failing_repaint_does_not_end_the_sleep():
+    class Broken(Host):
+        def keep_alive(self):
+            super().keep_alive()
+            raise RuntimeError("no window")
+
+    host = Broken()
+    out = run(host, 'opensak.sleep(300)\nprint("went on")')
+    assert out == ["went on"] and host.kept_alive >= 3
