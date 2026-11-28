@@ -1459,6 +1459,122 @@ def test_export_poi_reports_unreadable_icon(tmp_path, poi_cache):
     assert not (tmp_path / "out").exists()
 
 
+# #1395: a table of overrides for one call, so one saved setting can write
+# several files, each with its own category and icon.
+
+def _poi_icon(path: Path) -> Path:
+    from PySide6.QtGui import QColor, QImage
+
+    image = QImage(8, 8, QImage.Format.Format_ARGB32)
+    image.fill(QColor(200, 0, 0))
+    image.save(str(path))
+    return path
+
+
+def test_export_poi_overrides_category_icon_and_file_name(tmp_path, poi_cache):
+    from opensak.export.gpi import load_gpi_icon
+
+    icon = _poi_icon(tmp_path / "mystery.png")
+    runtime, out = _poi_runtime(tmp_path, file_name="x", category="Saved", waypoints_only=False,
+                                include_waypoints=False)
+    saved = next((tmp_path / "poi_settings").iterdir()).read_bytes()
+    runtime.run(f"""
+        opensak.filter{{ code = "GCPOI", label = "Mystery" }}
+        local files, n = opensak.export_poi("Garmin POI", nil, {{
+            file_name = "{{filter}}_poi", category = "Unknown caches", icon = {str(icon)!r},
+        }})
+        print(files[1], n)
+        -- without overrides the saved setting is used again
+        files = opensak.export_poi("Garmin POI")
+        print(files[1])
+    """)
+    target = (tmp_path / "out" / "Mystery_poi.gpi").resolve()
+    plain = (tmp_path / "out" / "x.gpi").resolve()
+    assert out == [f"{target}	1", str(plain)]
+    data = target.read_bytes()
+    assert b"Unknown caches" in data and b"Saved" not in data
+    assert load_gpi_icon(icon) in data
+    assert b"Saved" in plain.read_bytes()
+    # The saved setting itself is unchanged.
+    assert next((tmp_path / "poi_settings").iterdir()).read_bytes() == saved
+
+
+def test_export_poi_override_empty_icon_uses_device_default(tmp_path, tmp_path_factory,
+                                                            poi_cache):
+    # The setting's icon is in a folder without read permission; an empty
+    # icon override means no icon, so it is never read.
+    icon = tmp_path_factory.mktemp("icons") / "icon.bmp"
+    icon.write_bytes(b"x")
+    runtime, out = _poi_runtime(tmp_path, file_name="x", icon=str(icon))
+    runtime.run("""
+        opensak.filter{ code = "GCPOI" }
+        print(opensak.export_poi("Garmin POI", nil, { icon = "" }) ~= nil)
+    """)
+    assert out == ["true"]
+
+
+def test_export_poi_override_icon_checks_permission(tmp_path, tmp_path_factory, poi_cache):
+    icon = _poi_icon(tmp_path_factory.mktemp("icons") / "icon.png")
+    runtime, _ = _poi_runtime(tmp_path)
+    with pytest.raises(MacroError, match="may not read"):
+        runtime.run(f'opensak.filter{{ code = "GCPOI" }} '
+                    f'opensak.export_poi("Garmin POI", nil, {{ icon = {str(icon)!r} }})')
+    assert not (tmp_path / "out").exists()
+
+
+def test_export_poi_override_if_exists_and_folder(tmp_path, poi_cache):
+    target = tmp_path / "dev" / "x.gpi"
+    target.parent.mkdir()
+    target.write_bytes(b"old")
+    runtime, out = _poi_runtime(tmp_path, file_name="x", if_exists="overwrite")
+    runtime.run(f"""
+        opensak.filter{{ code = "GCPOI" }}
+        print(opensak.export_poi("Garmin POI", {str(tmp_path / "dev")!r}, {{ if_exists = "skip" }}))
+    """)
+    assert out == ["nil"]
+    assert target.read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("overrides, msg", [
+    ('"Mystery"', "overrides must be a table"),
+    ("{ folder = 'x' }", r"unknown override\(s\) \['folder'\]; valid: category, "),
+    ("{ 'x' }", r"unknown override\(s\) \[1\]"),
+    ("{ category = 5 }", "category must be a string"),
+    ("{ if_exists = 'replace' }", "if_exists must be one of overwrite, ask, skip"),
+    ("{ proximity_unit = 'miles' }", "proximity_unit must be one of"),
+    ("{ extra_field = 'notes' }", "extra_field must be one of"),
+    ("{ proximity = -1 }", "proximity must be a number >= 0"),
+    ("{ proximity = '50' }", "proximity must be a number >= 0"),
+    ("{ proximity = math.huge }", "proximity must be a number >= 0"),
+    ("{ proximity = true }", "proximity must be a number >= 0"),
+])
+def test_export_poi_rejects_bad_overrides(tmp_path, poi_cache, overrides, msg):
+    runtime, _ = _poi_runtime(tmp_path)
+    with pytest.raises(MacroError, match=msg):
+        runtime.run(f'opensak.filter{{ code = "GCPOI" }} '
+                    f'opensak.export_poi("Garmin POI", nil, {overrides})')
+    assert not (tmp_path / "out").exists()
+
+
+def test_export_poi_table_as_folder_hints_at_nil(tmp_path, poi_cache):
+    runtime, _ = _poi_runtime(tmp_path)
+    with pytest.raises(MacroError, match="pass nil as folder"):
+        runtime.run('opensak.export_poi("Garmin POI", { category = "x" })')
+
+
+def test_export_poi_override_values_reach_the_settings(tmp_path):
+    from lupa.lua54 import LuaRuntime
+
+    lua = LuaRuntime()
+    saved = PoiExportSettings(category="Saved", proximity=1.0, name="{code}")
+    settings = MacroRuntime._poi_overrides(saved, lua.eval(
+        '{ proximity = 2, proximity_unit = "km", name = "{name}", extra_field = "address" }'))
+    assert settings.proximity_meters() == 2000
+    assert (settings.name, settings.extra_field, settings.category) == ("{name}", "address",
+                                                                        "Saved")
+    assert saved.proximity == 1.0 and saved.name == "{code}"
+
+
 # ── Example: export_filters_to_gpx.lua ───────────────────────────────────────
 
 EXPORT_EXAMPLE = EXAMPLES / "export_filters_to_gpx.lua"

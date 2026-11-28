@@ -57,7 +57,9 @@ from opensak.macro.metadata import (
     PERMISSIONS,
     read_metadata,
 )
-from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
+from opensak.macro.runtime import (
+    API, API_VERSION, FILTER_KEY_DOCS, POI_OVERRIDE_CHOICES, ApiFunction, Param,
+)
 from opensak.utils.flags import BETA_ONLY
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
@@ -836,6 +838,11 @@ def _web_section() -> list[str]:
     ]
 
 
+def _lua_choices(choices: tuple[str, ...]) -> str:
+    """LuaLS type of a string that is one of *choices*: "a"|"b"."""
+    return "|".join(f'"{c}"' for c in choices)
+
+
 def _lua_fields() -> dict[tuple[str, str], str]:
     """(table, column) → the field holding the same value in opensak.cache()
     or opensak.logs(), waypoints(), ..."""
@@ -1399,6 +1406,19 @@ def render_lua_stub() -> str:
         "---@field remove_chars? string Characters removed from names and descriptions (default none).",
         "---@field first_log? string|fun(c: opensak.Cache): string? Extra information as the first log: special tags, or a function returning the text (nil: no log for that cache) (GPX/GGZ, default none).",
         "---@field device? string The device's folder, when several Garmin devices are connected.",
+        "",
+        "---What `opensak.export_poi()` may use instead of the saved setting's values, for one call.",
+        "---@class opensak.PoiOverrides",
+        '---@field file_name? string File name template without extension, with the same variables as the dialog ({filter}, {database}, ...).',
+        "---@field category? string Category of the file with the caches (the per-waypoint-type files keep their type).",
+        '---@field icon? string Image file for the POI icon; "" for the device\'s default icon.',
+        "---@field proximity? number Proximity alert distance (0 = none).",
+        "---@field proximity_unit? " + _lua_choices(POI_OVERRIDE_CHOICES["proximity_unit"]) + " Unit of `proximity`.",
+        "---@field name? string Template of the POI name.",
+        "---@field description? string Template of the POI description.",
+        "---@field extra? string Template of the extra text.",
+        "---@field extra_field? " + _lua_choices(POI_OVERRIDE_CHOICES["extra_field"]) + " Where the extra text goes.",
+        "---@field if_exists? " + _lua_choices(POI_OVERRIDE_CHOICES["if_exists"]) + " When the file exists.",
         "",
         "---The table passed to `opensak.form{}`.",
         "---@class opensak.FormSpec",

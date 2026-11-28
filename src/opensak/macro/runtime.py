@@ -39,6 +39,7 @@ import io
 import json
 import locale
 import logging
+import math
 import os
 import queue
 import sqlite3
@@ -121,12 +122,18 @@ from opensak.export.gpx_content import (
     CHILDREN_CHOICES, GPX_VERSIONS, MAX_COUNTS_CHOICES, GpxContent,
 )
 from opensak.export.file_export_settings import (
+    IF_EXISTS_CHOICES,
     FileExportProfile,
     FileExportSettings,
     expand_file_name,
 )
 from opensak.export.poi_export import write_poi_export
-from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
+from opensak.export.poi_export_settings import (
+    EXTRA_FIELD_CHOICES,
+    PROXIMITY_UNITS,
+    PoiExportProfile,
+    PoiExportSettings,
+)
 from opensak.filters.line_polygon import LineShape, read_points_file
 from opensak.importer.gpx_import_settings import (
     FOLDER_IMPORT_SUFFIXES,
@@ -256,6 +263,17 @@ SLEEP_BUDGET_S = 60.0
 # largest macro file it reads.
 MAX_MACRO_DEPTH = 10
 MAX_MACRO_BYTES = 1024 * 1024
+# opensak.export_poi(): the settings its overrides table may replace for one
+# call (#1395), with the allowed values of the ones that are a choice.
+POI_OVERRIDE_TEXT_KEYS = ("file_name", "category", "icon", "name", "description", "extra")
+POI_OVERRIDE_CHOICES: dict[str, tuple[str, ...]] = {
+    "if_exists": tuple(IF_EXISTS_CHOICES),
+    "extra_field": tuple(EXTRA_FIELD_CHOICES),
+    "proximity_unit": tuple(PROXIMITY_UNITS),
+}
+POI_OVERRIDE_KEYS = frozenset(
+    {*POI_OVERRIDE_TEXT_KEYS, *POI_OVERRIDE_CHOICES, "proximity"}
+)
 # opensak.set_companion_table{}: the keys of its table.
 _COMPANION_TABLE_KEYS = ("name", "linked", "code_column", "description")
 # opensak.export_gpx{}: the keys of its table, and what to do with an
@@ -5464,12 +5482,52 @@ class MacroRuntime:
                 return profile.settings
         raise MacroError(f"no saved POI export setting named {name!r}")
 
-    def _export_poi(self, lua, name=None, folder=None):
+    @staticmethod
+    def _poi_overrides(settings: PoiExportSettings, overrides: Any) -> PoiExportSettings:
+        """*settings* with the values of the Lua table *overrides* of
+        opensak.export_poi() (#1395), for this one call; the saved setting
+        is not changed. Every value is checked here, since
+        PoiExportSettings.from_dict() would quietly use the default for a
+        bad one."""
+        func = "opensak.export_poi"
+        if not _is_lua_table(overrides):
+            raise MacroError(
+                f"{func}: overrides must be a table, e.g. {{ category = \"Mystery\" }}, "
+                f"got {helpers.lua_tostring(overrides)}"
+            )
+        opts = dict(overrides.items())
+        unknown = set(opts) - POI_OVERRIDE_KEYS
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown override(s) {sorted(unknown, key=str)}; "
+                f"valid: {', '.join(sorted(POI_OVERRIDE_KEYS))}"
+            )
+        for key, value in opts.items():
+            if key == "proximity":
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value < 0):
+                    raise MacroError(
+                        f"{func}: proximity must be a number >= 0, got {value!r}"
+                    )
+            elif not isinstance(value, str):
+                raise MacroError(f"{func}: {key} must be a string, got {value!r}")
+            elif key in POI_OVERRIDE_CHOICES and value not in POI_OVERRIDE_CHOICES[key]:
+                raise MacroError(
+                    f"{func}: {key} must be one of "
+                    f"{', '.join(POI_OVERRIDE_CHOICES[key])}, got {value!r}"
+                )
+        return PoiExportSettings.from_dict({**settings.to_dict(), **opts})
+
+    def _export_poi(self, lua, name=None, folder=None, overrides=None):
         if not isinstance(name, str) or not name.strip():
             raise MacroError("opensak.export_poi expects the name of a saved POI export setting")
         if folder is not None and (not isinstance(folder, str) or not folder.strip()):
-            raise MacroError("opensak.export_poi: folder must be a non-empty string")
+            hint = (" (pass nil as folder to give only overrides)"
+                    if _is_lua_table(folder) else "")
+            raise MacroError(f"opensak.export_poi: folder must be a non-empty string{hint}")
         settings = self._load_poi_settings(name)
+        if overrides is not None:
+            settings = self._poi_overrides(settings, overrides)
         if folder is None and not settings.folder.strip():
             raise MacroError(
                 f"POI export setting {name!r} has no folder — choose one in the "
@@ -6006,7 +6064,7 @@ class _FormSession:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 5
+API_VERSION = 6
 
 # API version → the stable release it first shipped in. Within an API
 # version the API only grows; renaming or removing anything needs a new
@@ -7665,15 +7723,30 @@ API: tuple[ApiFunction, ...] = (
                     "(Settings → Folder permissions); for an unapproved one "
                     "the user is asked first. An existing file is skipped "
                     "when the setting says skip (or ask, and the user "
-                    "answers No).",
+                    "answers No). *overrides* replaces some of the "
+                    "setting's values for this call only, so one setting "
+                    "can write several files, each with its own category "
+                    "and icon; the saved setting is not changed.",
         example='local files, n = opensak.export_poi("Garmin POI")\n'
-                'if files then print(n .. " POIs → " .. table.concat(files, ", ")) end',
+                'if files then print(n .. " POIs → " .. table.concat(files, ", ")) end\n'
+                '-- the same setting, with a category and icon of its own\n'
+                'opensak.export_poi("Garmin POI", nil, {\n'
+                '    file_name = "Mystery", category = "Mystery",\n'
+                '    icon = [[C:\\POIIcons\\Mystery.bmp]],\n'
+                '})',
         since=3,
+        changed=((6, "added `overrides`"),),
         bind=lambda rt, lua: lambda *a: rt._export_poi(lua, *a),
         params=(
             Param("setting", "string", "Name of the saved POI export setting."),
             Param("folder", "string", "Folder to write to instead of the "
-                  "setting's folder, e.g. the device's Garmin/POI folder.",
+                  "setting's folder, e.g. the device's Garmin/POI folder; "
+                  "nil to give only *overrides*.",
+                  optional=True),
+            Param("overrides", "opensak.PoiOverrides", "Values of the setting "
+                  "to use instead for this call: file name, category, "
+                  "icon, proximity alert, POI texts, if the file exists. "
+                  "Unknown keys and bad values are an error.",
                   optional=True),
         ),
         returns=("string[]?, integer?",
