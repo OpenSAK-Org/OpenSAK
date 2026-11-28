@@ -608,3 +608,23 @@ def test_web_site_questions_are_asked_on_the_macros_thread(server, public, tmp_p
         macro=tmp_path / "m.lua")
     assert [a["host"] for a in host.asked] == ["a.example.test", "b.example.test"]
     assert host.threads == [threading.main_thread()] * 2
+
+
+def test_pause_between_requests_keeps_the_windows_alive(server, public, monkeypatch):
+    # #1398: the pause between two requests to one host waited without
+    # letting the GUI paint.
+    monkeypatch.setattr(net_access, "MIN_INTERVAL_S", 0.5)
+
+    class Waiting(Host):
+        def __init__(self):
+            super().__init__()
+            self.kept_alive = 0
+
+        def keep_alive(self):
+            self.kept_alive += 1
+
+    host = Waiting()
+    run(host, f'opensak.get_url("{url(server, "/")}")')
+    before = host.kept_alive                    # the request itself may keep it alive too
+    run(host, f'opensak.get_url("{url(server, "/")}")\nopensak.get_url("{url(server, "/")}")')
+    assert host.kept_alive - before >= 5

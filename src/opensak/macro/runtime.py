@@ -313,8 +313,8 @@ LOG_VARS_OPTIONS = {"depth": "depth", "globals": "globals"}
 LOG_VARS_DEPTH = 2
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
-# opensak.get_url() waits for its worker thread in steps of this many
-# seconds, keeping the windows alive in between (#1391).
+# opensak.get_url() (#1391) and opensak.sleep() (#1398) wait in steps of
+# this many seconds, keeping the windows alive in between.
 _WAIT_STEP_S = 0.05
 
 
@@ -3803,8 +3803,8 @@ class MacroRuntime:
         if last is None:
             return
         wait = net_access.MIN_INTERVAL_S - (time.monotonic() - last)
-        if wait > 0 and self._cancelled.wait(wait):
-            raise MacroError("macro cancelled")
+        if wait > 0:
+            self._wait(wait)
 
     def _host_list(self) -> list[net_access.HostPermission]:
         """The web sites the running macro may contact: those allowed this
@@ -4747,8 +4747,24 @@ class MacroRuntime:
                 f"opensak.sleep: a macro may sleep at most {SLEEP_BUDGET_S:g} s in total"
             )
         self._slept += seconds
-        if self._cancelled.wait(seconds):
-            raise MacroError("macro cancelled")
+        self._wait(seconds)
+
+    def _wait(self, seconds: float) -> None:
+        """Wait *seconds* on the GUI thread, which runs the macro (#1398),
+        in steps of _WAIT_STEP_S, keeping the windows alive in between: the
+        macro's open progress window is repainted (its Cancel stays
+        clickable; the macro sees it at its next p:update), otherwise the
+        host keeps its windows painted (keep_alive). A cancelled macro
+        stops at once."""
+        deadline = time.monotonic() + seconds
+        keep_alive = getattr(self._host, "keep_alive", None)
+        while (left := deadline - time.monotonic()) > 0:
+            if self._cancelled.wait(min(left, _WAIT_STEP_S)):
+                raise MacroError("macro cancelled")
+            if self._progress_windows:
+                self._progress_windows[-1].update(None, "")
+            elif keep_alive is not None:
+                keep_alive()
 
     # -- opensak.coords --------------------------------------------------------
 
