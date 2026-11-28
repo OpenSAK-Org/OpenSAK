@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem,
     QLineEdit, QFileDialog, QMessageBox,
-    QGroupBox, QFormLayout, QDialogButtonBox,
+    QGroupBox, QFormLayout, QDialogButtonBox, QCheckBox,
     QSizePolicy
 )
 
@@ -68,7 +68,7 @@ class NewDatabaseDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._custom_path: Path | None = None
+        self.custom_directory: Path | None = None
         self._update_path_preview()
 
     def _browse(self) -> None:
@@ -84,29 +84,24 @@ class NewDatabaseDialog(QDialog):
             QFileDialog.Option.ShowDirsOnly,
         )
         if folder:
-            self._custom_path = Path(folder)
+            self.custom_directory = Path(folder)
             self._update_path_preview()
 
     def _update_path_preview(self) -> None:
-        """Vis filsti i sti-feltet: kun mappe som default, fuld sti når navn er tastet."""
-        # Issue #562: se _browse() ovenfor — samme rettelse for selve
-        # preview-teksten, så den viste standard-sti matcher det sted
-        # databasen faktisk oprettes (get_db_dir(), jf. manager.py's
-        # _default_db_path()), ikke installationsmappen.
+        """Preview the final database path, or just the base folder before naming."""
         from opensak.settings_store import get_db_dir
         from opensak.msix import resolve_physical_appdata_path
-        name = self._name_edit.text().strip()
-        folder = self._custom_path or get_db_dir()
+        folder = self.custom_directory or get_db_dir()
         # Issue #820: on the MSIX/Store build, %AppData%-based paths are
         # silently virtualized by Windows to a per-package folder — show
         # the real, physical location so the preview matches what
         # Explorer would actually show, not the logical (unreachable)
         # path. No-op on non-MSIX builds/other platforms.
         display_folder = resolve_physical_appdata_path(folder)
-        if name:
-            self._path_edit.setText(str(display_folder / f"{name}.db"))
-        else:
-            self._path_edit.setText(str(display_folder))
+        name = self.name
+        path = DatabaseManager.new_database_path(name, display_folder) if name else display_folder
+        self._path_edit.setText(str(path))
+        self._path_edit.setToolTip(str(path))
 
     def _validate(self) -> None:
         name = self._name_edit.text().strip()
@@ -118,19 +113,6 @@ class NewDatabaseDialog(QDialog):
     @property
     def name(self) -> str:
         return self._name_edit.text().strip()
-
-    @property
-    def custom_path(self) -> Path | None:
-        """Returner fuld filsti (mappe + navn.db), eller None for default placering."""
-        if self._custom_path is None:
-            return None
-        name = self._name_edit.text().strip()
-        if not name:
-            return self._custom_path  # _validate() fanger dette
-        safe_name = "".join(
-            c if c.isalnum() or c in "-_ " else "_" for c in name
-        ).strip()
-        return self._custom_path / f"{safe_name}.db"
 
 
 # Issue #1047: the folder last chosen in the Copy/Move dialog, remembered for
@@ -176,6 +158,13 @@ class DatabaseLocationDialog(QDialog):
         folder_row.addWidget(browse_btn)
         form.addRow(tr("file_export_folder"), folder_row)
 
+        self._subfolder_check: QCheckBox | None = None
+        if not copy:
+            self._subfolder_check = QCheckBox(tr("db_move_create_subfolder"))
+            self._subfolder_check.setChecked(True)
+            self._subfolder_check.toggled.connect(self._update_preview)
+            form.addRow(self._subfolder_check)
+
         self._preview = QLabel()
         self._preview.setWordWrap(True)
         self._preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -211,10 +200,14 @@ class DatabaseLocationDialog(QDialog):
         return self._folder
 
     @property
+    def create_subfolder(self) -> bool:
+        return self._subfolder_check is not None and self._subfolder_check.isChecked()
+
+    @property
     def target_path(self) -> Path:
         if self._copy:
-            return self._folder / DatabaseManager.file_name_for(self.name)
-        return self._folder / self._db.path.name
+            return DatabaseManager.new_database_path(self.name, self._folder)
+        return DatabaseManager.move_target_path(self._db, self._folder, self.create_subfolder)
 
     def set_folder(self, folder: Path) -> None:
         self._folder = Path(folder)
@@ -235,7 +228,8 @@ class DatabaseLocationDialog(QDialog):
         if self._copy and not self.name:
             self._preview.setText("—")
         else:
-            self._preview.setText(str(resolve_physical_appdata_path(self.target_path)))
+            display_folder = resolve_physical_appdata_path(self._folder)
+            self._preview.setText(str(display_folder / self.target_path.relative_to(self._folder)))
 
     def _validate(self) -> None:
         global _last_destination
@@ -248,7 +242,14 @@ class DatabaseLocationDialog(QDialog):
                 self, tr("warning"), tr("db_err_move_same_folder", name=self._db.name)
             )
             return
-        if target.exists():
+        if (self._copy or self.create_subfolder) and (
+            target.parent.exists() or target.parent.is_symlink()
+        ):
+            QMessageBox.warning(
+                self, tr("warning"), tr("db_err_new_folder_exists", path=target.parent),
+            )
+            return
+        if target.exists() or target.is_symlink():
             QMessageBox.warning(
                 self, tr("warning"),
                 tr("db_err_target_path_exists", name=self.name, path=str(target)),
@@ -483,7 +484,7 @@ class DatabaseManagerDialog(QDialog):
         dlg = NewDatabaseDialog(self)
         if dlg.exec():
             try:
-                db = self._manager.new_database(dlg.name, dlg.custom_path)
+                db = self._manager.new_database(dlg.name, directory=dlg.custom_directory)
             except ValueError as e:
                 QMessageBox.warning(self, tr("warning"), str(e))
                 return
@@ -576,7 +577,7 @@ class DatabaseManagerDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            new_db = self._manager.copy_database(db, dlg.name, dlg.target_path)
+            new_db = self._manager.copy_database(db, dlg.name, directory=dlg.folder)
             self._refresh_list()
             QMessageBox.information(
                 self, tr("db_copied_title"),
@@ -594,7 +595,9 @@ class DatabaseManagerDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            warning = self._manager.move_database(db, dlg.folder)
+            warning = self._manager.move_database(
+                db, dlg.folder, create_subfolder=dlg.create_subfolder,
+            )
         except Exception as e:
             self._refresh_list(select_db=db)
             QMessageBox.warning(self, tr("warning"), str(e))

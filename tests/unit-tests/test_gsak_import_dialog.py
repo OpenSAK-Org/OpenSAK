@@ -679,6 +679,19 @@ class TestGsakImportDialogRun:
         dlg._start_import()
         assert shown and dlg._worker is None
 
+    def test_existing_destination_folder_gets_a_free_name(self, dlg, manager, tmp_path, qtbot):
+        path = manager.default_path_for("Trip")
+        path.parent.mkdir()
+        other_file = path.parent / "notes.txt"
+        other_file.write_text("Keep me")
+
+        dlg.set_path(_backup(tmp_path, {"Trip": "GC1AAA"}, with_settings=False))
+        assert _target(dlg, 0).currentText() == "Trip-2"
+        _run(dlg, qtbot)
+
+        assert _codes(_db_by_name(manager, "Trip-2").path) == ["GC1AAA"]
+        assert list(path.parent.iterdir()) == [other_file]
+
     def test_orphan_database_file_is_offered_and_registered(
             self, dlg, manager, tmp_path, qtbot, fake_box):
         # A valid OpenSAK database file that isn't in the list (e.g. removed

@@ -110,11 +110,8 @@ def find_existing(name: str):
 def target_state(name: str):
     """Resolve an OpenSAK database name: ``(TARGET_*, DatabaseInfo | Path)``.
 
-    A name that isn't in the database list can still collide with a file
-    on disk (new_database() derives the path from the name and refuses
-    to reuse a file) — e.g. a stale ``Default.db`` left behind. A valid
-    database file is offered as an existing target; anything else blocks
-    the name.
+    A name that isn't in the database list can still collide with a file or
+    folder on disk. A valid database file is offered as an existing target.
     """
     from opensak.db.manager import get_db_manager
 
@@ -123,13 +120,20 @@ def target_state(name: str):
         return TARGET_EXISTING, existing
     manager = get_db_manager()
     path = manager.default_path_for(name)
-    for db in manager.databases:
-        if db.path == path:
-            return TARGET_EXISTING, db
-    if path.exists():
-        if manager.is_valid_database_file(path):
-            return TARGET_ORPHAN, path
-        return TARGET_BLOCKED, path
+    flat_path = path.parent.parent / manager.file_name_for(name)
+    # Older databases may still be at the flat path. Keep offering to
+    # register them explicitly, without moving them or creating a duplicate.
+    for candidate in (path, flat_path):
+        for db in manager.databases:
+            if db.path == candidate:
+                return TARGET_EXISTING, db
+        # Some imported names are too long for the old flat filename.
+        if len(candidate.name.encode("utf-8")) <= 255 and candidate.exists():
+            if manager.is_valid_database_file(candidate):
+                return TARGET_ORPHAN, candidate
+            return TARGET_BLOCKED, candidate
+    if path.parent.exists() or path.parent.is_symlink():
+        return TARGET_BLOCKED, path.parent
     return TARGET_NEW, path
 
 

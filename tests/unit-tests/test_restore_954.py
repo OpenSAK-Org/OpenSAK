@@ -82,7 +82,7 @@ def _db(manager, name: str):
 
 
 def _restored_files() -> list[str]:
-    """Files of restored databases (and their sidecars) in the database folder."""
+    """Destination folders created by the restore."""
     from opensak.settings_store import get_db_dir
     return sorted(p.name for p in get_db_dir().iterdir() if "restored" in p.name)
 
@@ -124,7 +124,9 @@ class TestRestoreDatabase:
         info = restore_database(backup, backup.databases[0], today=TODAY)
 
         assert info.name == "Trip (restored 2026-10-01)"
-        assert _restored_files() == [info.path.name]
+        assert _restored_files() == [info.path.stem]
+        assert info.path.parent.name == info.path.stem
+        assert info.managed_folder
         assert len(manager.databases) == before + 1
         assert info.path != original.path and info.path.is_file()
         assert _count(info.path) == 30
@@ -145,6 +147,7 @@ class TestRestoreDatabase:
     def test_never_overwrites_an_existing_file(self, manager, backup):
         from opensak.db.manager import DatabaseManager
         squatter = DatabaseManager.default_path_for("Trip (restored 2026-10-01)")
+        squatter.parent.mkdir()
         squatter.write_bytes(b"not mine to overwrite")
         info = restore_database(backup, backup.databases[0], today=TODAY)
         assert info.path != squatter

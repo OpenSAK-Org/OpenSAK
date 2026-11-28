@@ -102,6 +102,76 @@ class TestDatabaseManagerInit:
 # ── new_database ──────────────────────────────────────────────────────────────
 
 class TestNewDatabase:
+    @pytest.mark.parametrize("custom_directory", [None, "custom"])
+    def test_creates_database_in_its_own_folder(
+        self, real_manager, tmp_path, custom_directory
+    ):
+        from opensak.db.database import get_engine, init_db
+
+        directory = tmp_path / custom_directory if custom_directory else None
+        active_path = real_manager.active.path
+        active_engine = init_db(active_path)
+
+        info = real_manager.new_database("Norway / 2026", directory=directory)
+
+        assert info.path == (directory or tmp_path) / "Norway _ 2026" / "Norway _ 2026.db"
+        assert DatabaseManager.is_valid_database_file(info.path)
+        assert real_manager.active.path == active_path
+        assert get_engine() is active_engine
+
+    @pytest.mark.parametrize(
+        ("name", "stem"),
+        [
+            ('  Norway: ?*/\\"<>|.  ', "Norway_ _________"),
+            ("../Trips", "___Trips"),
+            ("NUL", "_NUL"),
+            ("com1", "_com1"),
+            ("COM0", "_COM0"),
+            ("LPT0", "_LPT0"),
+            ("LPT²", "_LPT²"),
+            ("  ", "_"),
+            ("Åland", "Åland"),
+        ],
+    )
+    def test_new_database_path_sanitizes_name(self, tmp_path, name, stem):
+        assert DatabaseManager.new_database_path(name, tmp_path) == (
+            tmp_path / stem / f"{stem}.db"
+        )
+
+    def test_long_names_fit_with_room_for_sqlite_sidecars(self, tmp_path):
+        name = "Å" * 200
+        first = DatabaseManager.new_database_path(name, tmp_path)
+        second = DatabaseManager.new_database_path(name + "2", tmp_path)
+        assert first.parent != second.parent
+        assert len((first.stem + ".companion.db3-journal").encode("utf-8")) <= 255
+
+    def test_refuses_even_an_empty_existing_folder(self, manager, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.lang._translations", {
+            "db_err_new_folder_exists": "Destination folder already exists: {path}",
+        })
+        folder = tmp_path / "Occupied"
+        folder.mkdir()
+        with pytest.raises(ValueError, match="Destination folder already exists") as error:
+            manager.new_database("Occupied", directory=tmp_path)
+        assert str(folder) in str(error.value)
+        assert list(folder.iterdir()) == []
+        assert all(db.name != "Occupied" for db in manager.databases)
+
+    def test_failed_creation_can_retry_without_a_leftover_folder(
+        self, real_manager, tmp_path
+    ):
+        path = tmp_path / "Retry" / "Retry.db"
+
+        def fail_after_writing(db_path):
+            db_path.touch()
+            raise OSError("disk write failed")
+
+        with patch("opensak.db.database.session_for", side_effect=fail_after_writing):
+            with pytest.raises(ValueError, match="disk write failed"):
+                real_manager.new_database("Retry")
+        assert not path.parent.exists()
+        assert real_manager.new_database("Retry").path == path
+
     def test_adds_entry_to_list(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             manager.new_database("Test", tmp_path / "Test.db")
@@ -154,7 +224,8 @@ class TestNewDatabase:
         # Simulate an orphaned file left behind by e.g. remove_from_list()
         # (which intentionally does not delete the physical file) or a
         # previous rename during testing.
-        stray = tmp_path / "test1.db"
+        stray = tmp_path / "test1" / "test1.db"
+        stray.parent.mkdir()
         stray.write_text("OLD CACHE DATA FROM A PREVIOUS TEST DATABASE")
 
         with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):
@@ -191,6 +262,129 @@ class TestNewDatabase:
 # ── rename ────────────────────────────────────────────────────────────────────
 
 class TestRename:
+    @pytest.mark.parametrize(
+        ("custom_parent", "folder_name"),
+        [(False, "Trip"), (True, "Trip"), (False, "OldTrip")],
+    )
+    def test_renames_folder_from_initial_pr_without_ownership_metadata(
+        self, real_manager, tmp_path, custom_parent, folder_name
+    ):
+        from opensak.settings_store import get_store
+
+        base = tmp_path / "custom" if custom_parent else tmp_path
+        path = base / folder_name / "Trip.db"
+        real_manager.new_database("Trip", path)
+        entries = get_store().get("databases.list")
+        next(entry for entry in entries if entry["name"] == "Trip").pop("managed_folder")
+        get_store().set("databases.list", entries)
+        reloaded = DatabaseManager()
+        info = next(db for db in reloaded.databases if db.name == "Trip")
+
+        assert info.managed_folder is None
+        reloaded.rename(info, "Holiday")
+
+        assert info.path == base / "Holiday" / "Holiday.db"
+        assert info.path.is_file()
+        assert not path.parent.exists()
+        assert info.managed_folder is True
+
+    def test_renames_managed_folder_and_companion_after_reload(self, real_manager):
+        from opensak.db import companion
+
+        info = real_manager.new_database("Trip")
+        old_path = info.path
+        companion.companion_path(old_path).write_bytes(b"companion")
+        (old_path.parent / "notes.txt").write_text("notes")
+        reloaded = DatabaseManager()
+        info = next(db for db in reloaded.databases if db.name == "Trip")
+        assert info.managed_folder
+
+        reloaded.rename(info, "Holiday")
+
+        assert info.path == old_path.parent.parent / "Holiday" / "Holiday.db"
+        assert info.path.is_file()
+        assert companion.companion_path(info.path).read_bytes() == b"companion"
+        assert (info.path.parent / "notes.txt").read_text() == "notes"
+        assert not old_path.parent.exists()
+
+    def test_renaming_external_database_keeps_its_folder(self, real_manager, tmp_path):
+        path = tmp_path / "External" / "External.db"
+        real_manager.new_database("External", path)
+        reloaded = DatabaseManager()
+        info = next(db for db in reloaded.databases if db.name == "External")
+
+        assert info.managed_folder is False
+        reloaded.rename(info, "Renamed")
+
+        assert info.path == path.with_name("Renamed.db")
+        assert info.path.is_file()
+
+    def test_case_only_rename_keeps_the_active_engine_and_lock(self, real_manager):
+        from opensak.db.database import get_engine
+        from opensak.db.lock import lock_path_for
+
+        info = real_manager.new_database("Trip")
+        real_manager.switch_to(info)
+        real_manager.hold_active_lock()
+        try:
+            real_manager.rename(info, "trip")
+
+            assert info.path.name == "trip.db"
+            assert info.path.parent.name == "trip"
+            assert Path(get_engine().url.database) == info.path
+            assert lock_path_for(info.path).exists()
+            assert {p.name for p in info.path.parent.glob("*.lock")} == {"trip.db.lock"}
+        finally:
+            real_manager.release_active_lock()
+
+    def test_managed_rename_refuses_an_existing_empty_folder(self, real_manager, tmp_path):
+        info = real_manager.new_database("Trip")
+        occupied = tmp_path / "Holiday"
+        occupied.mkdir()
+
+        with pytest.raises(ValueError):
+            real_manager.rename(info, "Holiday")
+
+        assert info.name == "Trip" and info.path.is_file()
+        assert list(occupied.iterdir()) == []
+
+    def test_managed_rename_refuses_a_folder_created_after_validation(
+        self, real_manager, tmp_path, monkeypatch
+    ):
+        info = real_manager.new_database("Trip")
+        occupied = tmp_path / "Holiday"
+        monkeypatch.setattr("opensak.db.database.dispose_engine", lambda _: occupied.mkdir())
+
+        with pytest.raises(ValueError):
+            real_manager.rename(info, "Holiday")
+
+        assert info.name == "Trip" and info.path.is_file()
+        assert list(occupied.iterdir()) == []
+
+    def test_managed_rename_rolls_back_when_folder_rename_fails(
+        self, real_manager, monkeypatch
+    ):
+        from opensak.db import companion
+
+        info = real_manager.new_database("Trip")
+        old_path = info.path
+        companion.companion_path(old_path).write_bytes(b"companion")
+        rename = Path.rename
+
+        def fail_folder(source, target):
+            if source == old_path.parent:
+                raise OSError("folder is locked")
+            return rename(source, target)
+
+        monkeypatch.setattr(Path, "rename", fail_folder)
+        with pytest.raises(ValueError):
+            real_manager.rename(info, "Holiday")
+
+        assert info.name == "Trip" and info.path == old_path and old_path.is_file()
+        assert companion.companion_path(old_path).read_bytes() == b"companion"
+        assert not old_path.with_name("Holiday.db").exists()
+        assert not (old_path.parent.parent / "Holiday").exists()
+
     def test_renames_database(self, manager, tmp_path):
         db_path = tmp_path / "Original.db"
         with patch("opensak.db.database.init_db"):
@@ -493,6 +687,18 @@ class TestSwitchTo:
 # ── copy_database ─────────────────────────────────────────────────────────────
 
 class TestCopyDatabase:
+    def test_copy_to_selected_directory_claims_its_own_folder(self, real_manager, tmp_path):
+        info = real_manager.new_database("Trip")
+        directory = tmp_path / "copies"
+        copy = real_manager.copy_database(info, "My:Copy", directory=directory)
+
+        assert copy.path == directory / "My_Copy" / "My_Copy.db"
+        assert DatabaseManager.is_valid_database_file(copy.path)
+        assert copy.managed_folder
+        with pytest.raises(ValueError):
+            real_manager.copy_database(info, "My?Copy", directory=directory)
+        assert DatabaseManager.is_valid_database_file(copy.path)
+
     def test_copies_file_and_adds_entry(self, manager, tmp_path):
         src = tmp_path / "Src.db"
         with patch("opensak.db.database.init_db"):
@@ -512,7 +718,8 @@ class TestCopyDatabase:
         src_info = next(db for db in manager.databases if db.name == "Src2")
         with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):
             copy = manager.copy_database(src_info, "DstDefault")
-        assert copy.path.parent == tmp_path
+        assert copy.path == tmp_path / "DstDefault" / "DstDefault.db"
+        assert copy.managed_folder
 
     def test_rejects_duplicate_name(self, manager, tmp_path):
         src = tmp_path / "CopySrc.db"
