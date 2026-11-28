@@ -219,6 +219,7 @@ from opensak.stats import html as report_html
 from opensak.stats import maps as report_maps
 from opensak.stats import tables as stats_tables
 from opensak.utils import flags
+from opensak.utils.cancel import Cancelled
 from opensak.utils.constants import (
     ATTRIBUTES,
     CACHE_TYPES,
@@ -321,6 +322,9 @@ GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary
 # opensak.get_url() (#1391) and opensak.sleep() (#1398) wait in steps of
 # this many seconds, keeping the windows alive in between.
 _WAIT_STEP_S = 0.05
+# opensak.export_file() / export_gpx(): their progress window is updated at
+# most every this many seconds (#1398).
+_EXPORT_PROGRESS_S = 0.05
 
 
 class _Call:
@@ -4942,12 +4946,14 @@ class MacroRuntime:
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(target))):
                     return None
         try:
-            count = write_export_file(
-                caches, target, settings.fmt,
-                use_corrected=settings.use_corrected_coords,
-                save=self._safe_saver(target),
-                content=settings.content(),
-            )
+            with self._export_progress("opensak.export_file", target) as progress:
+                count = write_export_file(
+                    caches, target, settings.fmt,
+                    use_corrected=settings.use_corrected_coords,
+                    progress_cb=progress,
+                    save=self._safe_saver(target),
+                    content=settings.content(),
+                )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         except OSError as exc:
@@ -5046,18 +5052,68 @@ class MacroRuntime:
 
                 if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
                     return None
-        text = self._export_text(lua, func, caches, rename, describe, first_log_fn)
         try:
-            count = write_export_file(
-                caches, output, fmt, use_corrected=corrected, text=text,
-                attributes=attributes, child_waypoints=child_waypoints,
-                save=self._safe_saver(output), content=content,
-            )
+            with self._export_progress(func, output) as progress:
+                text = self._export_text(lua, func, caches, rename, describe, first_log_fn,
+                                         progress)
+                count = write_export_file(
+                    caches, output, fmt, use_corrected=corrected, text=text,
+                    attributes=attributes, child_waypoints=child_waypoints,
+                    progress_cb=progress,
+                    save=self._safe_saver(output), content=content,
+                )
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {output}: {exc}") from None
         return str(output), count
+
+    @contextmanager
+    def _export_progress(self, func: str, output: Path) -> Iterator[Callable[[int, int], None]]:
+        """A progress window for an export into *output* (#1398), and the
+        progress_cb(done, total) for write_export_file(). The macro runs on
+        the GUI thread, so without it a large export froze the windows. The
+        callback updates the window at most every _EXPORT_PROGRESS_S and
+        raises Cancelled once the user presses Cancel or the macro is
+        cancelled; the run then ends with "<func>: cancelled by the user"
+        or, through the sandbox's stop(), "macro cancelled". The export
+        writes into a temporary file (safe_write_stream), so a cancelled
+        export leaves no file behind and an older file at *output* as it
+        was. Without a user interface (a headless run) only the cancel is
+        checked."""
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            from opensak.lang import tr
+
+            handle = self._host.progress(tr("file_export_dialog_title"), 100)
+            self._progress_windows.append(handle)
+        shown = 0.0
+        by_user = False
+
+        def progress(done: int, total: int) -> None:
+            nonlocal shown, by_user
+            if self._cancelled.is_set():
+                raise Cancelled()
+            now = time.monotonic()
+            if handle is None or (now - shown < _EXPORT_PROGRESS_S and done != total):
+                return
+            shown = now
+            # The file name only: a headless host prints every new text.
+            if not handle.update(done * 100 // total if total else None, output.name):
+                by_user = True
+                raise Cancelled()
+
+        try:
+            yield progress
+        except Cancelled:
+            if by_user:
+                raise MacroError(f"{func}: cancelled by the user: {output}") from None
+            self._check_cancelled()     # a stop that pcall cannot catch
+            raise MacroError("macro cancelled") from None
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
 
     @staticmethod
     def _lua_function(func: str, key: str, value: Any) -> Optional[Any]:
@@ -5150,9 +5206,12 @@ class MacroRuntime:
         return result[0], result[1]
 
     def _export_text(self, lua, func: str, caches: list, rename, describe,
-                     first_log=None) -> ExportText:
+                     first_log=None,
+                     progress: Optional[Callable[[int, int], None]] = None) -> ExportText:
         """Call the macro's rename / description / first_log functions once
-        per cache, with the cache table (see Cache fields)."""
+        per cache, with the cache table (see Cache fields). *progress* (see
+        _export_progress) is called before each cache, with no total: the
+        bar fills while the file is written."""
         if rename is None and describe is None and first_log is None:
             return ExportText()
         names: dict[str, str] = {}
@@ -5160,6 +5219,8 @@ class MacroRuntime:
         first_logs: dict[str, str] = {}
         codes = [c.gc_code for c in caches]
         for record in iter_records(get_session, codes, resolve_fields(None), self._db_file(None)):
+            if progress is not None:
+                progress(0, 0)
             table = lua.table_from(record, recursive=True)
             for fn, key, result in ((rename, "rename", names),
                                     (describe, "description", descriptions),
