@@ -24,7 +24,7 @@ from pathlib import Path
 from functools import lru_cache
 
 from PySide6.QtGui import QIcon, QImage, QPixmap, QPainter
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
 from PySide6.QtSvg import QSvgRenderer
 
 
@@ -728,6 +728,62 @@ def get_cache_type_pixmap_composite(
     painter.drawPixmap(size - half, 0, overlay_px)          # smiley at top-right
     painter.end()
     return canvas
+
+
+# ── PNG rendering (KMZ export, #1361) ─────────────────────────────────────────
+
+# Keys of _TYPE_FILE_MAP that are OpenSAK's own waypoint types, not cache types.
+WAYPOINT_TYPE_KEYS: tuple[str, ...] = (
+    "parking_area", "trailhead", "stage", "final_location", "reference_point",
+    "waypoint", "hotel_poi", "custom_wp",
+)
+# Every cache type with an icon, plus the fallback for unknown types.
+CACHE_TYPE_KEYS: tuple[str, ...] = tuple(
+    k for k in _TYPE_FILE_MAP if k not in WAYPOINT_TYPE_KEYS
+) + ("unknown",)
+
+
+def cache_type_key(cache_type: str) -> str:
+    """The internal icon key for a database cache or waypoint type
+    ("Traditional Cache" → "traditional")."""
+    return _db_type_to_key(cache_type)
+
+
+def _svg_to_image(svg_data: str, size: int) -> QImage:
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    QSvgRenderer(QByteArray(svg_data.encode())).render(painter)
+    painter.end()
+    return image
+
+
+def render_icon_png(key: str, size: int = 64, found: bool = False) -> bytes:
+    """PNG of the icon for *key* (see cache_type_key), with the gold smiley
+    on its top-right corner if *found*, laid out like
+    get_cache_type_pixmap_composite(). Uses QImage, not QPixmap, so it may
+    run on a worker thread (the KMZ export does). User icons (#519) apply.
+
+    Icons with text need fonts, so a QGuiApplication must exist."""
+    from PySide6.QtGui import QGuiApplication
+    if QGuiApplication.instance() is None:
+        raise RuntimeError("render_icon_png() needs a QGuiApplication")
+    base = _svg_to_image(_get_svg_for_key(key), size)
+    if found:
+        half = max(8, size // 2) // 2
+        image = QImage(size + half, size + half, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.drawImage(0, half, base)
+        painter.drawImage(size - half, 0, _svg_to_image(_get_found_overlay_svg(), 2 * half))
+        painter.end()
+    else:
+        image = base
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    # PySide6 wants the format as str here; its stubs say bytes.
+    image.save(buffer, "PNG")  # type: ignore[call-overload]
+    return bytes(buffer.data().data())
 
 
 def get_all_type_keys() -> list[str]:

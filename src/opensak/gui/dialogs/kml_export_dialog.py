@@ -39,12 +39,14 @@ class _ExportWorker(QThread):
     progress  = Signal(int, int)   # (done, total)
     cancelled = Signal()           # stopped by cancel; no file was written
 
-    def __init__(self, caches, output_path: str, include_waypoints: bool, include_found: bool):
+    def __init__(self, caches, output_path: str, include_waypoints: bool, include_found: bool,
+                 kmz: bool = False):
         super().__init__()
         self._caches            = caches
         self._output_path       = output_path
         self._include_waypoints = include_waypoints
         self._include_found     = include_found
+        self._kmz               = kmz
         self.cancel             = CancelFlag()
 
     def run(self) -> None:
@@ -62,6 +64,7 @@ class _ExportWorker(QThread):
                 progress_cb=make_progress_cb(self.progress.emit, self.cancel),
                 total=len(caches),
                 count=sum(1 for c in caches if self._include_found or not c.found),
+                kmz=self._kmz,
             )
             self.finished.emit(count)
         except Cancelled:
@@ -73,6 +76,18 @@ class _ExportWorker(QThread):
 # ---------------------------------------------------------------------------
 # Dialog
 # ---------------------------------------------------------------------------
+
+def with_export_suffix(path: str, kmz: bool) -> str:
+    """*path* with the extension the export writes: .kmz or .kml (#1361).
+    Any other extension is kept, and none gets the right one added."""
+    if not path:
+        return path
+    suffix = Path(path).suffix.lower()
+    wanted = ".kmz" if kmz else ".kml"
+    if suffix in (".kml", ".kmz"):
+        return path[: -len(suffix)] + wanted
+    return path if suffix else path + wanted
+
 
 class KmlExportDialog(WorkerGuardMixin, QDialog):
     def __init__(self, caches: list, parent=None) -> None:
@@ -119,6 +134,12 @@ class KmlExportDialog(WorkerGuardMixin, QDialog):
         self._cb_found.setChecked(True)
         opt_layout.addWidget(self._cb_found)
 
+        # #1361: KMZ with OpenSAK's own icons, for viewers used offline.
+        self._cb_kmz = QCheckBox(tr("kml_dialog_kmz"))
+        self._cb_kmz.setToolTip(tr("kml_dialog_kmz_tip"))
+        self._cb_kmz.toggled.connect(self._on_kmz_toggled)
+        opt_layout.addWidget(self._cb_kmz)
+
         layout.addWidget(opt_group)
 
         # How-to hint
@@ -141,16 +162,21 @@ class KmlExportDialog(WorkerGuardMixin, QDialog):
         self._buttons.rejected.connect(self.reject)
         layout.addWidget(self._buttons)
 
+    def _on_kmz_toggled(self, kmz: bool) -> None:
+        self._path_edit.setText(with_export_suffix(self._path_edit.text().strip(), kmz))
+
     def _browse(self) -> None:
+        kmz = self._cb_kmz.isChecked()
         path, _ = QFileDialog.getSaveFileName(
             self,
             tr("kml_dialog_save_as"),
             self._path_edit.text(),
-            tr("kml_dialog_file_filter"),
+            tr("kml_dialog_file_filter_kmz" if kmz else "kml_dialog_file_filter"),
         )
         if path:
-            if not path.lower().endswith(".kml"):
-                path += ".kml"
+            wanted = ".kmz" if kmz else ".kml"
+            if not path.lower().endswith(wanted):
+                path += wanted
             self._path_edit.setText(path)
 
     def _start_export(self) -> None:
@@ -168,6 +194,7 @@ class KmlExportDialog(WorkerGuardMixin, QDialog):
             output_path       = output_path,
             include_waypoints = self._cb_waypoints.isChecked(),
             include_found     = self._cb_found.isChecked(),
+            kmz               = self._cb_kmz.isChecked(),
         )
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
